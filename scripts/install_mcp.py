@@ -463,12 +463,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if "codex" in agents:
         print(
             "Codex: restart, then run: $imreview <PR URL>, "
-            "$imcifix <issue URL>, or $imupdate <repository>"
+            "$imcoding <goal or design>, $imcifix <issue URL>, "
+            "or $imupdate <repository>"
         )
     if any(agent != "codex" for agent in agents):
         print(
             "Claude/Cursor/ZCode: restart, then run: /imreview <PR URL>, "
-            "/imcifix <issue URL>, or /imupdate <repository>"
+            "/imcoding <goal or design>, /imcifix <issue URL>, "
+            "or /imupdate <repository>"
         )
     return 0
 

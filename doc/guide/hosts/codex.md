@@ -30,7 +30,7 @@ Use InferMatrixCopilot to review
 https://github.com/vllm-project/vllm-omni/pull/5172.
 ```
 
-插件还会装上 `imreview`、`imdesign`、`imcifix`、`imupdate` 四个 skill，所以最短的
+插件还会装上 `imreview`、`imdesign`、`imcoding`、`imcifix`、`imupdate` 等 skill，所以最短的
 评审写法是：
 
 ```text
@@ -45,6 +45,17 @@ $imcifix https://github.com/vllm-project/vllm-omni/issues/5023
 
 `imcifix` 是**宿主 agent 的本地补丁流程**。它不意味着 MCP 服务端暴露了什么
 `issue_fix` 后台工具，也不会 commit、push、开 PR 或发评论 —— 除非你明确要求。
+
+实现功能或已有设计用：
+
+```text
+$imcoding 给 scheduler 加抢占开关，沿用现有配置接口并验证默认行为
+$imcoding 实现刚才确认的 imdesign 设计，完成集成和针对性验证
+```
+
+`imcoding` 由 Codex 在目标仓库中完成实际代码修改，读取相关知识和已有实现，
+接好调用方与配置，运行相关检查并汇报结果。已有本地改动会保留；commit、push
+和开 PR 按用户授权执行。
 
 Codex 调用 `review`，拿到本地 `knowledge/AGENTS.md` 路径和一份精简的首轮评审
 checklist，然后**自己**按那份文档的路由图走。MCP 不猜哪个 owner 适用，也不注入
@@ -144,7 +155,7 @@ Strict 会用它配置的模型运行打包好的 `pr-review` playbook，带进�
 （`--yes` 加 `ALLOW_POST=1`）。
 
 安装后重启 Codex。用 `/mcp` 或 `codex mcp list` 确认 `infermatrix-copilot` 已连接，
-用 `/skills` 确认 `imreview`、`imdesign`、`imcifix`、`imupdate` 可用。
+用 `/skills` 确认 `imreview`、`imdesign`、`imcoding`、`imcifix`、`imupdate` 等可用。
 
 ## 默认 MCP 暴露了什么
 

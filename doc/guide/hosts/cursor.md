@@ -19,7 +19,7 @@ cd InferMatrixCopilot
 install.cmd                                     # Windows
 ```
 
-安装器自动识别 Cursor 并注册 MCP 与五个 Skill。**装完重启 Cursor。**
+安装器自动识别 Cursor 并注册 MCP 与插件中的 Skill。**装完重启 Cursor。**
 
 手动配置（安装器没识别到，或你要自己接管）时，模板在
 [`integrations/config-templates/cursor/mcp.json`](../../../integrations/config-templates/cursor/mcp.json)。
@@ -32,6 +32,7 @@ Cursor 用 slash 形式：
 /imreview https://github.com/vllm-project/vllm-omni/pull/5172
 /imreview                       # 当前 PR；没有 PR 时审当前本地改动
 /imdesign <目标 / issue / PR>
+/imcoding <功能需求或已有设计>
 /imcifix <issue 或 URL>
 /imupdate vllm-omni
 /imkbinit <仓库名>               # 初始化，或按要求拓宽/深化已有知识库
@@ -39,6 +40,14 @@ Cursor 用 slash 形式：
 
 `integrations/cursor/` 下另有 `imreview.md` / `imcifix.md` 两份提示词文件，
 供直接粘贴或自定义命令使用。
+
+`/imcoding` 会在目标仓库中把需求或已有 `imdesign` 设计落实为代码，完成调用方、
+配置和必要文档的集成，并运行相关检查。已有本地改动会保留，commit、push 和
+开 PR 按用户授权执行。例如：
+
+```text
+/imcoding 给 scheduler 加抢占开关，沿用现有配置接口并验证默认行为
+```
 
 ## 初始化与深化知识
 
