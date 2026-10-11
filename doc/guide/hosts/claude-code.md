@@ -19,7 +19,7 @@ cd InferMatrixCopilot
 install.cmd                                     # Windows
 ```
 
-安装器自动识别 Claude Code，注册 MCP 与五个 Skill，用的是与 Codex、Cursor
+安装器自动识别 Claude Code，注册 MCP 与插件中的 Skill，用的是与 Codex、Cursor
 **同一份** MCP 描述符和 Skill。
 
 **重启 Claude Code。**
@@ -32,6 +32,7 @@ Claude Code 用 slash 形式（Codex 用 `$`）：
 /imreview https://github.com/vllm-project/vllm-omni/pull/5172
 /imreview                       # 当前 PR；没有 PR 时审当前本地改动
 /imdesign <目标 / issue / PR>
+/imcoding <功能需求或已有设计>
 /imcifix https://github.com/vllm-project/vllm-omni/issues/5023
 /imupdate vllm-omni
 ```
@@ -43,17 +44,24 @@ Claude Code 用 slash 形式（Codex 用 `$`）：
 Use InferMatrixCopilot in Direct mode to review this PR.
 ```
 
-## 五个 Skill 的边界
+## 常用 Skill 的边界
 
 | Skill | 做什么 | 不做什么 |
 |---|---|---|
 | `imreview` | 审 PR 或本地改动，输出带文件行号的结论 | 不自动发 GitHub |
 | `imdesign` | 产出协同设计包（方案、边界、验证计划） | 不自动改代码 |
+| `imcoding` | 将需求或已有设计实现为代码，完成集成与针对性验证 | commit / push / 开 PR 需要用户授权 |
 | `imcifix` | 本地复现 → 最小修复 → 针对性验证 | 不 commit / push / 开 PR / 发评论 |
 | `imupdate` | 同步上游发版带来的结构事实 | 不修改目标仓库 |
 | `imkbinit` | 为一个仓库运行下一个 `kb init` 阶段并汇报（默认 dry-run） | 不自己改知识页、不连跑多个阶段、不合并 PR |
 
 `imcifix` 是**宿主 Agent 的本地补丁流程**——它不意味着 MCP 会去改你的仓库。
+
+`imcoding` 同样由宿主 Agent 在目标仓库中执行。例如：
+
+```text
+/imcoding 实现刚才确认的 imdesign 设计，完成调用链集成并验证默认行为
+```
 
 ## 确认装好了
 

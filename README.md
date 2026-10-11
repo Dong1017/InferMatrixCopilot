@@ -1,14 +1,15 @@
 # InferMatrixCopilot
 
 让 Codex、Claude Code、Cursor 等 Coding Agent 按**目标仓库的项目知识**
-审查和维护代码，而不只是做一遍通用检查。上游发版或目录变化后，还能更新
+实现、审查和维护代码。上游发版或目录变化后，还能更新
 这套知识，避免 Agent 继续按旧路径和旧清单工作。
 
-它提供五个常用 Skill：
+常用 Skill 包括：
 
 - `imreview`：审查 PR 或本地改动时，找到相关模型、组件和维护者规则，让审查
   不只停留在通用检查。
 - `imdesign`：写代码前理清问题、方案、接口边界和验证计划。
+- `imcoding`：把功能需求或已有设计落实为可运行代码，完成必要集成并针对性验证。
 - `imcifix`：从 GitHub issue 出发，在本地复现、最小修复并针对性验证。
 - `imupdate`：上游变化后更新模型清单、registry、deploy、路径路由和
   source pin，避免继续按旧知识工作。
@@ -56,7 +57,7 @@ install.cmd --repo-path D:\path\to\vllm-omni
 
 Windows 也可以直接双击 `install.cmd`。`--repo-path` 可选，用于同时写入 Strict
 使用的本地 checkout。安装器会识别本机的 Codex、Claude Code 和 Cursor，注册
-MCP 与五个 Skill，并创建 `~/.infermatrix-copilot/.env`。
+MCP 与插件中的 Skill，并创建 `~/.infermatrix-copilot/.env`。
 
 安装后重启 Agent。Codex 使用 `$imreview`，Claude Code 和 Cursor 使用
 `/imreview`；Direct 不需要 API Key。若 Agent 没有主动调用，直接说：
@@ -303,6 +304,22 @@ Strict 对应的 CI / issue 工作流：
 ./infermatrix-copilot -p "answer issue 4842, do not post" # 起草 issue 回复
 ./infermatrix-copilot -p "triage recent open issues"      # 批量分诊
 ```
+
+## 快速上手 5 · 编码实现（imcoding）
+
+把功能需求或 `imdesign` 的设计包交给宿主 Agent，在目标仓库中完成实现：
+
+```text
+# Codex
+$imcoding 给 scheduler 加抢占开关，沿用现有配置接口并验证默认行为
+
+# Claude Code / Cursor
+/imcoding 实现刚才确认的设计，完成调用链集成和针对性验证
+```
+
+Agent 会先读取仓库约定、相关源码和知识，明确完成条件，然后修改实际代码，
+接好调用方、配置和必要文档，并运行相关检查。交付时说明实现内容、验证结果
+和未解决的问题；已有本地改动会保留，commit、push 和开 PR 按用户授权执行。
 
 ## 其它能力
 

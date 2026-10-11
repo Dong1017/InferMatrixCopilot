@@ -1,0 +1,4 @@
+interface:
+  display_name: "Imcoding"
+  short_description: "Implement working code with repository knowledge"
+  default_prompt: "Use $imcoding to implement this change in the target repository and verify the behavior."
