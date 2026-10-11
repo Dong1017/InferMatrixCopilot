@@ -1,10 +1,10 @@
 ---
 title: "Serving metrics 生命周期规则"
 created: 2026-09-05
-updated: 2026-09-22
+updated: 2026-10-11
 type: rule
 tags: [vllm-omni, components, serving]
-sources: ["PR #3576", "PR #4755", "PR #6549", vllm_omni/engine/async_omni_engine.py, vllm_omni/engine/orchestrator.py, vllm_omni/entrypoints/async_omni.py, vllm_omni/entrypoints/omni_base.py, tests/metrics/test_prometheus.py, "PR #6561"]
+sources: ["PR #3576", "PR #4755", "PR #6549", vllm_omni/engine/async_omni_engine.py, vllm_omni/engine/orchestrator.py, vllm_omni/entrypoints/async_omni.py, vllm_omni/entrypoints/omni_base.py, tests/metrics/test_prometheus.py, "PR #6561", "PR #8554"]
 confidence: high
 ---
 
@@ -54,3 +54,12 @@ confidence: high
 - 验收：生产 handler 写入 state 集合后 abort，断言实例属性无独立 request-keyed metrics
   map；cleanup 后 `request_states` 与任何 request-keyed map 均无该 id；同一 message 重放
   只累计一次。^[PR #6561]
+
+## VLLM-OMNI-PR8554-COLLECT-STAGE-METRICS — 逐请求 stage metrics 记账必须可门禁关闭，并保留 token/finish-reason 轻量子集与 completion 路由
+
+- 触发：修改 orchestrator 的 per-request stage metrics 路径（`OrchestratorAggregator` 的 stage-metric 事件合并、`StagePool.build_stage_metrics`、per-output timestamp/audio bookkeeping）、`collect_stage_metrics`/`log_stats` 门禁语义（含 CLI validation 与 orchestrator 初始化的冲突检查，以及 CLI 校验的 headless 豁免），或该 flag 的 engine 参数 plumbing。
+- 强制：`collect_stage_metrics` 默认开启以保持 legacy 行为；关闭时必须跳过 per-output timestamp/audio bookkeeping、diagnostic 计算与完整 response-level stage-metric merging——`vllm_omni/metrics/stats.py` 的 `_merge_stage_metric_event` 在该模式下于加入 `STAGE_GEN_TIME_MS` 前即返回。轻量 `StageRequestStats` 仍携带 token counts 与 finish reason 进入 response 级 stage metadata，保住 usage 记账与生成校验；completion routing 不得因关闭采集而改变（`build_stage_metrics` 仍被调用、其结果原样路由，`pipeline_timings` 为 `None`）。`log_stats=True` 与 `collect_stage_metrics=False` 是矛盾配置，orchestrator 初始化（`vllm_omni/engine/orchestrator.py`）拒绝该组合；CLI validation（`vllm_omni/entrypoints/cli/serve.py`）同样拒绝，但显式豁免 headless——`--headless --log-stats --no-collect-stage-metrics` 是被接受的组合并由 `tests/entrypoints/test_serve.py` 验证。Python 接口默认 `log_stats=False`、API serving 默认 `log_stats=True`（除非 `--disable-log-stats`），该默认不因新 flag 改变；flag 从 `OmniBase.__init__` 经 `OmniEngineBase`/stage-spawn plumbing 传到 orchestrator 与 stage pool。
+- 禁止：在 `log_stats=False` 时仍无条件执行逐输出 stage-metric 记账与合并（Moshi/Hibiki ~12.5Hz 音频帧 cadence 下 `_merge_stage_metric_event` 曾占 orchestrator 进程约 40% 采样、最大并发实时流约减半）；关闭采集时丢弃 token counts/finish reason 子集导致 usage 统计或 TTS 生成校验改变；在 CLI 校验中静默接受非 headless 的 `log_stats=True, collect_stage_metrics=False`，或反向拒绝 headless 下的 `--log-stats --no-collect-stage-metrics` 组合；宣称 stage gen time 在关闭时仍会照常进入 response 级 stage metadata——该模式下 merge 路径不添加 `STAGE_GEN_TIME_MS`。
+- 验收：覆盖关闭采集时 completion 仍调用 `build_stage_metrics` 并原样路由（断言 `pipeline_timings is None`）、completion 时 drain native cache（用 `Orchestrator(log_stats=False, collect_stage_metrics=False)` 实例化）、orchestrator 初始化拒绝矛盾配置、CLI 拒绝非 headless 的矛盾配置并保留 headless 豁免的显式测试（`--headless --log-stats --no-collect-stage-metrics` 被接受）、output timestamp 不再被追踪（`does_not_track_output_timestamps` 类断言）；Qwen3 TTS 回归（`test_serving_speech.py` 的 codec limit、base nonstream/SSE completion 与 qwen3 nonstream 选择）在关闭采集下保持不变；以 `object.__new__` 构造 `AsyncOmni` 的测试 harness 必须同步设置 `collect_stage_metrics` 属性。 ^[PR #8554]
+
+<!-- kb:rule status=active since=v0.30.0 -->
