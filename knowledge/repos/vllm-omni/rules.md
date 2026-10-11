@@ -1,10 +1,10 @@
 ---
 title: "vLLM-Omni 硬门禁"
 created: 2026-07-10
-updated: 2026-07-30
+updated: 2026-10-11
 type: rule
 tags: [vllm-omni]
-sources: [benchmark/incidents/_index.md, ci/incidents/_index.md, git/incidents/_index.md, remote/incidents/_index.md]
+sources: [benchmark/incidents/_index.md, ci/incidents/_index.md, git/incidents/_index.md, remote/incidents/_index.md, "PR #8014"]
 ---
 
 # vLLM-Omni 硬门禁
@@ -98,3 +98,12 @@ sources: [benchmark/incidents/_index.md, ci/incidents/_index.md, git/incidents/_
 - [remote](remote/_index.md)
 - [components](components/_index.md)
 - [models](models/_index.md)
+
+## VLLM-OMNI-PR8014-WAN22-COLDSTART — Wan2.2 冷启动 e2e 拆分独立 CI 作业并保持分层超时
+
+- 触发：改动 `.buildkite/amd/test-amd-merge.yml` 中 `Diffusion · Wan22` 作业的定义或编排，或调整 `tests/e2e/offline_inference/test_wan22_t2v.py` / `tests/e2e/online_serving/test_wan22_t2v.py` 中 `init_timeout`、`stage_init_timeout`、`startup_timeout` 或外层 `timeout` 的取值（本规则仅覆盖 MERGE 通道；READY 通道的 Wan2.2 作业不在范围内）。
+- 强制：Wan2.2 离线与在线两条 e2e 路径必须是两个独立的 Blocking Buildkite 作业（`Diffusion · Wan22 Offline Test` 与 `Diffusion · Wan22 Online Test`），各自拥有独立的 `timeout 40m` 进程期限，使任一路径的冷 ROCm 启动（可近 30 分钟）不挤占另一条路径；测试内层超时取 2100 秒（35 分钟），比外层作业期限少约 5 分钟留给清理（离线作业设置 `init_timeout`/`stage_init_timeout`，在线作业另设 `startup_timeout`）；拆分结构必须由 `tests/buildkite/test_upload_pipeline.py::test_amd_wan22_merge_jobs_have_independent_cold_start_budgets` 回归守护，断言每个作业命令只包含自己的测试文件。
+- 禁止：把两条 Wan2.2 e2e 测试文件合并进单个作业命令串行执行；令内层超时大于或等于外层 `timeout 40m`；删除该 YAML 结构回归测试，或使任一作业重新包含另一条路径的测试文件。
+- 验收：`.buildkite/amd/test-amd-merge.yml` 恰好包含上述两个 Wan2.2 作业，均含 `timeout 40m` 且互不引用对方测试文件；`pytest tests/buildkite/test_upload_pipeline.py` 通过。^[PR #8014]
+
+<!-- kb:rule status=active since=v0.30.0 -->
