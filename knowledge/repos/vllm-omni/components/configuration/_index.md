@@ -56,3 +56,4 @@ sources: ["claude-workflow-starter-private@296ea45", vllm_omni/config/]
 | 冻结 topology、辅助 stage、mixed V1/MRv2 runner、deploy profile 与 `additional_config` 投影 | [topology 与部署 profile](rules-topology-profiles.md) |
 
 - [部署 platform overlay 的最终配置合同](rules-platform-overlays.md)。
+- [配置规则 — CUDA graph 显存预留与 KV 预算](rules-cudagraph-kv-reserve.md)
