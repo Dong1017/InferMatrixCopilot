@@ -4,7 +4,7 @@ created: 2026-07-10
 updated: 2026-10-12
 type: rule
 tags: [vllm-omni]
-sources: [benchmark/incidents/_index.md, ci/incidents/_index.md, git/incidents/_index.md, remote/incidents/_index.md, "PR #8014", "PR #8786"]
+sources: [benchmark/incidents/_index.md, ci/incidents/_index.md, git/incidents/_index.md, remote/incidents/_index.md, "PR #8014", "PR #8786", "PR #8770"]
 ---
 
 # vLLM-Omni 硬门禁
@@ -114,5 +114,14 @@ sources: [benchmark/incidents/_index.md, ci/incidents/_index.md, git/incidents/_
 - 强制：四个人类必答问题——想达成什么结果、对该结果杠杆最高的变量、这项工作如何推动该变量、解决谁的客户/用户的哪些需求——须由人类贡献者作答，或附其明确回答的公开安全来源引用；任务或 issue 中已有明确人类回答时直接复用，不让贡献者重复作答；agent 不得自造回答、不得从 diff 推断认可；回答缺失或明显含糊时询问人类并等待，等待期间只可继续只读调查，实现与提交均被阻断。提交前核对 PR 描述按现行模板回答全部四个必答小节：空白小节、未改动的占位注释或 agent 写的猜测都不通过，并阻断提交与 ready-for-review。答案明确后先判断达成结果是否真的需要 PR（优先既有能力、配置、文档、支持性答复或不改动；文档改动本身也可能需要 PR；不需要时停止提交流程并说明更小的下一步；需要时把窄范围与验证计划挂钩到所述结果与变量）。bug fix 须先建立真实失败：记录期望与实际行为、受影响的修订版本（revision）与环境，并附最小复现、失败的回归测试或观测到的失败 trace 之一；失败未确立时报告证据缺口并继续调查，而非宣称已确认修复。自查报告中保留这些回答及其来源。改动上述四个文件时须保留模板四个必答小节、SKILL.md 的门槛小节（锚点 `#contributor-intent-gate`）及 `CONTRIBUTING.md` 与 `docs/contributing/README.md` 指向该锚点的两处链接。
 - 禁止：agent 编写、推测或预填意图回答，或让空白小节、未改动的占位注释蒙混过关；把合理诊断或未执行过的复现脚本当作已验证失败证据；未经人类授权把私有任务对话内容复制进公开 issue/PR（意图摘要只能在授权的受众与信息共享范围内分享）；删除或改名必答小节、SKILL.md 门槛小节或锚点导致入口链接失效；把该门槛当作 GitHub/CI 对模板的机械强制，或将它套用于对他人 PR 的独立评审与自动评审选择——SKILL.md 与贡献文档明确排除了这两种用法。
 - 验收：贡献者自查时，四个意图问题均有人类回答或公开安全引用并已回答“是否需要 PR”，bug fix 附可核验的失败证据（期望与实际行为、受影响修订版本与环境、最小复现/失败回归测试/失败 trace 之一）；改动四个文件的 PR 中，模板仍含四个带 `Required` 占位注释的小节，SKILL.md 含 `Contributor intent gate` 节，两份贡献文档指向 `#contributor-intent-gate` 的链接有效。^[PR #8786]
+
+<!-- kb:rule status=active since=v0.30.0 -->
+
+## VLLM-OMNI-PR8770-NPU-RECORD-SHAPES — NPU profiler 必须显式转发 torch_profiler_record_shapes
+
+- 触发：改动 `vllm_omni/platforms/npu/profiler.py` 中 `NPUOmniProfiler._create_profiler` 传给 `torch_npu.profiler.profile(...)` 的参数集合，特别是 `record_shapes` 一项的取舍。
+- 强制：该调用必须保留 `record_shapes=profiler_config.torch_profiler_record_shapes` 的显式转发。依据 PR #8770 随该行新增的代码注释：缺省此参数时 NPU profiler 会静默忽略 `torch_profiler_record_shapes=True`。
+- 禁止：从 `_create_profiler` 删除 `record_shapes` 转发，或将其改为不读取 `profiler_config.torch_profiler_record_shapes` 的常量，使该配置项重新被静默忽略。
+- 验收：`vllm_omni/platforms/npu/profiler.py` 的 `_create_profiler` 中，`torch_npu.profiler.profile(...)` 调用包含 `record_shapes=profiler_config.torch_profiler_record_shapes`。^[PR #8770]
 
 <!-- kb:rule status=active since=v0.30.0 -->
