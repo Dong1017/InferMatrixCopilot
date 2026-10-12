@@ -1,10 +1,10 @@
 ---
 title: "vLLM-Omni 硬门禁"
 created: 2026-07-10
-updated: 2026-10-11
+updated: 2026-10-12
 type: rule
 tags: [vllm-omni]
-sources: [benchmark/incidents/_index.md, ci/incidents/_index.md, git/incidents/_index.md, remote/incidents/_index.md, "PR #8014"]
+sources: [benchmark/incidents/_index.md, ci/incidents/_index.md, git/incidents/_index.md, remote/incidents/_index.md, "PR #8014", "PR #8786"]
 ---
 
 # vLLM-Omni 硬门禁
@@ -105,5 +105,14 @@ sources: [benchmark/incidents/_index.md, ci/incidents/_index.md, git/incidents/_
 - 强制：Wan2.2 离线与在线两条 e2e 路径必须是两个独立的 Blocking Buildkite 作业（`Diffusion · Wan22 Offline Test` 与 `Diffusion · Wan22 Online Test`），各自拥有独立的 `timeout 40m` 进程期限，使任一路径的冷 ROCm 启动（可近 30 分钟）不挤占另一条路径；测试内层超时取 2100 秒（35 分钟），比外层作业期限少约 5 分钟留给清理（离线作业设置 `init_timeout`/`stage_init_timeout`，在线作业另设 `startup_timeout`）；拆分结构必须由 `tests/buildkite/test_upload_pipeline.py::test_amd_wan22_merge_jobs_have_independent_cold_start_budgets` 回归守护，断言每个作业命令只包含自己的测试文件。
 - 禁止：把两条 Wan2.2 e2e 测试文件合并进单个作业命令串行执行；令内层超时大于或等于外层 `timeout 40m`；删除该 YAML 结构回归测试，或使任一作业重新包含另一条路径的测试文件。
 - 验收：`.buildkite/amd/test-amd-merge.yml` 恰好包含上述两个 Wan2.2 作业，均含 `timeout 40m` 且互不引用对方测试文件；`pytest tests/buildkite/test_upload_pipeline.py` 通过。^[PR #8014]
+
+<!-- kb:rule status=active since=v0.30.0 -->
+
+## VLLM-OMNI-PR8786-INTENT-GATE — 贡献者自检意图门槛：四项人类回答、PR 必要性与 bug fix 真实失败证据
+
+- 触发：以贡献者身份准备、实现或提交自己的 vllm-omni 贡献（按 `.claude/skills/precheck-pr/SKILL.md` 的 `## Contributor intent gate` 在实现前运行，意图或范围变化时提交前复检），或 PR 改动 `.github/PULL_REQUEST_TEMPLATE.md`、`.claude/skills/precheck-pr/SKILL.md`、`CONTRIBUTING.md`、`docs/contributing/README.md` 中该门槛的小节、锚点或入口链接。该门槛只约束贡献者自检：SKILL.md 明确把它限定于 contributor self-review，排除对他人 PR 的独立评审与自动评审选择。
+- 强制：四个人类必答问题——想达成什么结果、对该结果杠杆最高的变量、这项工作如何推动该变量、解决谁的客户/用户的哪些需求——须由人类贡献者作答，或附其明确回答的公开安全来源引用；任务或 issue 中已有明确人类回答时直接复用，不让贡献者重复作答；agent 不得自造回答、不得从 diff 推断认可；回答缺失或明显含糊时询问人类并等待，等待期间只可继续只读调查，实现与提交均被阻断。提交前核对 PR 描述按现行模板回答全部四个必答小节：空白小节、未改动的占位注释或 agent 写的猜测都不通过，并阻断提交与 ready-for-review。答案明确后先判断达成结果是否真的需要 PR（优先既有能力、配置、文档、支持性答复或不改动；文档改动本身也可能需要 PR；不需要时停止提交流程并说明更小的下一步；需要时把窄范围与验证计划挂钩到所述结果与变量）。bug fix 须先建立真实失败：记录期望与实际行为、受影响的修订版本（revision）与环境，并附最小复现、失败的回归测试或观测到的失败 trace 之一；失败未确立时报告证据缺口并继续调查，而非宣称已确认修复。自查报告中保留这些回答及其来源。改动上述四个文件时须保留模板四个必答小节、SKILL.md 的门槛小节（锚点 `#contributor-intent-gate`）及 `CONTRIBUTING.md` 与 `docs/contributing/README.md` 指向该锚点的两处链接。
+- 禁止：agent 编写、推测或预填意图回答，或让空白小节、未改动的占位注释蒙混过关；把合理诊断或未执行过的复现脚本当作已验证失败证据；未经人类授权把私有任务对话内容复制进公开 issue/PR（意图摘要只能在授权的受众与信息共享范围内分享）；删除或改名必答小节、SKILL.md 门槛小节或锚点导致入口链接失效；把该门槛当作 GitHub/CI 对模板的机械强制，或将它套用于对他人 PR 的独立评审与自动评审选择——SKILL.md 与贡献文档明确排除了这两种用法。
+- 验收：贡献者自查时，四个意图问题均有人类回答或公开安全引用并已回答“是否需要 PR”，bug fix 附可核验的失败证据（期望与实际行为、受影响修订版本与环境、最小复现/失败回归测试/失败 trace 之一）；改动四个文件的 PR 中，模板仍含四个带 `Required` 占位注释的小节，SKILL.md 含 `Contributor intent gate` 节，两份贡献文档指向 `#contributor-intent-gate` 的链接有效。^[PR #8786]
 
 <!-- kb:rule status=active since=v0.30.0 -->
