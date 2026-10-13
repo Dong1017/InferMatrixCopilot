@@ -57,3 +57,4 @@ sources: ["claude-workflow-starter-private@296ea45", vllm_omni/config/]
 
 - [部署 platform overlay 的最终配置合同](rules-platform-overlays.md)。
 - [配置规则 — CUDA graph 显存预留与 KV 预算](rules-cudagraph-kv-reserve.md)
+- [XPU eager pins 与 Intel 支持验证](rules-xpu-eager-pins.md)
