@@ -1,10 +1,10 @@
 ---
 title: "vLLM-Omni 硬门禁"
 created: 2026-07-10
-updated: 2026-10-12
+updated: 2026-10-13
 type: rule
 tags: [vllm-omni]
-sources: [benchmark/incidents/_index.md, ci/incidents/_index.md, git/incidents/_index.md, remote/incidents/_index.md, "PR #8014", "PR #8786", "PR #8770"]
+sources: [benchmark/incidents/_index.md, ci/incidents/_index.md, git/incidents/_index.md, remote/incidents/_index.md, "PR #8014", "PR #8786", "PR #8770", "PR #8645"]
 ---
 
 # vLLM-Omni 硬门禁
@@ -123,5 +123,14 @@ sources: [benchmark/incidents/_index.md, ci/incidents/_index.md, git/incidents/_
 - 强制：该调用必须保留 `record_shapes=profiler_config.torch_profiler_record_shapes` 的显式转发。依据 PR #8770 随该行新增的代码注释：缺省此参数时 NPU profiler 会静默忽略 `torch_profiler_record_shapes=True`。
 - 禁止：从 `_create_profiler` 删除 `record_shapes` 转发，或将其改为不读取 `profiler_config.torch_profiler_record_shapes` 的常量，使该配置项重新被静默忽略。
 - 验收：`vllm_omni/platforms/npu/profiler.py` 的 `_create_profiler` 中，`torch_npu.profiler.profile(...)` 调用包含 `record_shapes=profiler_config.torch_profiler_record_shapes`。^[PR #8770]
+
+<!-- kb:rule status=active since=v0.30.0 -->
+
+## VLLM-OMNI-PR8645-DUPLEXEVAL-BENCH — Omni-DuplexEval 并入 bench serve：独占 run 目录、计时后评分与取消语义
+
+- 触发：改动 `vllm_omni/benchmarks/duplex/omni_duplex_eval_serving.py`、`omni_duplex_eval_runner.py`、`omni_duplex_eval_judge.py`，或 `vllm_omni/entrypoints/cli/benchmark/`（cli_args.py / serve.py）中 `omni-duplex-eval` 数据集与 `--duplex-eval-*` 旗标在 `vllm bench serve` 的接线，或 `tests/benchmarks/duplex/test_omni_duplex_eval_serving.py` 与 `docs/cli/bench/serve.md` 的对应小节。
+- 强制：`--duplex-eval-response-root` 仅是父目录，每次调用必须在其下创建独占 `run-*` 子目录（使并发/QPS 扫描不覆盖旧结果），实际路径写日志并存入保存结果的 `omni_duplex_eval.response_root`；只有成功的测量会话在基准计时结束后发布 `<split>/<id>.json` 与 `<id>.meta.json` 工件，工件错误记入 `omni_duplex_eval` 摘要而不丢弃服务测量。可选评分（`--duplex-eval-evaluate` 及 judge 旗标）复用既有独立评测器且必须在性能计时结束后运行，按 total/evaluated/skipped/failed 报告覆盖：零 evaluated 记为 `failed` 而非合法准确率，warmup 永不评分，judge 失败不得使已完成的性能测量作废。会话语义：一个视频即一个会话/请求；正常 barge-in 取消是回合结局而非样本失败，其已收集文本仍可交给 judge；关闭会话前排空观察到的活跃响应，关闭边界产生的响应记入元数据 `unfinished_response_ids`，由结果的 `omni_duplex_eval.published_with_unfinished_responses` 计数、非零时告警；服务器错误、失败响应与排空/关闭超时仍使样本失败。媒体准备在各并发槽的 worker 线程内懒惰执行并在请求完成时释放解码输入，参考音频只编码一次共享；准备不计入单会话时延但计入总时长与吞吐；`--omni-request-timeout-s`（默认 900 秒）只覆盖准备后的完整会话。
+- 禁止：把工件直接写入 response-root 根层或复用/覆盖既有 `run-*` 目录；在计时结束前评分、给 warmup 评分，或把零 evaluated 报成有效准确率；因 judge 失败丢弃性能结果；把正常 barge-in 取消计为样本失败；在事件循环上同步解码全部媒体或令驻留解码片段数突破 `--max-concurrency`。
+- 验收：`tests/benchmarks/duplex/test_omni_duplex_eval_serving.py` 通过；同一 response-root 下重复调用生成互不相同的 `run-*` 目录；保存结果含 `omni_duplex_eval.response_root`、带覆盖计数的 `omni_duplex_eval.accuracy` 与 `published_with_unfinished_responses` 字段。^[PR #8645]
 
 <!-- kb:rule status=active since=v0.30.0 -->
