@@ -1,10 +1,10 @@
 ---
 title: "OpenAI Realtime 请求与会话规则"
 created: 2026-10-06
-updated: 2026-10-09
+updated: 2026-10-13
 type: rule
 tags: [vllm-omni, components, serving]
-sources: ["PR #7285", "PR #8279", "PR #8287", "PR #8294", "PR #8339", "PR #8566"]
+sources: ["PR #7285", "PR #8279", "PR #8287", "PR #8294", "PR #8339", "PR #8566", "PR #8840"]
 confidence: high
 ---
 
@@ -160,3 +160,12 @@ confidence: high
 - 验收：覆盖不同源采样率、多 chunk/tail flush、text-only/tool suppression，断言发送
   sample 数与 history duration 一致；覆盖 0/中间/末尾 truncate、缺 token/duration 与
   tool responses；已有合法 content_index/audio length 检查先于 history 修改。^[PR #8339]
+
+## VLLM-OMNI-PR8840-RT-CANCEL-CODE — 迟到/无目标的 response.cancel 必须返回 OpenAI 标准 response_cancel_not_active
+
+- 触发：修改 turn-based `/v1/realtime` 连接层（`vllm_omni/entrypoints/openai/realtime/connection.py`）中 `response.cancel` 的错误码映射、`_handle_response_cancel`，或 realtime error 事件的 code/`event_id` 构造。
+- 强制：cancel 与回复结束竞态——无 active response，或 `response_id` 指向非当前 active response——必须以 OpenAI Realtime 的标准错误码 `response_cancel_not_active`（常量 `RESPONSE_CANCEL_NOT_ACTIVE`）发送 error 事件，保留原消息文本并回显触发事件的 `event_id`；mismatch 的 cancel 不得设置 `_response_cancel_event`，也不得影响仍 active 的 response。
+- 禁止：把该竞态映射为通用 `invalid_request_error`——Open WebUI 在除 `response_cancel_not_active` 之外的错误码上会直接结束通话，迟到的 cancel 因此丢掉整通语音通话；让无目标的 cancel 取消或篡改当前 active response；丢失 `event_id` 回显。
+- 验收：参数化测试覆盖 active response 为 None 与 response_id 不匹配两种情况，断言 error code 等于 `RESPONSE_CANCEL_NOT_ACTIVE`、回显的 `event_id`、`_response_cancel_event` 未设置，且 active response 原样保留。^[PR #8840]
+
+<!-- kb:rule status=active since=v0.30.0 -->
