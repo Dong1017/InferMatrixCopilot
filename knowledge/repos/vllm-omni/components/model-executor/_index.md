@@ -62,3 +62,4 @@ sources: []
 - [数值精确性与平台可移植性规则](rules-numeric-exactness.md)
 - [Model Executor — NPU KV cache 布局规则](rules-npu-kv-layout.md)
 - [Model Executor — Dynamo/cudagraph compile guard rules](rules-compile-guard.md)
+- [Model Executor — INC/AutoRound 量化配置规则](rules-inc-autoround.md)
