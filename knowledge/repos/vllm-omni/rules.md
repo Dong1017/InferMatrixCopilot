@@ -4,7 +4,7 @@ created: 2026-07-10
 updated: 2026-10-14
 type: rule
 tags: [vllm-omni]
-sources: [benchmark/incidents/_index.md, ci/incidents/_index.md, git/incidents/_index.md, remote/incidents/_index.md, "PR #8014", "PR #8786", "PR #8770", "PR #8645", "PR #8897", "PR #8673", "PR #8910"]
+sources: [benchmark/incidents/_index.md, ci/incidents/_index.md, git/incidents/_index.md, remote/incidents/_index.md, "PR #8014", "PR #8786", "PR #8770", "PR #8645", "PR #8897", "PR #8673", "PR #8910", "PR #8871"]
 ---
 
 # vLLM-Omni 硬门禁
@@ -159,5 +159,14 @@ sources: [benchmark/incidents/_index.md, ci/incidents/_index.md, git/incidents/_
 - 强制：多条独立后续动作的合并回复必须用简短行动清单：证据允许时 2-4 项，单项动作可保持一句话，零发现也合法；每个 `- [ ]` 项写成动词加贡献者自有的具体交付物或完成条件，必要理由或证据放在其下；发起前先读既有评论与回复，只保留仍未解决的相关动作，不重复已解决请求；相关修订可链接短 SHA 指向完整 commit。已验证缺陷、证据缺口与可选建议须彼此区分，每个缺陷保留位置、触发、影响与修复方向。不得在给贡献者的回复中添加例行维护者/CI 状态小节、流程解释或编辑历史样板；实质性测试限制仅在与请求或结论相关时简短提及，绝不暗示未发生的评审或验证。评审者 CI 职责：永远不得要求贡献者提供项目的 CUDA L2/Buildkite 结果——维护者负责 CI admission 并检查匹配 head 的结果，这些检查保留在评审记录里而非例行转述给贡献者；须核对实际 label 与运行状态，区分未触发 admission、排队/运行、失败、通过与未知；不得在触发 label 之前（或 `ready` admission 之前）把尚未触发的 L2 结果当前置条件；当前 head 的适用 L2 仍在既有批准/合并门槛处必需（受既有 docs-only 跳过约束）；该节不替代正当的本地回归、复现或配对 A/B 证据，也不授予施加 label、重跑 CI 或启动算力的任何权限；撤回误发的贡献者向 L2 请求只需一行。`docs/contributing/ci/pr_merge_loop.md` 的合并循环段必须保留指向 maintainer-style-study.md `#consolidated-replies-with-multiple-actions` 锚点的链接及上述 CUDA L2 归属语义。
 - 禁止：为凑清单数量捏造动作或省略真实 blocker；在贡献者回复中恢复例行 CI/流程叙述或编辑历史样板；要求贡献者提供 CUDA L2/Buildkite 结果，或在触发 label/`ready` admission 之前要求 L2 结果；以该格式为名放宽或绕过既有批准/合并门槛、docs-only 跳过、posting 权限与 label/CI 权限；删除或改写 SKILL.md 的清单引用、两节的清单与 CI 职责语义，或移除合并循环指南中的对应段落与链接。
 - 验收：`maintainer-style-study.md` 保留 `Consolidated replies with multiple actions` 与 `Reviewer CI responsibilities` 两节及上述语义，SKILL.md 交付指示引用其 contributor-owned checklist；`docs/contributing/ci/pr_merge_loop.md` 合并循环段含指向该锚点的有效链接并保留“不向贡献者索取 CUDA L2/Buildkite 结果”的语义。^[PR #8910]
+
+<!-- kb:rule status=active since=v0.30.0 -->
+
+## VLLM-OMNI-PR8871-DUPLEXEVAL-CI — Omni-DuplexEval 夜间守卫走 bench serve 单调用：退出码不足为凭、断言前先落盘摘要
+
+- 触发：改动 `tests/e2e/accuracy/omni_duplex_eval/` 下的守卫文件（`test_omni_duplex_eval_ci.py`、`test_omni_duplex_eval_ci_mock.py`、`conftest.py`、`README.md`），或 `.buildkite/common/ci_source_file_dependencies.yml` 中该守卫的源依赖过滤器；本规则覆盖既有 CUDA/NPU 夜间 Omni-DuplexEval 评分回归的调用方式、结果落盘与断言结构，不覆盖 `vllm bench serve --duplex-eval-*` 实现本身（见 VLLM-OMNI-PR8645-DUPLEXEVAL-BENCH）。
+- 强制：守卫必须以单次 `vllm bench serve --omni --trust-remote-code --duplex-eval-evaluate --save-result` 调用完成生成、评判与结果保存（PR #8645 引入的路径）。样本选择取配置的全量 ID（`--num-prompts 0`）、`--disable-shuffle`、`--max-concurrency 1`，禁用 warmup 与基准自身的请求式就绪探测（`omni_server` fixture 已等待启动）。完整结果写 `results/bench-result.json`（含 `omni_duplex_eval.accuracy`、发布错误与 `published_with_unfinished_responses`），其 `omni_duplex_eval.accuracy` 对象复制为 `results/result_acc_{model}_{dataset}_{date}_{random_number}.json`（model/dataset 取配置 ID/路径的 basename，UTC `YYYYMMDD-HHMMSS` 加 8 位随机后缀）供既有 `results/*.json` 工件上传一并收集，不得另跑第二次评测或汇总。CLI 成功退出不足以判通过：必须核对 completed/published/evaluated 计数与 request、artifact、judge 错误（基准在评判失败时仍保留性能结果），摘要须在断言之前保存以便追溯失败细节；调用基准前先清除旧的 `bench-result.json` 与 `result_acc_*.json`，防止 CLI 早退后陈旧结果被当作当次结果上传。保留协议 pin（config、个体分数与摘要均匹配 `PROTOCOL_PIN`）与分数阈值断言（当前 record mode 0.0），并核对分数文件数量与 split/ID 集合同 CI 选择一致。fixture 须双设备隔离：judge 起在第一个分配设备、Omni server 起在第二个，健康的预启动 judge 可经 `VLLM_DUPLEX_EVAL_JUDGE_URL` 复用；未完成响应的样本仍可参评，其计数可从完整结果读取。CPU mock 测试必须驱动真实守卫：`_run_cli` 替换为记录 argv 并保存合成基准结果的 spy，用真实 `bench serve` 解析器解析拼装命令，验证工件持久化，并在 CLI 成功退出时仍拒绝不完整的生成、发布或评判。
+- 禁止：把守卫改回独立的 generate→evaluate→summarize 三段式 `vllm bench omni-duplex-eval` 调用，或引入第二评测/汇总流程；仅凭 CLI 退出码放行而不核对覆盖与错误计数；先断言后保存摘要；跑基准前不清除 results 目录中的旧结果文件；删除协议 pin、分数阈值断言或 split/ID 集合核对；把 mock spy 改回只记录 argv 不落盘合成结果，使覆盖断言失去真实驱动。
+- 验收：`tests/e2e/accuracy/omni_duplex_eval/test_omni_duplex_eval_ci_mock.py` 以 `core_model` + `cpu` 标记通过；`.buildkite/common/ci_source_file_dependencies.yml` 中该守卫的源依赖指向 `vllm_omni/benchmarks/serve.py`、`vllm_omni/benchmarks/patch/**` 与 `vllm_omni/entrypoints/cli/benchmark/**`；README 记录双设备 fixture（CUDA 为 `full_model and cuda and (H100 or B200) and cards_2`，NPU 为 `full_model and npu and A3 and cards_2`）与结果布局（`results/bench-result.json`、`<response-root>/run-*/evaluation/evaluation_summary.json`、`result_acc_*.json`）。^[PR #8871]
 
 <!-- kb:rule status=active since=v0.30.0 -->
