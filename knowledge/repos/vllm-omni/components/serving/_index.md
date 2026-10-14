@@ -60,3 +60,4 @@ sources: []
 
 - [多模态 processor cache 的 replica identity 合同](rules-multimodal-cache.md)。
 - [视频 timeline guides 规则](rules-timeline-guides.md)
+- [vLLM-Omni 服务：Gradio 示例 PCM 音频转换规则](rules-gradio-pcm.md)
