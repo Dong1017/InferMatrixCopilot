@@ -1,10 +1,10 @@
 ---
 title: "vLLM-Omni 硬门禁"
 created: 2026-07-10
-updated: 2026-10-13
+updated: 2026-10-14
 type: rule
 tags: [vllm-omni]
-sources: [benchmark/incidents/_index.md, ci/incidents/_index.md, git/incidents/_index.md, remote/incidents/_index.md, "PR #8014", "PR #8786", "PR #8770", "PR #8645", "PR #8897"]
+sources: [benchmark/incidents/_index.md, ci/incidents/_index.md, git/incidents/_index.md, remote/incidents/_index.md, "PR #8014", "PR #8786", "PR #8770", "PR #8645", "PR #8897", "PR #8673"]
 ---
 
 # vLLM-Omni 硬门禁
@@ -141,5 +141,14 @@ sources: [benchmark/incidents/_index.md, ci/incidents/_index.md, git/incidents/_
 - 强制：合并资格 = tip 匹配的批准 + 适用的 GitHub checks 绿 + 匹配平台的 L2 ready 绿，或如实的 docs-only 跳过记录；L3/L4 不计入合并资格。L3 merge-test（`.buildkite/cuda/test-merge.yml`）可由 `merge-test` label 触发，也可合并后在 main 上运行；L4 nightly（`.buildkite/cuda/test-nightly.yml`）由 `NIGHTLY=1`/`nightly-test` 触发；两者供给 quality watch 与 LESSONS（L3 红当日 LESSONS、L4 深度 LESSONS），无论以何种方式触发都不得变成合并前门槛或逐 PR 的例行税。vendor/平台 PR 必须用匹配平台门：CUDA `.buildkite/cuda/test-ready.yml`、AMD `.buildkite/amd/test-amd-ready.yml`、NPU `.buildkite/npu/test-npu-ready.yml`（NPU 有 L2/L4、无独立 L3）、Intel 静态 `.buildkite/intel/pipeline-intel.yml`（Intel 无独立 L3/L4 文件）；严禁以 CUDA-only L2 给 Ascend/AMD 等平台标绿。docs-only 变更的 GPU/wheel 检查跳过必须记录为跳过而非“绿”，label 请求不覆盖该跳过，main 的定时 nightly 覆盖仍运行。CUDA merge-test 合并后变红时：先判定是否新合并变更所致，确认因果后立即 revert 该变更（不等同类堆叠或次日评审）；须区分基础设施失败与 flaky，先定位因果 commit 再 revert；失败检查、因果变更、revert 与后续写入 LESSONS；L3 仍是合并后健康检查，不是新增的合并前门槛。每 6 小时的自动 merge-readiness 刷新只是补充每日检查点，每日上限仍为 ≤10 triage / 1 deep review。首评清单验收线保持：bug 须有指名的、无该变更即失败的回归且 tip 上变绿；perf 数字必须来自同硬件 + 同 prompt 集的 tip vs baseline A/B 配对；验证者必须写明在该 tip SHA 实际运行了什么，未运行的检查列 “not run”，不得省略。
 - 禁止：把 L3/L4 当作每 PR 的合并前阻塞；用不匹配平台的 L2 结果为 vendor PR 放行或标绿；把 docs-only 跳过表述为检查通过；未排除 infra/flake、未定位因果 commit 就 revert；删除或改写指南中上述门槛语义，或移除两个入口链接与 `.nav.yaml` 导航项。
 - 验收：`docs/contributing/ci/pr_merge_loop.md` 存在并保留 CI ladder（含 L3/L4 触发方式：L3 为 `merge-test` 或合并后于 main 运行、L4 为 `NIGHTLY=1`/`nightly-test`）、High-priority selection、Daily clock、Quality watch（含 CUDA merge-test regressions 小节）与 First-comment checklist 各节的上述语义；`CONTRIBUTING.md` 与 `docs/contributing/README.md` 的入口链接有效，`.nav.yaml` 含 `pr_merge_loop.md` 且 YAML 可解析；对该指南的改动不与上述门槛相矛盾。^[PR #8897]
+
+<!-- kb:rule status=active since=v0.30.0 -->
+
+## VLLM-OMNI-PR8673-CODEQL-SINGLE-JOB — CodeQL 单作业三语言扫描：仅 main 触发、组合语言 init 不带 build-mode
+
+- 触发：改动 `.github/workflows/codeql.yml`（作业拆分、`github/codeql-action/init`/`analyze` 的语言列表与输入、`on` 触发器、作业 `permissions`），或提议为该工作流增删语言、恢复定时扫描、改回每语言单作业结构。
+- 强制：全部 CodeQL 分析在单个 `ubuntu-latest` 作业（`analyze`）中完成，一次 `init` 以 `languages: actions,javascript-typescript,python` 组合初始化三种语言；触发器仅 `push: branches: [main]` 与 `pull_request: branches: [main]`；作业 `permissions` 保持合并时的 `contents: read` 与 `security-events: write`（PR #8673 自检核对的权限集）；组合语言 `init` 不携带单语言专用的 `build-mode` 输入，`analyze` 不指定 categories 而沿用 action 自动 categories。该文件为纯 CI 配置：验收以 pre-commit（YAML 校验、actionlint 等）与结构核对为准，不要求新增 pytest。PR #8673 合并时 hosted CodeQL 的实际运行（提取与 SARIF 上传）尚属 pending，本地 lint 通过不得被当作扫描运行成功的证据；运行性结论只能来自实际 CI 运行。
+- 禁止：把 C/C++ 加回语言列表——PR #8673 记录此前 C/C++ 扫描在仓库中找不到实现源文件（仅一个头文件）并以 `No source files found` 提取失败，除非仓库实际新增 C/C++ 实现源文件；恢复每周 `schedule` 触发或未使用的 manual-build 模板；给组合语言 `init` 添加 `build-mode` 或把扫描拆成每语言一个作业；删除或缩减作业 `permissions` 块中的 `contents: read`、`security-events: write` 声明。
+- 验收：`.github/workflows/codeql.yml` 恰含一个 `analyze` 作业；init 的 `languages` 为 `actions,javascript-typescript,python` 且无 `build-mode` 输入；`on` 仅含指向 `main` 的 push 与 pull_request、无 `schedule`；permissions 为 `contents: read` + `security-events: write`；`pre-commit run --files .github/workflows/codeql.yml` 通过。^[PR #8673]
 
 <!-- kb:rule status=active since=v0.30.0 -->
