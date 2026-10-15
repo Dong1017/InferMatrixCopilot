@@ -53,3 +53,66 @@ assert.equal(first.tab,'work'); assert.equal(first.mode,'graph'); assert.equal(f
 '''
     result = subprocess.run([NODE, "--input-type=module"], input=program, capture_output=True, text=True, timeout=20)
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.skipif(not NODE, reason="Node is required for browser checkpoints")
+def test_workspace_checkpoint_authorized_scope_and_cleanup():
+    program = f"import {{createWorkspaceCheckpoint}} from {MODULE.as_uri()!r};\n" + r'''
+import assert from 'node:assert/strict';
+const values=new Map();
+const storage={get length(){return values.size},key(index){return [...values.keys()][index]},getItem(key){return values.get(key)??null},setItem(key,value){values.set(key,value)},removeItem(key){values.delete(key)}};
+const checkpoints=createWorkspaceCheckpoint({storage});
+const scope={user_id:'alice',repo_id:'repo-A',rfc_id:'RFC-1'};
+checkpoints.save(scope,{tab:'work',query:'Engine',owner:'alice',selection:['F1','F2','F1'],viewport:[{left:130,top:80,scale:1.6}],token:'NEVER',body:'private text not needed for a viewport'});
+const restored=checkpoints.restore(scope);
+assert.equal(restored.query,'Engine');assert.deepEqual(restored.selection,['F1','F2']);
+assert.deepEqual(restored.viewport,[{left:130,top:80,scale:1.6}]);
+assert(!('token' in restored));assert(!('body' in restored));assert(![...values.values()].join('').includes('NEVER'));
+assert.equal(checkpoints.restore({...scope,user_id:'bob'}),null);
+assert.equal(checkpoints.restore({...scope,repo_id:'repo-B'}),null);
+assert.equal(checkpoints.restore({...scope,rfc_id:'RFC-2'}),null);
+checkpoints.save({user_id:'alice',rfc_id:'RFC-no-authorized-repo'},{selection:['F1']});assert.equal(values.size,1);
+checkpoints.save({...scope,repo_id:'repo-B'}, {query:'other repository'});
+checkpoints.save({...scope,rfc_id:'RFC-2'}, {query:'keep this'});
+checkpoints.forget({user_id:'alice',rfc_id:'RFC-1'});
+assert.equal(checkpoints.restore(scope),null);assert.equal(checkpoints.restore({...scope,repo_id:'repo-B'}),null);
+assert.equal(checkpoints.restore({...scope,rfc_id:'RFC-2'}).query,'keep this');
+checkpoints.save(scope,{viewport:[{left:-10,top:Infinity,scale:100}],selection:[null,3,'valid'],query:'x'.repeat(3000)});
+assert.deepEqual(checkpoints.restore(scope).viewport,[{left:0,top:0,scale:2.5}]);
+assert.deepEqual(checkpoints.restore(scope).selection,['valid']);assert.equal(checkpoints.restore(scope).query.length,2000);
+values.set('unrelated-setting','keep');checkpoints.clear();assert.equal(values.size,1);assert.equal(values.get('unrelated-setting'),'keep');
+const unavailable=createWorkspaceCheckpoint({storage:{getItem(){throw new Error('disabled')},setItem(){throw new Error('quota')},get length(){throw new Error('disabled')}}});
+assert.equal(unavailable.restore(scope),null);unavailable.save(scope,{query:'safe'});unavailable.forget(scope);unavailable.clear();
+'''
+    result = subprocess.run([NODE, "--input-type=module"], input=program, capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.skipif(not NODE, reason="Node is required for private composer checkpoints")
+def test_chat_input_checkpoint_contains_only_scoped_unsent_text():
+    program = f"import {{createChatInputCheckpoint, createWorkspaceCheckpoint}} from {MODULE.as_uri()!r};\n" + r'''
+import assert from 'node:assert/strict';
+const values=new Map();
+const storage={get length(){return values.size},key(index){return [...values.keys()][index]},getItem(key){return values.get(key)??null},setItem(key,value){values.set(key,value)},removeItem(key){values.delete(key)}};
+const composer=createChatInputCheckpoint({storage}), workspace=createWorkspaceCheckpoint({storage});
+const scope={user_id:'alice',repo_id:'repo-A',rfc_id:'RFC-1'};
+composer.save(scope,'Unsent proposal context 中文');
+assert.equal(composer.restore(scope),'Unsent proposal context 中文');
+assert.equal(composer.restore({...scope,user_id:'bob'}),null);
+assert.equal(composer.restore({...scope,repo_id:'repo-B'}),null);
+assert.equal(composer.restore({...scope,rfc_id:'RFC-2'}),null);
+composer.save({...scope,rfc_id:'RFC-2'},'Keep second RFC');
+composer.save(scope,{token:'secret',transcript:'do not persist',proposal:{}});
+assert.equal(composer.restore(scope),'Unsent proposal context 中文');
+composer.save(scope,'x'.repeat(20001));assert.equal(composer.restore(scope).length,20000);
+workspace.save(scope,{query:'independent graph state'});
+composer.forget({user_id:'alice',rfc_id:'RFC-1'});assert.equal(composer.restore(scope),null);
+assert.equal(composer.restore({...scope,rfc_id:'RFC-2'}),'Keep second RFC');
+assert.equal(workspace.restore(scope).query,'independent graph state');
+composer.clear();assert.equal(composer.restore({...scope,rfc_id:'RFC-2'}),null);
+assert.equal(workspace.restore(scope).query,'independent graph state');
+const unavailable=createChatInputCheckpoint({storage:{getItem(){throw new Error('disabled')},setItem(){throw new Error('quota')},get length(){throw new Error('disabled')}}});
+assert.equal(unavailable.restore(scope),null);unavailable.save(scope,'editing still works');unavailable.forget(scope);unavailable.clear();
+'''
+    result = subprocess.run([NODE, "--input-type=module"], input=program, capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stderr

@@ -48,7 +48,7 @@ Owner: Alice
 
 Depends on: F1
 
-### Model
+### 工作依赖
 
 #### F3. Add the model
 
@@ -178,6 +178,15 @@ def confirm_action(page, label, *, reason="Verified in product browser acceptanc
     expect(dialog).not_to_be_visible()
 
 
+def open_agent(page):
+    if not page.locator(".workspace-side").is_visible():
+        page.locator(".workspace-open-details").click()
+    page.locator(".workspace-side-tabs").get_by_role("tab", name="Agent", exact=True).click()
+    composer = page.locator("#workspace-agent .chat-composer textarea")
+    expect(composer).to_be_editable()
+    return composer
+
+
 def test_graph_is_on_first_screen_and_inspector_contains_only_linked_acceptance(open_page):
     page = open_page()
     canvas = page.locator("#rfc-work .roadmap-canvas:visible").first
@@ -301,6 +310,136 @@ def test_tabs_search_filters_and_english_keep_the_workspace(open_page):
     expect(page.locator("html")).to_have_attribute("lang", "en")
     expect(page.locator("#rfc-work select[name=task-track]")).to_have_value("Engine")
     assert not re.search(r"[\u4e00-\u9fff]", page.locator("[data-workspace-tab=work]").inner_text())
+    assert not page.errors
+
+
+def test_second_diagram_survives_settled_language_switch(open_page, site):
+    page = open_page()
+    diagram = page.locator("#rfc-work select[name=diagram]")
+    options = diagram.locator("option").evaluate_all("nodes => nodes.filter(node => node.value !== '__all').map(node => ({value:node.value,label:node.textContent}))")
+    assert len(options) >= 2 and options[1]["label"] == "工作依赖"
+    stable_key = options[1]["value"]
+    diagram.select_option(stable_key)
+    expect(page.locator("#rfc-work .roadmap-track:visible")).to_have_count(1)
+    expect(page.locator("#rfc-work .roadmap-track:visible .roadmap-actionable[data-feature-id=F3]")).to_be_visible()
+    for language, title in (("en", "Work dependencies"), ("zh", "工作依赖")):
+        with page.expect_response(lambda response: f"/api/v1/rfcs/{site.rfc_id}?" in response.url and f"language={language}" in response.url) as reading:
+            page.locator(f".language-switch [data-language={language}]").click()
+        reading.value.finished()
+        expect(page.locator("#content")).not_to_have_class(re.compile(r"is-refreshing"))
+        expect(diagram).to_have_value(stable_key)
+        expect(diagram.locator("option:checked")).to_have_text(title)
+        expect(page.locator("#rfc-work .roadmap-track:visible")).to_have_count(1)
+        expect(page.locator("#rfc-work .roadmap-track:visible > .panel-title h3")).to_have_text(title)
+        node = page.locator("#rfc-work .roadmap-track:visible .roadmap-actionable[data-feature-id=F3]")
+        expect(node).to_be_visible()
+        expect(node.locator("[data-graph-meta=state]")).to_contain_text("Acceptance" if language == "en" else "验收")
+    page.locator(".daily-rfc > .page-heading").get_by_role("button", name="刷新", exact=True).click()
+    expect(page.locator("#content")).not_to_have_class(re.compile(r"is-refreshing"))
+    expect(diagram).to_have_value(stable_key)
+    page.reload()
+    expect(diagram).to_have_value(stable_key)
+    expect(page.locator("#rfc-work .roadmap-track:visible .roadmap-actionable[data-feature-id=F3]")).to_be_visible()
+    assert not page.errors
+
+
+def test_hard_reload_restores_workspace_after_auth_and_prunes_revoked_selection(open_page, site):
+    user = site.service.dispatch(site.owner, "users.create", {"name": "Workspace maintainer"})
+    issued = site.service.dispatch(site.owner, "tokens.create", {"user_id": user["id"]})
+    site.service.dispatch(site.owner, "grants.set", {"repo_id": site.repository["id"], "user_id": user["id"], "role": "maintainer"})
+    page = open_page(token=issued["token"])
+    initial_revision = current(site)["revision"]
+    for identity, modifier in (("F1", "Control"), ("F2", "Meta")):
+        page.locator(f"#rfc-work .roadmap-actionable[data-feature-id={identity}]").first.click(modifiers=[modifier])
+    page.locator("#rfc-work input[name=task-search]").fill("engine")
+    for name, value in (("task-track", "Engine"), ("task-status", "planned"), ("task-owner", "Alice")):
+        page.locator(f"#rfc-work select[name={name}]").select_option(value)
+    graph = page.locator("#rfc-work .roadmap-track:visible").first
+    canvas = graph.locator(".roadmap-canvas")
+    for _ in range(6):
+        graph.locator('button[aria-label$="放大"]').click()
+    bounds = canvas.bounding_box()
+    page.mouse.move(bounds["x"] + bounds["width"] - 40, bounds["y"] + 10)
+    page.mouse.down()
+    page.mouse.move(bounds["x"] + 40, bounds["y"] + 10, steps=6)
+    page.mouse.up()
+    position = canvas.evaluate("node => ({left:node.scrollLeft,scale:Number(node.dataset.graphScale)})")
+    assert position["left"] > 20 and position["scale"] > 1
+    page.reload()
+    expect(page.locator(".daily-rfc")).to_be_visible()
+    expect(page.locator("#rfc-work input[name=task-search]")).to_have_value("engine")
+    for name, value in (("task-track", "Engine"), ("task-status", "planned"), ("task-owner", "Alice")):
+        expect(page.locator(f"#rfc-work select[name={name}]")).to_have_value(value)
+    page.wait_for_function("""position => {
+        const canvas = document.querySelector('#rfc-work .roadmap-track:not([hidden]) .roadmap-canvas');
+        return canvas && Math.abs(canvas.scrollLeft-position.left)<=1 && Number(canvas.dataset.graphScale)===position.scale;
+    }""", arg=position)
+    selected = page.locator("#rfc-work .roadmap-selected").evaluate_all("nodes => [...new Set(nodes.map(node=>node.dataset.featureId))].sort()")
+    assert selected == ["F1", "F2"]
+    assert current(site)["revision"] == initial_revision
+    # Current permission is authoritative even when a previous checkpoint had a
+    # writable selection. A later denied reload must purge it altogether.
+    site.service.dispatch(site.owner, "grants.set", {"repo_id": site.repository["id"], "user_id": user["id"], "role": "reader"})
+    page.reload()
+    expect(page.locator(".daily-rfc")).to_be_visible()
+    expect(page.locator("#rfc-work .roadmap-track:visible svg").first).to_be_visible()
+    expect(page.locator(".roadmap-selected")).to_have_count(0)
+    expect(page.locator(".workspace-selection")).to_be_hidden()
+    site.service.dispatch(site.owner, "grants.set", {"repo_id": site.repository["id"], "user_id": user["id"], "role": ""})
+    page.reload()
+    expect(page.locator("#content .error-panel")).to_be_visible()
+    assert page.evaluate("Object.keys(sessionStorage).filter(key=>key.startsWith('imrfc.workspace.v1:')).length") == 0
+    assert not page.errors
+
+
+def test_unsent_agent_input_survives_reload_and_clears_on_logout_and_access_loss(open_page, site):
+    user = site.service.dispatch(site.owner, "users.create", {"name": "Chat maintainer"})
+    issued = site.service.dispatch(site.owner, "tokens.create", {"user_id": user["id"]})
+    site.service.dispatch(site.owner, "grants.set", {"repo_id": site.repository["id"], "user_id": user["id"], "role": "maintainer"})
+    page = open_page(token=issued["token"])
+    first = "Private unsent Agent question, retained across reload"
+    open_agent(page).fill(first)
+    page.reload()
+    expect(page.locator(".daily-rfc")).to_be_visible()
+    expect(open_agent(page)).to_have_value(first)
+    page.locator("#logout").click()
+    expect(page.locator("#login")).to_be_visible()
+    assert page.evaluate("Object.keys(sessionStorage).filter(key=>key.startsWith('imrfc.chat-input.v1:')).length") == 0
+    assert first not in page.evaluate("JSON.stringify(Object.fromEntries(Object.entries(sessionStorage)))")
+    page.locator("#login-token").fill(issued["token"])
+    page.locator("#login-form button[type=submit]").click()
+    expect(page.locator(".daily-rfc")).to_be_visible()
+    expect(open_agent(page)).to_have_value("")
+    second = "Private unsent Agent question, purged when RFC access ends"
+    open_agent(page).fill(second)
+    site.service.dispatch(site.owner, "grants.set", {"repo_id": site.repository["id"], "user_id": user["id"], "role": ""})
+    page.reload()
+    expect(page.locator("#content .error-panel")).to_be_visible()
+    assert second not in page.evaluate("JSON.stringify(Object.fromEntries(Object.entries(sessionStorage)))")
+    expect(page.locator(".chat-composer textarea")).to_have_value("")
+    assert not site.service.store.all("SELECT id FROM chat_jobs")
+    assert not page.errors
+
+
+def test_failed_chat_send_keeps_checkpoint_until_queue_acknowledges(open_page, site):
+    # This sentinel enables the queue API without starting any model worker.
+    site.service.chat.agent = object()
+    page = open_page()
+    text = "Keep this unsent message until the service acknowledges it"
+    composer = open_agent(page)
+    composer.fill(text)
+    page.route("**/api/v1/actions/chat.send", lambda route: route.fulfill(status=503, json={
+        "error": {"code": "transport_error", "message": "Temporary send failure"}}), times=1)
+    send = page.locator("#workspace-agent .chat-composer").get_by_role("button", name="发送", exact=True)
+    send.click()
+    expect(page.locator("#workspace-agent .chat-error")).to_contain_text("Temporary send failure")
+    expect(composer).to_have_value(text)
+    assert text in page.evaluate("JSON.stringify(Object.fromEntries(Object.entries(sessionStorage)))")
+    assert not site.service.store.all("SELECT id FROM chat_jobs")
+    send.click()
+    expect(composer).to_have_value("")
+    assert text not in page.evaluate("JSON.stringify(Object.fromEntries(Object.entries(sessionStorage)))")
+    assert [row["status"] for row in site.service.store.all("SELECT status FROM chat_jobs")] == ["pending"]
     assert not page.errors
 
 

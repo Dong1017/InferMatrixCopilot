@@ -23,7 +23,7 @@ Do not summarize, add facts, remove qualifications, or turn goals, estimates, fa
 historical results or unverified claims into verified outcomes. Preserve URLs, code,
 issue/feature identifiers, all numerals, and ⟪S0⟫ / ⟪P0⟫ style placeholders exactly.
 Protected literals are replaced by ⟪P0⟫ placeholders; copy each placeholder unchanged.
-Keep project/model names (vLLM-Omni, LingBot, MiniMax, H200, GLM) and API identifiers.
+Preserve all project names, model names, hardware names and API identifiers exactly.
 Preserve Markdown punctuation and leading/trailing whitespace where present.
 """
 

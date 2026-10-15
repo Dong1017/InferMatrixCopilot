@@ -5,7 +5,7 @@ import {projectRFC, outcomeModel} from "/roadmap-components.mjs";
 import {currentLanguage, localizeText, setTranslations, applyLocale, initializeLocale, changeLanguage} from "/roadmap-locale.mjs";
 import {createChat, draftDigest} from "/roadmap-chat.mjs";
 import {actionDialog, askConfirm, renderDiff} from "/roadmap-ui.mjs";
-import {linkedCriteria, filterWork, workspaceDefaults} from "/roadmap-workspace.mjs";
+import {linkedCriteria, filterWork, workspaceDefaults, createWorkspaceCheckpoint} from "/roadmap-workspace.mjs";
 import {createDraftKeeper} from "/roadmap-drafts.mjs";
 const markdown = window.markdownit({html: false, linkify: true});
 markdown.renderer.rules.image = (tokens, index) => markdown.utils.escapeHtml(tokens[index].content);
@@ -65,6 +65,7 @@ let busyOperations = 0;
 let chat;
 let activeWorkspace = null;
 const workspaceStates = new Map();
+const workspaceCheckpoints = createWorkspaceCheckpoint();
 const drafts = createDraftKeeper({scope: () => {
   const current = activeRFC && location.hash.startsWith(`#rfc/${encodeURIComponent(activeRFC.id)}`) ? activeRFC : null;
   return {user_id: principal?.user_id, repo_id: current?.repo_id || "", rfc_id: current?.id || ""};
@@ -81,9 +82,21 @@ function restoreDrafts(root) {
 }
 document.addEventListener("draft-form-opened", event => { if (principal) restoreDrafts(event.target); });
 function workspaceState(id) {
-  if (!workspaceStates.has(id)) { const state = workspaceDefaults(); if (matchMedia("(max-width:700px)").matches) state.mode = "list"; workspaceStates.set(id, state); }
+  if (!workspaceStates.has(id)) {
+    const state = workspaceDefaults();
+    if (matchMedia("(max-width:700px)").matches) state.mode = "list";
+    // activeRFC is assigned only from a successful authorized service read.
+    const scope = principal && activeRFC?.id === id ? {user_id: principal.user_id, repo_id: activeRFC.repo_id, rfc_id: id} : null;
+    if (scope) Object.assign(state, workspaceCheckpoints.restore(scope) || {});
+    let retained;
+    const checkpoint = () => { if (scope && principal?.user_id === scope.user_id && workspaceStates.get(id) === retained) workspaceCheckpoints.save(scope, state); };
+    retained = new Proxy(state, {set(target, key, value) { if (Object.is(target[key], value)) return true; target[key] = value; checkpoint(); return true; }});
+    workspaceStates.set(id, retained);
+  }
   return workspaceStates.get(id);
 }
+window.addEventListener("pagehide", () => rememberGraphViewport());
+
 function returnChatMount() { chat?.mount(activeWorkspace?.agentMount?.isConnected ? activeWorkspace.agentMount : $("chat-mount")); }
 
 function closeFeatureDialog() {
@@ -304,7 +317,7 @@ function notice(message, error = false) {
 }
 function signedOut() {
   const languages = document.querySelector(".language-switch"); if (languages) document.body.prepend(languages);
-  drafts.clear();
+  drafts.clear(); workspaceCheckpoints.clear();
   for (const dialog of document.querySelectorAll("dialog.action-dialog")) dialog.close();
   selectedGraphIDs.clear(); graphSelectionRFC = "";
   closeFeatureDialog();
@@ -332,6 +345,8 @@ function signedOut() {
   $("login").hidden = false;
 }
 function forgetRFC(id) {
+  chat.forget?.(id);
+  workspaceCheckpoints.forget({user_id: principal?.user_id, rfc_id: id});
   const editor = editorDrafts.get(id);
   if (editor === activeEditor) closeRFCEditor(true);
   else if (editor) { drafts.forget(editor.dialog); editor.dialog.remove(); }
@@ -340,7 +355,7 @@ function forgetRFC(id) {
   if (activeGraphs?.rfc.id === id) activeGraphs = null;
   if (activeRFC?.id === id) {
     activeRFC = null; activeContent = null; activeWorkspace = null;
-    setTranslations(null); chat.forget?.(id); chat.setDefaultMount?.(null);
+    setTranslations(null); chat.setDefaultMount?.(null);
   }
   for (const dialog of document.querySelectorAll("dialog.action-dialog")) dialog.close();
 }
@@ -894,7 +909,8 @@ function enableGraphPanning(canvas) {
 }
 function dependencyGraph(rfc) {
   const models = graphModels(rfc);
-  for (const model of models) {
+  for (const [index, model] of models.entries()) {
+    model.key = `${index}:${model.title}`;
     model.title = localizeText(model.title);
     for (const node of model.nodes) node.title = node.group ? `${localizeText(node.group.title)} (${node.members.length})` : localizeText(node.title);
     for (const edge of model.edges) edge.label = localizeText(edge.label || "");
@@ -1364,13 +1380,13 @@ function detailViewWorkspace(rfc) {
 function buildWorkWorkspace(workspace) {
   const {rfc, state, work} = workspace;
   const graph = dependencyGraph(rfc), graphModelsNow = activeGraphs?.rfc.id === rfc.id ? activeGraphs.models : [];
-  if (!state.graph || !graphModelsNow.some(model => model.title === state.graph) && state.graph !== "__all") state.graph = graphModelsNow[0]?.title || "__all";
+  if (!state.graph || !graphModelsNow.some(model => model.key === state.graph) && state.graph !== "__all") state.graph = graphModelsNow[0]?.key || "__all";
   const query = input("task-search", "搜索编号、标题或负责人", state.query);
   query.setAttribute("aria-label", "搜索工作项");
   const track = select("task-track", [["", "所有工作轨道"], ...[...new Set((rfc.features || []).map(feature => feature.track).filter(Boolean))].map(value => [value, value])], state.track);
   const status = select("task-status", [["", "所有实现状态"], ...["planned", "in_progress", "partial", "implemented", "blocked"]], state.status);
   const owner = select("task-owner", [["", "所有负责人"], ["__unassigned", "待认领"], ...[...new Set((rfc.features || []).map(feature => feature.owner).filter(Boolean))].map(value => [value, value])], state.owner);
-  const diagram = select("diagram", [["__all", "全部图表"], ...graphModelsNow.map(model => [model.title, model.title])], state.graph);
+  const diagram = select("diagram", [["__all", "全部图表"], ...graphModelsNow.map(model => [model.key, model.title])], state.graph);
   diagram.setAttribute("aria-label", "选择路线图");
   const modes = element("div", {class: "segmented", "aria-label": "工作显示方式"});
   const graphMode = element("button", {type: "button", onclick: () => { state.mode = "graph"; state.removed = false; removed.setAttribute("aria-pressed", "false"); workspace.drawWork(); }}, "路线图");
@@ -1410,7 +1426,7 @@ function buildWorkWorkspace(workspace) {
     }
     for (const [index, section] of [...graph.querySelectorAll(".roadmap-track")].entries()) {
       const model = graphModelsNow[index];
-      section.hidden = state.graph !== "__all" && model.title !== state.graph || Boolean(state.track && !model.nodes.some(node => node.feature?.track === state.track || node.members?.some(feature => feature.track === state.track)));
+      section.hidden = state.graph !== "__all" && model.key !== state.graph || Boolean(state.track && !model.nodes.some(node => node.feature?.track === state.track || node.members?.some(feature => feature.track === state.track)));
     }
   };
   workspace.drawWork = () => {

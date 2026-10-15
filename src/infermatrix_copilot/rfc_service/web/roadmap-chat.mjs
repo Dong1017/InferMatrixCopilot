@@ -1,5 +1,6 @@
 import {currentLanguage, localizeText, applyLocale} from "/roadmap-locale.mjs";
 import {actionDialog, renderDiff} from "/roadmap-ui.mjs";
+import {createChatInputCheckpoint} from "/roadmap-workspace.mjs";
 
 const running = job => ["pending", "running"].includes(job.status);
 const keyOf = value => JSON.stringify(value);
@@ -61,6 +62,13 @@ export function eventText(event) {
 /** One DOM root follows the editor; route updates never rebuild this controller. */
 export function createChat({action, markdownBody, canEdit, getDraft, resolveSelection, onApply, refreshRFC, onSourceUpdate, onNotice, mount, launcher}) {
   const states = new Map();
+  const composerCheckpoints = createChatInputCheckpoint();
+  const composerScope = rfc => ({user_id: owner, repo_id: rfc?.repo_id, rfc_id: rfc?.id});
+  const checkpointInput = state => {
+    if (!owner || !state || states.get(state.rfc.id) !== state) return;
+    if (state.input) composerCheckpoints.save(composerScope(state.rfc), state.input);
+    else composerCheckpoints.forget(composerScope(state.rfc));
+  };
   let defaultMount = mount;
   let owner = null, epoch = 0, context = null, current = null, collapsed = true, fullscreen = false, polling = null, timer;
   const root = node("aside", {id: "rfc-chat", class: "rfc-chat", "aria-label": "RFC 对话助手"});
@@ -95,7 +103,7 @@ export function createChat({action, markdownBody, canEdit, getDraft, resolveSele
   const error = node("p", {class: "form-error chat-error", role: "alert", hidden: true});
   const log = node("div", {class: "chat-log", tabindex: "0", "aria-label": "对话与编辑建议"});
   const status = node("p", {class: "chat-status small muted", role: "status", "aria-live": "polite"});
-  const input = node("textarea", {rows: "3", placeholder: "讨论方案，或说明希望修改的内容…", "aria-label": "发送给 RFC 助手的消息"});
+  const input = node("textarea", {rows: "3", placeholder: "讨论方案，或说明希望修改的内容…", "aria-label": "发送给 RFC 助手的消息", maxlength: "20000"});
   const draftHint = node("p", {class: "small muted chat-draft-hint"});
   const send = node("button", {type: "submit", class: "primary"}, "发送");
   const stop = control("停止生成", () => {
@@ -103,7 +111,8 @@ export function createChat({action, markdownBody, canEdit, getDraft, resolveSele
     if (job) perform(state, async () => absorb(state, await action("chat.cancel", {thread_id: state.threadId, job_id: job.id})));
   });
   const composer = node("form", {class: "chat-composer", onsubmit: event => { event.preventDefault(); sendMessage(); }}, draftHint, input, node("div", {class: "chat-compose-actions"}, node("span", {class: "small muted"}, "Enter 换行 · Ctrl/⌘ + Enter 发送"), stop, send));
-  input.addEventListener("input", () => { if (current) current.input = input.value; renderControls(); });
+  input.addEventListener("input", () => { if (current) { current.input = input.value; checkpointInput(current); } renderControls(); });
+  window.addEventListener("pagehide", () => { if (current) { current.input = input.value; checkpointInput(current); } });
   input.addEventListener("keydown", event => { if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) { event.preventDefault(); sendMessage(); } });
   log.addEventListener("scroll", () => { if (current) current.scroll = log.scrollTop; });
   root.addEventListener("keydown", event => { if (event.key === "Escape" && fullscreen) { event.preventDefault(); event.stopPropagation(); fullscreen = false; layout(); } });
@@ -122,7 +131,7 @@ export function createChat({action, markdownBody, canEdit, getDraft, resolveSele
   }
   function setCollapsed(value) { collapsed = value; layout(); if (collapsed && !launcher.hidden) launcher.focus(); }
   function newState(rfc) {
-    return {rfc, threads: [], threadId: "", snapshot: {}, cursor: 0, live: new Map(), phases: new Map(), previews: new Map(), selection: null, input: "", scroll: 0, busy: false, loaded: false, loading: false, error: "", fingerprint: "", sendKey: null, sendSignature: null, earlier: [], historyMore: null};
+    return {rfc, threads: [], threadId: "", snapshot: {}, cursor: 0, live: new Map(), phases: new Map(), previews: new Map(), selection: null, input: composerCheckpoints.restore(composerScope(rfc)) || "", scroll: 0, busy: false, loaded: false, loading: false, error: "", fingerprint: "", sendKey: null, sendSignature: null, earlier: [], historyMore: null};
   }
   async function perform(state, callback) {
     if (!state || state.busy || !owner) return;
@@ -170,7 +179,7 @@ export function createChat({action, markdownBody, canEdit, getDraft, resolveSele
   async function sendMessage() {
     const state = current;
     if (!state || !context || context.id !== state.rfc.id || state.busy || state.snapshot.jobs?.some(running) || !input.value.trim()) return;
-    state.input = input.value;
+    state.input = input.value; checkpointInput(state);
     const draft = getDraft(state.rfc.id), request = {message: state.input.trim(), language: currentLanguage(), expected_revision: state.rfc.revision};
     const selected = resolveSelection?.(state.rfc, state.selection, draft) ?? state.selection;
     if (selected) request.selection = selected;
@@ -188,7 +197,7 @@ export function createChat({action, markdownBody, canEdit, getDraft, resolveSele
       const payload = {thread_id: state.threadId, ...request, idempotency_key: state.sendKey};
       const snapshot = await action("chat.send", payload);
       if (generation !== epoch) return;
-      absorb(state, snapshot); state.input = ""; state.sendKey = state.sendSignature = null;
+      absorb(state, snapshot); state.input = ""; checkpointInput(state); state.sendKey = state.sendSignature = null;
       if (current === state) input.value = "";
     });
   }
@@ -364,10 +373,11 @@ export function createChat({action, markdownBody, canEdit, getDraft, resolveSele
     root,
     session(identity) {
       if (identity?.user_id === owner) return;
+      if (!identity?.user_id || owner) composerCheckpoints.clear();
       epoch++; owner = identity?.user_id || null; clearTimeout(timer); states.clear(); current = context = null; input.value = ""; log.replaceChildren(); collapsed = true; fullscreen = false; render();
     },
     context(rfc) {
-      if (current) { current.input = input.value; current.scroll = log.scrollTop; }
+      if (current) { current.input = input.value; checkpointInput(current); current.scroll = log.scrollTop; }
       context = rfc || null;
       if (rfc && owner) { if (!states.has(rfc.id)) states.set(rfc.id, newState(rfc)); const next = states.get(rfc.id); if (current !== next) input.value = next.input; current = next; current.rfc = rfc; initialize(current); }
       render();
@@ -377,6 +387,7 @@ export function createChat({action, markdownBody, canEdit, getDraft, resolveSele
     mount(target = defaultMount) { (target?.isConnected ? target : mount).append(root); layout(); },
     setDefaultMount(target) { defaultMount = target || mount; this.mount(defaultMount); },
     forget(rfcId) {
+      composerCheckpoints.forget({user_id: owner, rfc_id: rfcId});
       states.delete(rfcId);
       if (current?.rfc.id === rfcId) { current = context = null; input.value = ""; log.replaceChildren(); collapsed = true; render(); schedule(); }
     },
