@@ -1,6 +1,6 @@
 # sdk/ —— 规范
 
-<!-- verified-against: 2026-10-05 -->
+<!-- verified-against: 2026-10-16 -->
 
 
 `Python SDK v1 · 跨仓库唯一 typed 边界 · refactor-status: ok`
@@ -16,6 +16,11 @@
 `thin_mcp_server` 或其私有 helper。
 
 ## 公开契约
+
+`changes_preview()` / `changes_apply()` 绑定人工编辑的完整候选、版本、摘要及幂等键；
+未传 reason 时保留预览原因。`list_rfcs()` 支持可选服务端筛选与分页；`grants()`、
+`check_repository()`、`service_status()` 继续委托同一授权应用。HTTP 错误保留
+`request_id`，不改变原有 code/status 属性，也不在远端故障后创建本地写入方。
 
 - RFC：`RFCClient` 选择显式本地或托管工作区，统一通过 `dispatch(action, payload)`
   调用 RFC 服务并校验 API 版本。`work()` 支持人工实现记录和清除，`graph()` 支持

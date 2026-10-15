@@ -1,6 +1,6 @@
 # thin_mcp_server.py —— 规范
 
-<!-- verified-against: 2026-10-05 -->
+<!-- verified-against: 2026-10-16 -->
 
 `LOC ~490 · 默认 MCP：Direct 门面 + Strict 入口 · refactor-status: ok`
 
@@ -16,6 +16,10 @@
 `rfc_request`、`rfc_capabilities`、`rfc_status`。
 
 ## 公开契约
+
+人工来源编辑通过 `rfcs.changes.preview/apply` 委托共享应用，应用必须绑定实际
+审阅的 preview_id/candidate_digest 与稳定幂等键。服务和连接就绪状态由
+`service.status` / `repositories.check` 返回，门面不自行推断已同步或已验收。
 上述十个工具；`build_mcp(...)`；`main()`。
 RFC 工具签名为 `rfc_request(action, payload=None)`、`rfc_capabilities()`、
 `rfc_status(rfc_id)`；后者调用 `rfcs.status`，返回不含源正文和候选列表的紧凑视图。
