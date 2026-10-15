@@ -14,13 +14,14 @@ import secrets
 import threading
 import time
 import uuid
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
 from . import RFC_API_VERSION
 from .drafts import digest, draft, parse, project, validate_features
-from .models import SESSION_TTL_SECONDS, Principal, ProviderError, RFCError, SourceRef
+from .models import REQUEST_ID, SESSION_TTL_SECONDS, Principal, ProviderError, RFCError, SourceRef
 from .store import Store, encode
 
 ROLES = {"reader": 1, "contributor": 2, "maintainer": 3}
@@ -35,7 +36,7 @@ def content_digest(title, body):
 
 
 class RFCService:
-    def __init__(self, state_dir, providers=None, roots=None, clock=time.time, translator=None, chat_agent=None):
+    def __init__(self, state_dir, providers=None, roots=None, clock=time.time, translator=None, chat_agent=None, workspace_v2=True):
         self.store = Store(state_dir)
         self.providers = dict(providers or {})
         self.roots = [Path(p).expanduser().resolve() for p in (roots or [])]
@@ -43,6 +44,7 @@ class RFCService:
         self.managed_files.mkdir(mode=0o700, exist_ok=True)
         self.roots.append(self.managed_files)
         self.clock = clock
+        self.workspace_v2 = bool(workspace_v2)
         with self.store.transaction() as con:
             con.execute("INSERT OR IGNORE INTO metadata VALUES ('writer_id',?)", (identifier("workspace"),))
         self.writer_id = self.store.one("SELECT value FROM metadata WHERE key='writer_id'")["value"]
@@ -50,6 +52,9 @@ class RFCService:
         self.translations = Translations(self, translator)
         from .chat import ChatService
         self.chat = ChatService(self, chat_agent)
+        from .changes import ReviewedChanges
+        self.changes = ReviewedChanges(self)
+        self._protect_existing_source_edits()
 
     def capabilities(self):
         settings = self.settings()
@@ -57,11 +62,11 @@ class RFCService:
                 "roles": list(ROLES), "multi_rfc": True, "knowledge_adapter_required": False,
                 "drafting": "host-assisted", "default_sync_seconds": settings["sync_seconds"],
                 "default_max_auto_additions": settings["default_max_auto_additions"], "writer_id": self.writer_id,
-                "chat": self.chat.enabled}
+                "chat": self.chat.enabled, "workspace_v2": settings["workspace_v2"]}
 
     def settings(self):
         row = self.store.one("SELECT value FROM metadata WHERE key='service_settings'")
-        return {"sync_seconds": 3600, "default_max_auto_additions": 5,
+        return {"sync_seconds": 3600, "default_max_auto_additions": 5, "workspace_v2": self.workspace_v2,
                 **(json.loads(row["value"]) if row else {}),
                 "public_registration": False, "configured_providers": sorted(self.providers)}
 
@@ -85,16 +90,24 @@ class RFCService:
             return result
 
     def _principal(self, con, token_id):
-        row = con.execute("""SELECT u.*,t.id credential_id FROM users u JOIN tokens t ON t.user_id=u.id
+        cache = getattr(con, "principal_index", {})
+        cached = cache.get(token_id)
+        if getattr(con, "read_only", False) and cached and cached.credential_expires > self.clock():
+            return cached
+        row = con.execute("""SELECT u.*,t.id credential_id,t.expires credential_expires FROM users u JOIN tokens t ON t.user_id=u.id
             WHERE t.id=? AND t.revoked=0 AND t.expires>? AND u.enabled=1""", (token_id, self.clock())).fetchone()
         if not row:
             raise RFCError("Authentication required or credential expired", 401, "unauthorized")
-        return Principal(row["id"], row["name"], bool(row["admin"]), row["credential_id"])
+        principal = Principal(row["id"], row["name"], bool(row["admin"]), row["credential_id"], row["credential_expires"])
+        if getattr(con, "read_only", False):
+            cache[token_id] = principal
+            con.principal_index = cache
+        return principal
 
     def authenticate(self, token):
         if not token:
             raise RFCError("Authentication required", 401, "unauthorized")
-        with self.store.transaction() as con:
+        with self.store.read() as con:
             row = con.execute("SELECT id FROM tokens WHERE digest=?", (digest(token),)).fetchone()
             if not row:
                 raise RFCError("Authentication required", 401, "unauthorized")
@@ -105,15 +118,16 @@ class RFCService:
         secret = secrets.token_urlsafe(40)
         with self.store.transaction() as con:
             self._current(con, principal)
-            con.execute("INSERT INTO sessions VALUES (?,?,?)", (digest(secret), principal.credential_id, self.clock() + SESSION_TTL_SECONDS))
-        return secret, principal
+            expires = min(principal.credential_expires, self.clock() + SESSION_TTL_SECONDS)
+            con.execute("INSERT INTO sessions VALUES (?,?,?)", (digest(secret), principal.credential_id, expires))
+        return secret, replace(principal, session_expires=expires)
 
     def authenticate_session(self, cookie):
-        with self.store.transaction() as con:
-            row = con.execute("SELECT token_id FROM sessions WHERE digest=? AND expires>?", (digest(cookie), self.clock())).fetchone()
+        with self.store.read() as con:
+            row = con.execute("SELECT token_id,expires FROM sessions WHERE digest=? AND expires>?", (digest(cookie), self.clock())).fetchone()
             if not row:
                 raise RFCError("Authentication required", 401, "unauthorized")
-            return self._principal(con, row["token_id"])
+            return replace(self._principal(con, row["token_id"]), session_expires=row["expires"])
 
     def revoke_session(self, cookie):
         with self.store.transaction() as con:
@@ -123,6 +137,10 @@ class RFCService:
         current = self._principal(con, principal.credential_id)
         if current.user_id != principal.user_id:
             raise RFCError("Authentication required", 401, "unauthorized")
+        if principal.session_expires is not None:
+            if principal.session_expires <= self.clock():
+                raise RFCError("Browser session expired; sign in again", 401, "unauthorized")
+            current = replace(current, session_expires=principal.session_expires)
         return current
 
     @staticmethod
@@ -137,6 +155,29 @@ class RFCService:
             raise RFCError("Administrator role required", 403, "forbidden")
 
     def _role(self, con, principal, repo_id, rfc_id=""):
+        if getattr(con, "read_only", False):
+            resource_index = getattr(con, "resource_index", None)
+            if resource_index is None:
+                repos = {row["id"] for row in con.execute("SELECT id FROM repositories")}
+                rfcs = {row["id"]: (row["repo_id"], row["restricted"]) for row in con.execute("SELECT id,repo_id,restricted FROM rfcs")}
+                resource_index = con.resource_index = (repos, rfcs)
+            repos, rfcs = resource_index
+            if repo_id not in repos or (rfc_id and (rfc_id not in rfcs or rfcs[rfc_id][0] != repo_id)):
+                return ""
+            if principal.admin:
+                return "maintainer"
+            indexes = getattr(con, "authority_indexes", {})
+            index = indexes.get(principal.user_id)
+            if index is None:
+                grants = {row["repo_id"]: row["role"] for row in con.execute("SELECT repo_id,role FROM repository_grants WHERE user_id=?", (principal.user_id,))}
+                narrowed = {row["rfc_id"]: row["role"] for row in con.execute("SELECT rfc_id,role FROM rfc_grants WHERE user_id=?", (principal.user_id,))}
+                index = indexes[principal.user_id] = (grants, narrowed)
+                con.authority_indexes = indexes
+            grants, narrowed = index
+            role = grants.get(repo_id, "")
+            if rfc_id and rfcs[rfc_id][1]:
+                return min((role, narrowed.get(rfc_id, "")), key=lambda value: ROLES.get(value, 0))
+            return role
         if not con.execute("SELECT 1 FROM repositories WHERE id=?", (repo_id,)).fetchone():
             return ""
         if principal.admin:
@@ -216,6 +257,10 @@ class RFCService:
                 model["source_update"] = {"operation_id": operation["id"], "status": state,
                     "updated": operation["updated"], "error": operation["error"],
                     "can_retry": operation["status"] in ("failed", "uncertain") and result.get("code") != "source_conflict"}
+        if model.get("source_reconciliation") and model.get("source_update", {}).get("status", "synced") == "synced":
+            model["source_update"] = {"status": "review_required", "can_retry": False,
+                                      "updated": model["source_reconciliation"].get("detected", row["updated"]),
+                                      "error": "Workspace edits differ from the source baseline; review before synchronizing"}
         source = json.loads(row["source"])
         if source.get("path", "").startswith(("/", "\\")) or re.match(r"^[A-Za-z]:", source.get("path", "")):
             source.pop("path", None)
@@ -240,7 +285,7 @@ class RFCService:
                   "enrolled", "restricted", "updated", "role", "can_write", "can_publish",
                   "implementation", "acceptance", "complete", "sync_status", "freshness",
                   "next_actions", "last_discovery", "legacy_namespace", "namespace", "translations", "source_update",
-                  "operation_id", "operation", "proposal_id"}
+                  "operation_id", "operation", "proposal_id", "preview_id", "source_reconciliation"}
         if mode == "detail":
             fields |= {"body", "features", "criteria", "scope", "auto_add", "max_auto_additions",
                        "grants", "historical_claims", "historical_priorities", "ambiguities", "node_groups"}
@@ -265,8 +310,13 @@ class RFCService:
         payload = payload or {}
         if not isinstance(payload, dict):
             raise RFCError("Payload must be an object")
+        if action == "rfcs.changes.preview":
+            return self.changes.preview(principal, payload)
+        if action == "repositories.check":
+            from .service_status import check_repository
+            return check_repository(self, principal, payload)
         if action == "sources.preview":
-            with self.store.transaction() as con:
+            with self.store.read() as con:
                 principal = self._current(con, principal)
                 rid = payload.get("repo_id", "")
                 self._require(con, principal, rid, "contributor")
@@ -274,14 +324,21 @@ class RFCService:
                 self._source_access(con, principal, rid, ref)
                 repo = dict(con.execute("SELECT * FROM repositories WHERE id=?", (rid,)).fetchone())
             fetched = self._provider(repo).get_source(ref)
-            with self.store.transaction() as con:
+            with self.store.read() as con:
                 principal = self._current(con, principal)
                 self._require(con, principal, rid, "contributor")
                 self._source_access(con, principal, rid, SourceRef.from_dict(fetched.get("source", ref.to_dict())))
             return {"source": ref.to_dict(), "title": fetched.get("title", "Imported RFC"), "body": fetched["body"], "revision": fetched.get("revision", ""), "content_digest": content_digest(fetched.get("title", "Imported RFC"), fetched["body"])}
-        with self.store.transaction() as con:
+        reads = {"capabilities", "me", "service.settings", "service.status", "service.diagnostics",
+                 "users.list", "tokens.list", "repositories.list", "grants.list", "rfcs.list", "rfcs.get",
+                 "rfcs.status", "rfcs.next", "rfcs.export", "rfcs.suggestions", "legacy.get",
+                 "operations.get", "operations.list", "audit.list", "chat.list", "chat.get", "chat.events", "chat.proposals.preview"}
+        transaction = self.store.read if action in reads else self.store.transaction
+        with transaction() as con:
             principal = self._current(con, principal)
             result = self._dispatch(con, principal, action, payload)
+            if action in {"chat.send", "chat.retry"}:
+                self.store.wake_on_commit(con)
             if isinstance(result, dict) and "repo_id" in result and "features" in result:
                 if payload.get("language"):
                     result["translations"] = self.translations.snapshot(con, principal, result, payload["language"])
@@ -292,6 +349,8 @@ class RFCService:
         now = self.clock()
         if action.startswith("chat."):
             return self.chat.dispatch(con, p, action, data)
+        if action == "rfcs.changes.apply":
+            return self.changes.apply(con, p, data)
         if action in ("rfcs.update", "rfcs.work", "rfcs.decision") and data.get("rfc_id"):
             self._rfc(con, p, data["rfc_id"], "contributor")
             if con.execute("SELECT 1 FROM operations WHERE rfc_id=? AND kind IN ('rfcs.publish','rfcs.enroll') AND status IN ('running','uncertain')", (data["rfc_id"],)).fetchone():
@@ -308,21 +367,30 @@ class RFCService:
         if action == "capabilities":
             return self.capabilities()
         if action == "me":
-            return p.to_dict()
+            return {**p.to_dict(), "workspace_v2": self.settings()["workspace_v2"]}
+        if action in ("service.status", "service.diagnostics"):
+            from .service_status import service_status
+            if action == "service.diagnostics":
+                self._admin(p)
+            return service_status(self, con, diagnostics=action == "service.diagnostics")
         if action == "service.settings":
             self._admin(p)
             return self.settings()
         if action == "service.configure":
             self._admin(p)
-            if set(data) - {"sync_seconds", "default_max_auto_additions"}:
-                raise RFCError("Only refresh cadence and the new-RFC addition limit are configurable here")
+            if set(data) - {"sync_seconds", "default_max_auto_additions", "workspace_v2"}:
+                raise RFCError("Only refresh cadence, the new-RFC addition limit and workspace interface are configurable here")
             settings = self.settings()
             for key, minimum, maximum in (("sync_seconds", 60, 86400), ("default_max_auto_additions", 0, 100)):
                 value = data.get(key, settings[key])
                 if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
                     raise RFCError(f"{key} must be an integer between {minimum} and {maximum}")
                 settings[key] = value
-            saved = {key: settings[key] for key in ("sync_seconds", "default_max_auto_additions")}
+            if "workspace_v2" in data:
+                if type(data["workspace_v2"]) is not bool:
+                    raise RFCError("workspace_v2 must be a boolean")
+                settings["workspace_v2"] = data["workspace_v2"]
+            saved = {key: settings[key] for key in ("sync_seconds", "default_max_auto_additions", "workspace_v2")}
             con.execute("INSERT OR REPLACE INTO metadata VALUES ('service_settings',?)", (encode(saved),))
             self.store.audit(con, p.user_id, action, now, detail=saved)
             return settings
@@ -403,6 +471,16 @@ class RFCService:
             con.execute("INSERT INTO repository_grants VALUES (?,?,?)", (rid, p.user_id, "maintainer"))
             self.store.audit(con, p.user_id, action, now, rid)
             return {"id": rid, "name": name, "provider": provider, "external_name": external}
+        if action == "grants.list":
+            self._admin(p)
+            params, where = [], ""
+            if data.get("repo_id"):
+                where = " WHERE g.repo_id=?"
+                params.append(data["repo_id"])
+            grants = [dict(row) for row in con.execute("SELECT g.repo_id,r.name repo_name,g.user_id,u.name user_name,g.role FROM repository_grants g JOIN repositories r ON r.id=g.repo_id JOIN users u ON u.id=g.user_id" + where + " ORDER BY r.name,u.name", params)]
+            rfc_where = " WHERE f.repo_id=?" if params else ""
+            narrowed = [dict(row) for row in con.execute("SELECT g.rfc_id,f.title rfc_title,f.repo_id,r.name repo_name,g.user_id,u.name user_name,g.role FROM rfc_grants g JOIN rfcs f ON f.id=g.rfc_id JOIN repositories r ON r.id=f.repo_id JOIN users u ON u.id=g.user_id" + rfc_where + " ORDER BY r.name,f.title,u.name", params)]
+            return {"grants": grants, "rfc_grants": narrowed}
         if action == "grants.set":
             self._admin(p)
             rid, uid, role = data.get("repo_id", ""), data.get("user_id", ""), data.get("role", "")
@@ -417,18 +495,8 @@ class RFCService:
             self.store.audit(con, p.user_id, action, now, rid, detail={"user_id": uid, "role": role})
             return {"repo_id": rid, "user_id": uid, "role": role}
         if action == "rfcs.list":
-            result = []
-            for row in con.execute("SELECT * FROM rfcs ORDER BY updated DESC"):
-                if data.get("repo_id") and data["repo_id"] != row["repo_id"]:
-                    continue
-                if self._role(con, p, row["repo_id"], row["id"]):
-                    view = self._view(con, p, dict(row))
-                    if data.get("query") and data["query"].casefold() not in (view["title"] + view["body"]).casefold():
-                        continue
-                    if data.get("language"):
-                        view["translations"] = self.translations.snapshot(con, p, {"id": view["id"], "title": view["title"]}, data["language"])
-                    result.append(self._compact_view(view, data.get("view")))
-            return {"rfcs": result}
+            from .service_status import list_rfcs
+            return list_rfcs(self, con, p, data)
         if action == "rfcs.draft":
             rid = data.get("repo_id", "")
             self._require(con, p, rid, "contributor")
@@ -492,6 +560,8 @@ class RFCService:
             body = data.get("body", row["body"])
             if not isinstance(body, str) or len(body) > 2_000_000:
                 raise RFCError("Invalid draft body")
+            if json.loads(row["source"]) and (body != row["body"] or data.get("title", row["title"]) != row["title"]):
+                raise RFCError("Source-backed edits require a reviewed change preview and apply", 409, "review_required")
             if row["enrolled"] and (body != row["body"] or any(k in data for k in ("scope", "features", "criteria", "title", "auto_add", "max_auto_additions"))):
                 self._require(con, p, row["repo_id"], "maintainer", row["id"])
                 self._text(data.get("reason"), "Explicit decision reason")
@@ -760,11 +830,36 @@ class RFCService:
             raise RFCError("Source must belong to the authorized repository", 403, "forbidden")
         return SourceRef.from_dict({**ref.to_dict(), "repository": repo["external_name"]}).to_dict()
 
-    def _chat_source_baseline(self, principal, rfc_id, expected_revision, *, check_deadline=None):
+    def _protect_existing_source_edits(self):
+        """Keep pre-upgrade workspace edits until reviewed reconciliation.
+
+        Old direct updates did not queue source writes. A differing or missing
+        baseline must never become permission to overwrite those local edits.
+        """
+        with self.store.transaction() as con:
+            for record in con.execute("SELECT * FROM rfcs WHERE source!='{}'").fetchall():
+                row, model = dict(record), json.loads(record["model"])
+                if model.get("source_reconciliation"):
+                    continue
+                marker = model.get("source_update", {})
+                operation = con.execute("SELECT status FROM operations WHERE id=? AND kind='rfcs.update_source'",
+                                        (marker.get("operation_id", ""),)).fetchone() if marker else None
+                if operation and operation["status"] != "succeeded":
+                    continue
+                snapshot = con.execute("SELECT revision,body,title FROM source_snapshots WHERE rfc_id=? ORDER BY id DESC LIMIT 1", (row["id"],)).fetchone()
+                if snapshot and snapshot["body"] == row["body"] and snapshot["title"] == row["title"]:
+                    continue
+                model["source_reconciliation"] = {"status": "review_required", "detected": self.clock(),
+                                                   "baseline_revision": snapshot["revision"] if snapshot else ""}
+                serialized = encode(model)
+                revision = digest('{"body":' + encode(row["body"]) + ',"model":' + serialized + ',"title":' + encode(row["title"]) + '}')
+                con.execute("UPDATE rfcs SET model=?,revision=? WHERE id=?", (serialized, revision, row["id"]))
+
+    def _chat_source_baseline(self, principal, rfc_id, expected_revision, *, check_deadline=None, refresh=False):
         """Bind a preview to an upstream revision without networking inside SQLite."""
         if check_deadline:
             check_deadline()
-        with self.store.transaction() as con:
+        with self.store.read() as con:
             if check_deadline:
                 check_deadline()
             principal = self._current(con, principal)
@@ -781,7 +876,7 @@ class RFCService:
             previous_write = con.execute("SELECT status,result FROM operations WHERE id=?", (marker.get("operation_id", ""),)).fetchone() if marker else None
             known_conflict = bool(previous_write and previous_write["status"] == "failed"
                                   and json.loads(previous_write["result"]).get("code") == "source_conflict")
-            if snapshot and snapshot["revision"] and snapshot["title"]:
+            if not refresh and snapshot and snapshot["revision"] and snapshot["title"]:
                 if not known_conflict and snapshot["body"] == row["body"] and snapshot["title"] == row["title"]:
                     return {"source_revision": snapshot["revision"], "source_body": snapshot["body"],
                             "source_title": snapshot["title"], "source_conflict": False}
@@ -812,6 +907,11 @@ class RFCService:
                 "source_conflict": fetched["body"] != current["body"] or fetched["title"] != current["title"]}
 
     def _apply_chat_proposal(self, con, p, row, candidate, proposal_id, reason):
+        return self._apply_reviewed_candidate(con, p, row, candidate, proposal_id, reason,
+                                               audit_action="rfcs.chat_apply", source_key="chat-source:")
+
+    def _apply_reviewed_candidate(self, con, p, row, candidate, proposal_id, reason,
+                                   *, audit_action="rfcs.changes.apply", source_key="reviewed-source:"):
         """Save the reviewed candidate and queue its exact source write atomically."""
         from .chat import apply_plan_changes
         p = self._current(con, p)
@@ -825,11 +925,17 @@ class RFCService:
                 or not isinstance(body, str) or len(body) > 2_000_000):
             raise RFCError("Invalid reviewed RFC content")
         source_data = json.loads(current["source"])
+        if candidate.get("source_binding", digest(current["source"])) != digest(current["source"]):
+            raise RFCError("RFC source changed; review a fresh proposal before saving", 409, "preview_mismatch")
         if source_data:
             from .providers import MAX_DOCUMENT_BYTES
             if len(body.encode("utf-8")) > MAX_DOCUMENT_BYTES:
                 raise RFCError("Reviewed source content exceeds the provider document size limit")
         old = json.loads(current["model"])
+        for change in candidate.get("plan_changes", []):
+            feature = next((item for item in old.get("features", []) if item["id"] == change.get("feature_id")), None)
+            if feature and not self._visible_source(con, p, current["repo_id"], feature.get("auto_source")):
+                raise RFCError("Feature not found or access denied", 403, "forbidden")
         if current["enrolled"] or source_data:
             self._require(con, p, current["repo_id"], "maintainer", current["id"])
             reason = self._text(reason, "Explicit decision reason")
@@ -846,6 +952,7 @@ class RFCService:
             if prior.get(feature["id"], {}).get("implementation_claim"):
                 feature["implementation_claim"] = copy.deepcopy(prior[feature["id"]]["implementation_claim"])
         model = apply_plan_changes(model, candidate.get("plan_changes", []), previous=old)
+        model.pop("source_reconciliation", None)
         self._policy(model)
         if body != current["body"] or title != current["title"] or candidate.get("plan_changes"):
             self._invalidate(model, "Reviewed RFC design changed")
@@ -865,7 +972,7 @@ class RFCService:
                     raise RFCError("Source reconciliation requires the exact source-to-candidate diff", 409, "preview_mismatch")
             if source.provider == "local":
                 heading = re.search(r"^#\s+(.+)$", body, re.M)
-                body_title = heading[1] if heading else Path(source.path or source.identifier).stem
+                body_title = heading[1].rstrip("\r") if heading else Path(source.path or source.identifier).stem
                 if body_title != title:
                     raise RFCError("The reviewed local RFC title must match its Markdown heading", 409, "preview_mismatch")
                 source_repo = con.execute("SELECT root FROM repositories WHERE id=?", (current["repo_id"],)).fetchone()
@@ -875,11 +982,11 @@ class RFCService:
                 kind = "pr" if source.kind in ("pull", "pull_request", "pr") else source.kind
                 source_lock = "|".join((source.provider, repository, kind, source.identifier or source.path))
             operation = self._enqueue(con, p, "rfcs.update_source", current["repo_id"], current["id"], {
-                "idempotency_key": "chat-source:" + proposal_id, "source": source.to_dict(),
+                "idempotency_key": source_key + proposal_id, "source": source.to_dict(),
                 "expected_source_revision": expected_source, "title": title, "body": body,
                 "content_digest": content_digest(title, body), "reason": reason, "source_lock": source_lock})
             model["source_update"] = {"operation_id": operation["operation_id"], "content_digest": content_digest(title, body)}
-        self.store.audit(con, p.user_id, "rfcs.chat_apply", self.clock(), current["repo_id"], current["id"],
+        self.store.audit(con, p.user_id, audit_action, self.clock(), current["repo_id"], current["id"],
                          {"proposal_id": proposal_id, "reason": reason or "Reviewed draft proposal", "source_operation_id": operation["operation_id"] if operation else ""})
         view = self._save(con, p, current, model, body, title)
         return {**view, **(operation or {})}
@@ -925,6 +1032,10 @@ class RFCService:
 
     def _view_visibility(self, con, principal, repo_id):
         """Build an ACL index for this transaction only; never cache user authority."""
+        cache = getattr(con, "visibility_index", {})
+        cache_key = (principal.user_id, repo_id)
+        if getattr(con, "read_only", False) and cache_key in cache:
+            return cache[cache_key]
         roots = {r["id"]: r["root"] for r in con.execute("SELECT id,root FROM repositories")}
         blocked, blocked_paths = set(), set()
         aliases = {"pull_request": "pr", "pull": "pr"}
@@ -951,6 +1062,9 @@ class RFCService:
                 return identity(ref) not in blocked
             except RFCError:
                 return False
+        if getattr(con, "read_only", False):
+            cache[cache_key] = visible
+            con.visibility_index = cache
         return visible
 
     @staticmethod
@@ -1055,7 +1169,8 @@ class RFCService:
         now = self.clock()
         con.execute("""INSERT INTO operations(id,actor,credential_id,kind,repo_id,rfc_id,payload,idempotency_key,request_digest,created,updated)
             VALUES (?,?,?,?,?,?,?,?,?,?,?)""", (operation_id, p.user_id, p.credential_id, kind, repo_id, rfc_id, encode(data), key, request_digest, now, now))
-        self.store.audit(con, p.user_id, kind + ".queued", now, repo_id, rfc_id, {"operation_id": operation_id})
+        self.store.audit(con, p.user_id, kind + ".queued", now, repo_id, rfc_id, {"operation_id": operation_id, "request_id": REQUEST_ID.get()})
+        self.store.wake_on_commit(con)
         row = con.execute("SELECT * FROM operations WHERE id=?", (operation_id,)).fetchone()
         return {"operation_id": operation_id, "operation": self._operation(row)}
 
@@ -1233,6 +1348,9 @@ class RFCService:
             fetched = provider.get_source(source)
             if fetched.get("source"):
                 source = SourceRef.from_dict(fetched["source"])
+            if (row and json.loads(row["model"]).get("source_reconciliation")
+                    and (row["body"] != fetched["body"] or row["title"] != fetched.get("title", row["title"]))):
+                raise RFCError("Workspace edits require reviewed reconciliation before source registration", 409, "review_required")
             if row and not row["enrolled"] and row["body"] != fetched["body"]:
                 raise RFCError("Source changed or draft differs from source; preview the current source before enrolling", 409, "preview_mismatch")
             self._authority(op, worker)
@@ -1259,6 +1377,7 @@ class RFCService:
                     if fetched["body"] != row["body"]:
                         self._invalidate(model, "Source changed during reauthorization")
                 model.update(writer_id=self.writer_id, enrollment={"actor": p.user_id, "credential_id": p.credential_id}, state="proposed")
+                model.pop("source_reconciliation", None)
                 self._policy(model)
                 model["freshness"]["verification"] = self.clock()
                 con.execute("UPDATE rfcs SET enrolled=1,source=? WHERE id=?", (encode(source.to_dict()), row["id"]))
@@ -1275,9 +1394,15 @@ class RFCService:
             fetched = provider.get_source(source)
             marker = original.get("source_update", {})
             source_operation = self.store.one("SELECT status FROM operations WHERE id=? AND kind='rfcs.update_source'", (marker.get("operation_id", ""),)) if marker else None
-            preserve_reviewed = bool(source_operation and source_operation["status"] != "succeeded")
+            snapshot = self.store.one("SELECT revision,body,title FROM source_snapshots WHERE rfc_id=? ORDER BY id DESC LIMIT 1", (row["id"],))
+            local_difference = (not snapshot or snapshot["body"] != row["body"] or snapshot["title"] != row["title"])
+            preserve_reviewed = bool((source_operation and source_operation["status"] != "succeeded")
+                                     or original.get("source_reconciliation") or local_difference)
             working_body = row["body"] if preserve_reviewed else fetched["body"]
             model = copy.deepcopy(original) if preserve_reviewed else parse(working_body, original)
+            if local_difference and not (source_operation and source_operation["status"] != "succeeded"):
+                model.setdefault("source_reconciliation", {"status": "review_required", "detected": self.clock(),
+                                                            "baseline_revision": snapshot["revision"] if snapshot else ""})
             removed = {f["id"] for f in original["features"] if not f.get("sidecar")} - {f["id"] for f in model["features"]}
             model["tombstones"] = sorted(set(model["tombstones"]) | removed)
             for f in model["features"]:
@@ -1464,4 +1589,4 @@ def build_service(state_dir, config_path=None):
         if chat_config.get("backend", "zcode") != "zcode":
             raise ValueError("RFC chat requires the configured Zcode backend")
         chat_agent = ZcodeChatAgent(chat_config)
-    return RFCService(state_dir, providers=providers, roots=roots, translator=translator, chat_agent=chat_agent)
+    return RFCService(state_dir, providers=providers, roots=roots, translator=translator, chat_agent=chat_agent, workspace_v2=config.get("workspace_v2", True))

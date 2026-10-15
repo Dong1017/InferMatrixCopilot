@@ -18,6 +18,7 @@ from urllib.parse import urlsplit
 
 from .drafts import digest, parse, validate_features
 from .models import RFCError, SourceRef
+from .model_status import record_model_status, safe_model_error
 from .store import encode
 
 MAX_MESSAGE = 20000
@@ -435,7 +436,9 @@ class ChatService:
 
     @staticmethod
     def _job_public(job):
-        return {key: job[key] for key in ("id", "status", "error", "created", "updated")} | {"error_code": json.loads(job["result"]).get("code", "")}
+        result = json.loads(job["result"])
+        return {key: job[key] for key in ("id", "status", "error", "created", "updated")} | {
+            "error_code": result.get("code", ""), "retryable": result.get("retryable")}
 
     def _snapshot(self, con, thread, row, data=None):
         data = data or {}
@@ -813,6 +816,7 @@ class ChatService:
                 if answer:
                     con.execute("INSERT INTO chat_messages(thread_id,job_id,role,content,created) VALUES (?,?,?,?,?)", (thread["id"], job["id"], "assistant", answer, self.service.clock()))
                 con.execute("UPDATE chat_jobs SET status='succeeded',result=?,error='',lease_until=0,updated=? WHERE id=? AND worker=?", (encode({"proposal_id": proposal_id}), self.service.clock(), job["id"], worker))
+                record_model_status(self.service, con, "chat")
                 con.execute("UPDATE chat_threads SET updated=? WHERE id=?", (self.service.clock(), thread["id"]))
                 self._event(con, thread["id"], job["id"], "completed", {"proposal_id": proposal_id, "model": getattr(self.agent, "model", "")})
                 self.service.store.audit(con, principal.user_id, "chat.completed", self.service.clock(), row["repo_id"], row["id"], {"thread_id": thread["id"], "job_id": job["id"], "proposal_id": proposal_id})
@@ -820,12 +824,16 @@ class ChatService:
                 check_deadline()
             return {"processed": 1, "job_id": job["id"], "status": "succeeded"}
         except Exception as exc:
+            model_error = safe_model_error(exc)
             status = "requires_reauthorization" if isinstance(exc, RFCError) and exc.status in (401, 403) else "cancelled" if isinstance(exc, RFCError) and exc.code == "cancelled" else "failed"
-            error = str(exc) if isinstance(exc, RFCError) else "Chat unavailable; retry or contact the service operator"
-            code = exc.code if isinstance(exc, RFCError) else "chat_unavailable"
+            error = str(exc) if isinstance(exc, RFCError) else model_error["message"] if model_error else "Chat unavailable; retry or contact the service operator"
+            code = exc.code if isinstance(exc, RFCError) else model_error["code"] if model_error else "chat_unavailable"
+            result = {"code": code, **({"retryable": model_error["retryable"]} if model_error else {})}
             with self.service.store.transaction() as con:
-                changed = con.execute("UPDATE chat_jobs SET status=?,result=?,error=?,lease_until=0,updated=? WHERE id=? AND worker=? AND status='running' AND lease_until>?", (status, encode({"code": code}), error, self.service.clock(), job["id"], worker, self.service.clock())).rowcount
-                if changed: self._event(con, job["thread_id"], job["id"], status, {"message": error, "code": code})
+                changed = con.execute("UPDATE chat_jobs SET status=?,result=?,error=?,lease_until=0,updated=? WHERE id=? AND worker=? AND status='running' AND lease_until>?", (status, encode(result), error, self.service.clock(), job["id"], worker, self.service.clock())).rowcount
+                if model_error:
+                    record_model_status(self.service, con, "chat", error=model_error)
+                if changed: self._event(con, job["thread_id"], job["id"], status, {"message": error, **result})
             return {"processed": 1, "job_id": job["id"], "status": status, "code": code}
         finally:
             stop.set()

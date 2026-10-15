@@ -554,3 +554,28 @@ def test_suggestion_reads_filter_hidden_sources_before_paging_and_use_current_pr
     agent.hook = demote_and_read
     # This thread initially saw the private source; narrowing hides the history before any read.
     assert service.chat.process()["status"] == "requires_reauthorization"
+
+
+def test_model_quota_failure_is_actionable_and_preserves_conversation(workspace):
+    from infermatrix_copilot.providers.zcode import ZCodeFailure
+    service, admin, repo, rfc, agent = workspace
+    thread = create(service, admin, rfc)
+    queued = send(service, admin, thread)
+    def limited(kwargs):
+        raise ZCodeFailure("model_quota_exceeded", retryable=False)
+    agent.hook = limited
+    failed = service.chat.process()
+    assert failed["status"] == "failed" and failed["code"] == "model_quota_exceeded"
+    current = snapshot(service, admin, thread)
+    assert current["messages_total"] == 1 and current["messages"][0]["role"] == "user"
+    assert current["jobs"][0]["error_code"] == "model_quota_exceeded"
+    assert current["jobs"][0]["retryable"] is False
+    assert current["proposals"] == []
+    state = service.dispatch(admin, "service.status")["chat"]
+    assert state["last_model_error"]["code"] == "model_quota_exceeded" and not state["ready"]
+    assert state["status"] == "model_quota_exceeded"
+    assert service.dispatch(admin, "rfcs.get", {"rfc_id": rfc["id"]})["revision"] == rfc["revision"]
+    agent.hook = None
+    service.dispatch(admin, "chat.retry", {"thread_id": thread, "job_id": queued["job_id"]})
+    assert service.chat.process()["status"] == "succeeded"
+    assert service.dispatch(admin, "service.status")["chat"]["last_model_error"] is None

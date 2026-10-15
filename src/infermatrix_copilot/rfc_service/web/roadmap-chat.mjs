@@ -1,4 +1,5 @@
 import {currentLanguage, localizeText, applyLocale} from "/roadmap-locale.mjs";
+import {actionDialog, renderDiff} from "/roadmap-ui.mjs";
 
 const running = job => ["pending", "running"].includes(job.status);
 const keyOf = value => JSON.stringify(value);
@@ -60,6 +61,7 @@ export function eventText(event) {
 /** One DOM root follows the editor; route updates never rebuild this controller. */
 export function createChat({action, markdownBody, canEdit, getDraft, resolveSelection, onApply, refreshRFC, onSourceUpdate, onNotice, mount, launcher}) {
   const states = new Map();
+  let defaultMount = mount;
   let owner = null, epoch = 0, context = null, current = null, collapsed = true, fullscreen = false, polling = null, timer;
   const root = node("aside", {id: "rfc-chat", class: "rfc-chat", "aria-label": "RFC 对话助手"});
   const title = node("h2", {}, "RFC 对话助手");
@@ -76,15 +78,17 @@ export function createChat({action, markdownBody, canEdit, getDraft, resolveSele
     state.snapshot = result; state.live.clear(); state.cursor = 0; state.previews.clear(); state.selection = null; state.earlier = []; state.historyMore = null;
     await load(state);
   }));
-  const deleteThread = control("删除对话", () => {
+  const deleteThread = control("删除对话", async () => {
     const state = current;
-    if (!state?.threadId || !confirm(label("删除这段对话及其编辑建议？"))) return;
-    perform(state, async () => {
-      await action("chat.delete", {thread_id: state.threadId});
+    if (!state?.threadId || state.busy) return;
+    const threadId = state.threadId;
+    await actionDialog({title: "删除对话", description: "删除这段对话及其编辑建议？", submitLabel: "删除对话", onSubmit: async () => {
+      await action("chat.delete", {thread_id: threadId});
+      if (states.get(state.rfc.id) !== state) return;
       state.threads = state.threads.filter(thread => thread.id !== state.threadId); state.threadId = state.threads[0]?.id || "";
       state.snapshot = {}; state.live.clear(); state.previews.clear(); state.cursor = 0; state.earlier = []; state.historyMore = null;
       if (state.threadId) await load(state); else render();
-    });
+    }});
   }, "quiet danger");
   const threadbar = node("div", {class: "chat-threads"}, threads, newThread, deleteThread);
   const selection = node("div", {class: "chat-selection"});
@@ -245,26 +249,18 @@ export function createChat({action, markdownBody, canEdit, getDraft, resolveSele
     if (statuses[proposal.status]) card.append(node("p", {class: "small muted"}, statuses[proposal.status]));
     const preview = state.previews.get(proposal.id);
     if (preview) {
-      card.append(node("pre", {class: "chat-diff", "data-no-translate": "", tabindex: "0"}, typeof preview.diff === "string" ? preview.diff : JSON.stringify(preview.diff, null, 2)));
-      if (preview.source_conflict) card.append(node("p", {class: "chat-source-conflict"}, "来源存在其他修改。应用会以已检查的候选版本更新当前来源，请逐项核对下面的来源差异。"));
-      if (preview.source_diff) card.append(node("details", {open: ""}, node("summary", {}, "当前来源与候选版本的差异"), node("pre", {class: "chat-diff", "data-no-translate": "", tabindex: "0"}, preview.source_diff)));
-      if (preview.plan_diff?.length) card.append(node("details", {open: ""}, node("summary", {}, "工作计划变更"), node("pre", {class: "chat-diff", "data-no-translate": ""}, preview.plan_diff.map(item => typeof item === "string" ? item : JSON.stringify(item, null, 2)).join("\n"))));
-      if (preview.source_update) card.append(node("p", {class: "small muted"}, "应用会保存新版本，并排队更新来源；来源同步状态在 RFC 页面显示。"));
-      const candidate = preview.candidate || {};
-      card.append(node("p", {class: "small muted"}, node("span", {}, "基于版本"), " ", privateText(candidate.base_revision || preview.base_revision), " · ", privateText(preview.candidate_digest?.slice(0, 12))));
-      const reason = node("input", {type: "text", placeholder: "修改原因（保存和来源更新的依据）", "aria-label": "应用建议的修改原因", value: preview.reason || ""});
-      reason.addEventListener("input", () => { preview.reason = reason.value; });
-      const apply = control(preview.source_update ? "应用并同步来源" : "应用并保存", () => applyProposal(state, proposal, preview), "primary");
-      apply.disabled = state.busy || !canEdit(state.rfc) || proposal.status !== "proposed";
-      card.append(reason, node("div", {class: "actions"}, apply));
+      card.append(node("p", {class: "proposal-ready"}, "变更已准备好，请在审阅面板中检查差异。"));
+      const review = control("审阅变更", () => reviewProposal(state, proposal, preview), "primary");
+      review.disabled = state.busy || !canEdit(state.rfc) || proposal.status !== "proposed";
+      card.append(review);
     }
     if (proposal.status === "proposed") {
-      const inspect = control(preview ? "重新检查差异" : "查看差异", () => perform(state, async () => {
+      const inspect = control(preview ? "重新检查差异" : "查看差异", async () => { await perform(state, async () => {
         const draft = getDraft(state.rfc.id), payload = {thread_id: state.threadId, proposal_id: proposal.id};
         if (draft) payload.draft_digest = draftDigest(draft.title, draft.body);
         const result = await action("chat.proposals.preview", payload);
         if (states.get(state.rfc.id) === state) { state.previews.set(proposal.id, {...result, reason: result.proposal?.reason || proposal.reason || "", editorDigest: draft ? payload.draft_digest : null}); state.fingerprint = ""; }
-      }));
+      }); const reviewed = state.previews.get(proposal.id); if (reviewed && !state.error && canEdit(state.rfc)) await reviewProposal(state, proposal, reviewed); });
       const reject = control("拒绝建议", () => perform(state, async () => { await action("chat.proposals.reject", {thread_id: state.threadId, proposal_id: proposal.id}); await load(state); }), "quiet");
       inspect.disabled = reject.disabled = state.busy;
       card.append(node("div", {class: "actions"}, inspect, reject));
@@ -272,16 +268,30 @@ export function createChat({action, markdownBody, canEdit, getDraft, resolveSele
     }
     return card;
   }
+  async function reviewProposal(state, proposal, preview) {
+    const extra = node("div", {class: "stack"});
+    const candidate = preview.candidate || {};
+    const target = state.rfc.source?.url || state.rfc.source?.identifier || state.rfc.source?.path;
+    extra.append(node("p", {class: "review-target"}, node("strong", {}, preview.source_update ? "写回目标" : "保存位置"), " · ", privateText(target || "Workspace")),
+      node("p", {class: "small muted"}, node("span", {}, "基于版本"), " · ", privateText(candidate.base_revision || preview.base_revision || state.rfc.revision)));
+    if (preview.source_conflict) extra.append(node("p", {class: "chat-source-conflict"}, "来源存在其他修改。应用会以已检查的候选版本更新当前来源，请逐项核对下面的来源差异。"));
+    extra.append(node("section", {class: "review-section"}, node("h3", {}, "RFC 正文差异"), renderDiff(typeof preview.diff === "string" ? preview.diff : JSON.stringify(preview.diff || {}, null, 2))));
+    if (preview.source_diff) extra.append(node("section", {class: "review-section"}, node("h3", {}, "当前来源与候选版本的差异"), renderDiff(preview.source_diff)));
+    if (preview.plan_diff?.length) extra.append(node("section", {class: "review-section"}, node("h3", {}, "工作计划变更"), renderDiff(preview.plan_diff.map(item => typeof item === "string" ? item : JSON.stringify(item, null, 2)).join("\n"))));
+    await actionDialog({title: "审阅 RFC 变更", description: "应用将使用这里显示的完整候选版本。", className: "review-dialog", draftKey: `proposal:${proposal.id}`, extra,
+      fields: [{name: "reason", label: "修改原因", value: preview.reason || "", required: true}], submitLabel: preview.source_update ? "应用并同步来源" : "应用并保存",
+      onSubmit: async values => { preview.reason = values.reason; await applyProposal(state, proposal, preview); }});
+  }
   async function applyProposal(state, proposal, preview) {
-    if (state.busy || !canEdit(state.rfc)) return;
+    if (state.busy || !canEdit(state.rfc) || !owner || states.get(state.rfc.id) !== state) throw Error(label("当前权限无法应用此变更。"));
     const draft = getDraft(state.rfc.id), digest = draft ? draftDigest(draft.title, draft.body) : null;
     const expectedDraft = preview.candidate?.draft_digest || preview.draft_digest || null;
     if (digest !== preview.editorDigest || (expectedDraft && digest !== expectedDraft)) {
-      state.error = label("编辑内容已变化。保留当前输入，请重新生成建议并检查差异。"); render(); return;
+      throw Error(label("编辑内容已变化。保留当前输入，请重新生成建议并检查差异。"));
     }
-    if (!preview.reason?.trim()) { state.error = label("请填写修改原因，然后应用建议。"); render(); return; }
-    if (!confirm(label(preview.source_update ? "应用已检查的差异，保存 RFC 新版本，并排队更新来源？" : "应用已检查的差异并保存 RFC 新版本？"))) return;
-    await perform(state, async () => {
+    if (!preview.reason?.trim()) throw Error(label("请填写修改原因，然后应用建议。"));
+    state.busy = true; render();
+    try {
       const payload = {thread_id: state.threadId, proposal_id: proposal.id, candidate_digest: preview.candidate_digest, reason: preview.reason.trim()};
       if (expectedDraft) payload.draft_digest = expectedDraft;
       const result = await action("chat.proposals.apply", payload);
@@ -290,7 +300,7 @@ export function createChat({action, markdownBody, canEdit, getDraft, resolveSele
       if (result.id) { state.rfc = result; await onApply(result, {draftDigest: digest}); }
       onNotice?.(label(result.source_update ? "RFC 新版本已保存；来源更新已排队。" : "RFC 新版本已保存。"));
       await load(state);
-    });
+    } finally { state.busy = false; render(); schedule(); }
   }
   function render() {
     layout(); const state = current;
@@ -327,20 +337,23 @@ export function createChat({action, markdownBody, canEdit, getDraft, resolveSele
         more.disabled = state.busy; items.push(more);
       }
       const seen = new Set();
+      const displayed = new Set();
       for (const message of [...state.earlier, ...(snapshot.messages || [])]) {
         if (seen.has(message.id)) continue; seen.add(message.id);
         const body = markdownBody(message.content || "", state.rfc.source?.url); body.setAttribute("data-no-translate", "");
         items.push(node("article", {class: `chat-message chat-${message.role}`}, node("h3", {}, message.role === "user" ? "你" : "RFC 助手"), body));
+        if (message.role === "assistant") for (const proposal of snapshot.proposals || []) if (proposal.job_id === message.job_id) { items.push(renderProposal(state, proposal)); displayed.add(proposal.id); }
       }
       for (const [jobId, text] of state.live) {
         const body = node("pre", {class: "chat-stream", "data-no-translate": ""}, text);
         items.push(node("article", {class: "chat-message chat-assistant", "data-job-id": jobId}, node("h3", {}, "RFC 助手"), body));
       }
-      for (const proposal of [...(snapshot.proposals || [])].sort((left, right) => left.created - right.created || left.id.localeCompare(right.id))) items.push(renderProposal(state, proposal));
+      for (const proposal of [...(snapshot.proposals || [])].filter(proposal => !displayed.has(proposal.id)).sort((left, right) => left.created - right.created || left.id.localeCompare(right.id))) items.push(renderProposal(state, proposal));
       for (const job of snapshot.jobs || []) if (["failed", "requires_reauthorization", "cancelled"].includes(job.status)) {
         const retry = control("重试", () => perform(state, async () => absorb(state, await action("chat.retry", {thread_id: state.threadId, job_id: job.id}))));
-        retry.disabled = state.busy || Boolean(active);
-        items.push(node("div", {class: "chat-job-error"}, node("span", {}, job.status === "cancelled" ? "生成已停止。" : job.status === "requires_reauthorization" ? "授权已变化，请重新登录后重试。" : "回复生成失败，可以重试。"), job.error ? privateText(job.error) : null, retry));
+        const quota = job.error_code === "model_quota_exceeded";
+        retry.disabled = state.busy || Boolean(active) || quota;
+        items.push(node("div", {class: "chat-job-error"}, node("span", {}, quota ? "GLM 额度已用尽。请等待额度恢复或联系管理员；现有记录和编辑均已保留。" : job.status === "cancelled" ? "生成已停止。" : job.status === "requires_reauthorization" ? "授权已变化，请重新登录后重试。" : "回复生成失败，可以重试。"), job.error ? privateText(job.error) : null, retry));
       }
       log.replaceChildren(...items); applyLocale(log);
       requestAnimationFrame(() => { if (current !== state) return; log.scrollTop = bottom ? log.scrollHeight : scroll; state.scroll = log.scrollTop; });
@@ -361,9 +374,14 @@ export function createChat({action, markdownBody, canEdit, getDraft, resolveSele
       schedule();
     },
     select(rfc, target) { this.context(rfc); current.selection = target; current.error = ""; setCollapsed(false); render(); input.focus(); },
-    mount(target = mount) { target.append(root); layout(); },
+    mount(target = defaultMount) { (target?.isConnected ? target : mount).append(root); layout(); },
+    setDefaultMount(target) { defaultMount = target || mount; this.mount(defaultMount); },
+    forget(rfcId) {
+      states.delete(rfcId);
+      if (current?.rfc.id === rfcId) { current = context = null; input.value = ""; log.replaceChildren(); collapsed = true; render(); schedule(); }
+    },
     open() { setCollapsed(false); render(); },
     refresh: render,
-    reset() { this.session(null); this.mount(); },
+    reset() { defaultMount = mount; this.session(null); this.mount(); },
   };
 }

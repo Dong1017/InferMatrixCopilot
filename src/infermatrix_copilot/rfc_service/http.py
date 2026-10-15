@@ -9,6 +9,8 @@ import ipaddress
 import json
 import gzip
 import hashlib
+import time
+import uuid
 from functools import lru_cache
 from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -16,7 +18,7 @@ from importlib.resources import files
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from .models import SESSION_TTL_SECONDS, RFCError
+from .models import REQUEST_ID, SESSION_TTL_SECONDS, RFCError
 
 COOKIE_NAME = "imrfc_session"
 MAX_BODY_BYTES = 1024 * 1024
@@ -34,12 +36,17 @@ _STATIC = {
     "/roadmap-locale.mjs": ("roadmap-locale.mjs", "text/javascript; charset=utf-8"),
     "/roadmap-chat.mjs": ("roadmap-chat.mjs", "text/javascript; charset=utf-8"),
     "/roadmap-mermaid.js": ("roadmap-mermaid.js", "text/javascript; charset=utf-8"),
+    "/roadmap-ui.mjs": ("roadmap-ui.mjs", "text/javascript; charset=utf-8"),
+    "/roadmap-drafts.mjs": ("roadmap-drafts.mjs", "text/javascript; charset=utf-8"),
+    "/roadmap-ui-catalog.mjs": ("roadmap-ui-catalog.mjs", "text/javascript; charset=utf-8"),
+    "/roadmap-workspace.mjs": ("roadmap-workspace.mjs", "text/javascript; charset=utf-8"),
+    "/roadmap-ui.css": ("roadmap-ui.css", "text/css; charset=utf-8"),
     "/style.css": ("style.css", "text/css; charset=utf-8"),
 }
 _COLLECTIONS = {
     "repositories": "repositories.list", "rfcs": "rfcs.list",
     "users": "users.list", "tokens": "tokens.list",
-    "operations": "operations.list", "audit": "audit.list",
+    "operations": "operations.list", "audit": "audit.list", "grants": "grants.list",
 }
 _CSP = (
     "default-src 'self'; script-src 'self'; style-src 'self'; "
@@ -111,6 +118,7 @@ class RFCRequestHandler(BaseHTTPRequestHandler):
     def _send(self, status: int, body: bytes = b"", *, content_type: str = "application/json; charset=utf-8",
               headers: dict[str, str] | None = None) -> None:
         headers = dict(headers or {})
+        headers.setdefault("X-Request-ID", REQUEST_ID.get() or uuid.uuid4().hex)
         if status == 200 and len(body) >= 1024 and "Content-Encoding" not in headers and _accepts_gzip(self.headers.get("Accept-Encoding", "")):
             body = gzip.compress(body, compresslevel=5, mtime=0)
             headers["Content-Encoding"] = "gzip"
@@ -136,9 +144,10 @@ class RFCRequestHandler(BaseHTTPRequestHandler):
 
     def _error(self, error: RFCError) -> None:
         status = error.status if 400 <= error.status <= 599 else 500
-        self._json({"error": {"code": error.code, "message": str(error)}}, status)
+        self._json({"error": {"code": error.code, "message": str(error), "request_id": REQUEST_ID.get()}}, status)
 
     def _run(self, callback: Any) -> None:
+        token = REQUEST_ID.set(uuid.uuid4().hex)
         try:
             callback()
         except RFCError as exc:
@@ -147,7 +156,9 @@ class RFCRequestHandler(BaseHTTPRequestHandler):
             pass
         except Exception:
             # Unexpected exceptions may contain credentials or private content.
-            self._json({"error": {"code": "internal_error", "message": "The request could not be completed"}}, 500)
+            self._json({"error": {"code": "internal_error", "message": "The request could not be completed", "request_id": REQUEST_ID.get()}}, 500)
+        finally:
+            REQUEST_ID.reset(token)
 
     def _path(self) -> tuple[str, dict[str, str]]:
         parts = urlsplit(self.path)
@@ -215,7 +226,7 @@ class RFCRequestHandler(BaseHTTPRequestHandler):
             self._check_origin()
         return self.server.service.authenticate_session(session)
 
-    def _session_cookie(self, secret: str, *, revoke: bool = False) -> str:
+    def _session_cookie(self, secret: str, *, revoke: bool = False, expires: float | None = None) -> str:
         cookies = SimpleCookie()
         cookies[COOKIE_NAME] = "" if revoke else secret
         morsel = cookies[COOKIE_NAME]
@@ -224,11 +235,18 @@ class RFCRequestHandler(BaseHTTPRequestHandler):
         morsel["samesite"] = "Strict"
         if self.server.public_origin.startswith("https://"):
             morsel["secure"] = True
-        morsel["max-age"] = "0" if revoke else str(SESSION_TTL_SECONDS)
+        remaining = SESSION_TTL_SECONDS
+        if expires is not None:
+            clock = getattr(self.server.service, "clock", time.time)
+            remaining = max(0, min(remaining, int(expires - clock())))
+        morsel["max-age"] = "0" if revoke else str(remaining)
         return morsel.OutputString()
 
     def _get(self) -> None:
         path, query = self._path()
+        if path in {"/healthz", "/api/v1/healthz"}:
+            self._json({"ok": True})
+            return
         if path == "/roadmap-languages.json":
             self._json(self.server.service.translations.public_ui(query.get("language", "en")))
             return
@@ -252,6 +270,8 @@ class RFCRequestHandler(BaseHTTPRequestHandler):
         payload = dict(query)
         if path in {"/api/v1/me", "/api/v1/capabilities"}:
             action = path.rsplit("/", 1)[-1]
+        elif path in {"/api/v1/service/status", "/api/v1/service/diagnostics"}:
+            action = "service." + path.rsplit("/", 1)[-1]
         elif path.startswith("/api/v1/"):
             segments = path[len("/api/v1/"):].split("/")
             if len(segments) == 1 and segments[0] in _COLLECTIONS:
@@ -291,7 +311,7 @@ class RFCRequestHandler(BaseHTTPRequestHandler):
             secret, principal = self.server.service.create_session(token)
             # Only the browser cookie receives the secret; responses contain identity.
             identity = principal.to_dict() if hasattr(principal, "to_dict") else dict(principal)
-            self._json({"principal": identity}, headers={"Set-Cookie": self._session_cookie(secret)})
+            self._json({"principal": identity}, headers={"Set-Cookie": self._session_cookie(secret, expires=getattr(principal, "expires", None))})
             return
         principal = self._principal(mutation=True)
         if not path.startswith("/api/v1/actions/"):
@@ -327,7 +347,7 @@ class RFCRequestHandler(BaseHTTPRequestHandler):
         self._run(self._delete)
 
     def do_OPTIONS(self) -> None:
-        self._error(RFCError("Cross-origin requests are not supported", 405, "method_not_allowed"))
+        self._run(lambda: self._error(RFCError("Cross-origin requests are not supported", 405, "method_not_allowed")))
 
 
 def create_server(service: Any, host: str = "127.0.0.1", port: int = 0,
@@ -345,15 +365,18 @@ def create_server(service: Any, host: str = "127.0.0.1", port: int = 0,
         raise ValueError("A non-loopback listener requires an HTTPS public URL")
     else:
         origin = ""
+    class RFCThreadingServer(ThreadingHTTPServer):
+        request_queue_size = 128
+
     if ":" in host:
         import socket
 
-        class IPv6Server(ThreadingHTTPServer):
+        class IPv6Server(RFCThreadingServer):
             address_family = socket.AF_INET6
 
         server_class = IPv6Server
     else:
-        server_class = ThreadingHTTPServer
+        server_class = RFCThreadingServer
     server = server_class((host, port), RFCRequestHandler)
     server.daemon_threads = True
     server.service = service

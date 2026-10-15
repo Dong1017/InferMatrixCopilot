@@ -206,3 +206,25 @@ def test_protected_identifiers_remain_valid_next_to_chinese():
 def test_interface_catalog_includes_labels_inside_dynamic_templates():
     from infermatrix_copilot.rfc_service.translations import ui_strings
     assert {'工作空间', 'RFC 详情', '负责人', '验收', '实现'} <= set(ui_strings())
+
+
+def test_translation_quota_failure_keeps_cached_strings_and_has_safe_status(workspace):
+    from infermatrix_copilot.providers.zcode import ZCodeFailure
+    service, p, repo, rfc, translator = workspace
+    service.translations.ui = []
+    get(service, p, rfc)
+    process_all(service)
+    before = get(service, p, rfc)["translations"]["strings"]
+    fresh = service.dispatch(p, "rfcs.update", {"rfc_id": rfc["id"], "expected_revision": rfc["revision"],
+        "body": rfc["body"] + "\nNew statement to translate.\n"})
+    def fail(entries):
+        raise ZCodeFailure("model_quota_exceeded", retryable=False)
+    translator.translate = fail
+    get(service, p, fresh)
+    assert service.translations.process()["ready"] == 0
+    after = get(service, p, fresh)["translations"]
+    assert all(after["strings"].get(key) == value for key, value in before.items())
+    assert after["last_model_error"]["code"] == "model_quota_exceeded"
+    assert service.dispatch(p, "service.status")["translations"]["last_model_error"]["retryable"] is False
+    calls = len(translator.calls)
+    assert service.translations.process()["processed"] == 0 and len(translator.calls) == calls

@@ -58,6 +58,17 @@ def _parser() -> argparse.ArgumentParser:
     imp.add_argument("--source", help="Optional SourceRef JSON file")
     listing = commands.add_parser("list")
     listing.add_argument("--repo", dest="repo_id", default="")
+    listing.add_argument("--query", default="")
+    listing.add_argument("--state", default="")
+    listing.add_argument("--enrolled", choices=("true", "false"))
+    listing.add_argument("--offset", type=int)
+    listing.add_argument("--limit", type=int)
+    commands.add_parser("service-status", help="Read worker and provider availability")
+    commands.add_parser("diagnostics", help="Read administrator operational diagnostics")
+    grants = commands.add_parser("grants", help="Read administrator repository and RFC access summaries")
+    grants.add_argument("--repo", dest="repo_id", default="")
+    check = commands.add_parser("check-repository", help="Verify configured repository access without writing the source")
+    check.add_argument("repo_id")
     for name in ("status", "next", "enroll", "decision", "work", "export"):
         command = commands.add_parser(name)
         command.add_argument("rfc_id")
@@ -145,41 +156,73 @@ def main(argv: list[str] | None = None) -> int:
 
             server = create_server(service, host=args.host, port=args.port, public_url=args.public_url)
             stop = threading.Event()
+            from .runtime import WorkerMonitor, wait_for_work
+            monitor = WorkerMonitor(service, stop)
             def worker():
+                next_scan = 0
                 while not stop.is_set():
+                    service.store.work_available.clear()
+                    monitor.state("operations", busy=True)
+                    failed = False
                     try:
-                        _run_cycle(service, 10)
+                        if time.monotonic() >= next_scan:
+                            service.sync_due()
+                            next_scan = time.monotonic() + min(30, args.interval)
+                        service.process_pending(limit=10)
                     except Exception:
+                        failed = True
                         print("RFC reconciliation failed; inspect the operation and audit history", file=sys.stderr)
-                    stop.wait(args.interval)
+                    finally:
+                        monitor.state("operations", error=failed)
+                    wait_for_work(service, stop, args.interval)
             thread = None
             translation_thread = None
             chat_threads = []
             if not args.no_worker:
-                thread = threading.Thread(target=worker, daemon=True)
+                monitor.register("operations", "operations")
+                if service.translations.enabled:
+                    monitor.register("translations", "translations")
+                if service.chat.enabled:
+                    for index in range(2):
+                        monitor.register("chat", f"chat-{index}")
+                monitor.start()
+                thread = threading.Thread(target=worker, name="rfc-operations", daemon=True)
                 thread.start()
                 if service.translations.enabled:
                     def translate_worker():
+                        next_reconcile = 0
                         while not stop.is_set():
+                            monitor.state("translations", busy=True)
+                            failed = False
                             try:
-                                service.translations.reconcile()
-                                result = service.translations.process()
+                                if time.monotonic() >= next_reconcile:
+                                    service.translations.reconcile()
+                                    next_reconcile = time.monotonic() + 30
+                                service.translations.process()
                             except Exception:
-                                result = {"processed": 0}
+                                failed = True
                                 print("RFC translation unavailable; source views remain accessible", file=sys.stderr)
-                            stop.wait(1 if result["processed"] else 5)
-                    translation_thread = threading.Thread(target=translate_worker, daemon=True)
+                            finally:
+                                monitor.state("translations", error=failed)
+                            stop.wait(1)
+                    translation_thread = threading.Thread(target=translate_worker, name="rfc-translations", daemon=True)
                     translation_thread.start()
                 if service.chat.enabled:
-                    def chat_worker_loop():
+                    def chat_worker_loop(index):
+                        name = f"chat-{index}"
                         while not stop.is_set():
+                            monitor.state(name, busy=True)
+                            failed = False
                             try:
                                 service.chat.process()
                             except Exception:
+                                failed = True
                                 print("RFC chat unavailable; inspect the authenticated conversation status", file=sys.stderr)
+                            finally:
+                                monitor.state(name, error=failed)
                             stop.wait(1)
                     for index in range(2):
-                        chat_thread = threading.Thread(target=chat_worker_loop, name=f"rfc-chat-{index}", daemon=True)
+                        chat_thread = threading.Thread(target=chat_worker_loop, args=(index,), name=f"rfc-chat-{index}", daemon=True)
                         chat_thread.start()
                         chat_threads.append(chat_thread)
             print(f"RFC service: {server.public_url}", flush=True)
@@ -194,6 +237,7 @@ def main(argv: list[str] | None = None) -> int:
                     translation_thread.join(timeout=2)
                 for chat_thread in chat_threads:
                     chat_thread.join(timeout=2)
+                monitor.join()
             return 0
         client = RFCClient(state_dir=state, service_url=service_url,
                            token=os.environ.get(args.token_env, ""), config_path=args.config)
@@ -222,7 +266,19 @@ def main(argv: list[str] | None = None) -> int:
                 payload["source"] = _data(args.source)
             result = client.draft(payload)
         elif command == "list":
-            result = client.list_rfcs(args.repo_id)
+            payload = {"repo_id": args.repo_id, "query": args.query, "state": args.state, "view": "summary"}
+            for key in ("enrolled", "offset", "limit"):
+                if getattr(args, key) is not None:
+                    payload[key] = getattr(args, key)
+            result = client.dispatch("rfcs.list", payload)
+        elif command == "service-status":
+            result = client.dispatch("service.status")
+        elif command == "diagnostics":
+            result = client.dispatch("service.diagnostics")
+        elif command == "grants":
+            result = client.dispatch("grants.list", {"repo_id": args.repo_id})
+        elif command == "check-repository":
+            result = client.dispatch("repositories.check", {"repo_id": args.repo_id})
         elif command == "status":
             result = client.status(args.rfc_id)
         elif command == "next":

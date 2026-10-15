@@ -507,6 +507,9 @@ def build_mcp(
         validated answer. Review chat.proposals.preview, then explicitly confirm
         chat.proposals.apply with its exact candidate_digest. Existing sources
         are synchronized by a separate operation; unsourced drafts stay local.
+        Manual source edits use rfcs.changes.preview then rfcs.changes.apply,
+        with the exact preview_id/candidate_digest and a stable idempotency_key.
+        service.status reports readiness; repositories.check verifies a connection.
         Chat cannot pass acceptance or waive criteria.
         """
         return rfc_call(action, payload)

@@ -205,6 +205,17 @@ class _HTTPProvider:
         self._token = token
         self._transport = transport or _urllib_transport
 
+    def check_repository(self, repository: str) -> dict[str, Any]:
+        owner, name = self._repo(repository)
+        item, _ = self._json("GET", f"/repos/{quote(owner, safe='')}/{quote(name, safe='')}")
+        if not isinstance(item, dict) or not (item.get("id") or item.get("full_name") or item.get("path_with_namespace")):
+            raise ProviderError("Provider returned an invalid repository response")
+        permissions = item.get("permissions")
+        writable = None
+        if isinstance(permissions, dict):
+            writable = any(permissions.get(key) is True for key in ("admin", "push", "write"))
+        return {"readable": True, "writable": writable}
+
     def _repo(self, repository: str) -> tuple[str, str]:
         parts = repository.split("/") if isinstance(repository, str) else []
         if len(parts) != 2 or any(part in ("", ".", "..") or not _COMPONENT.fullmatch(part) for part in parts):
@@ -447,6 +458,16 @@ class LocalProvider:
             metadata = self.roots[repository].stat()
             self._root_inodes[repository] = (metadata.st_dev, metadata.st_ino)
 
+    def check_repository(self, repository: str) -> dict[str, Any]:
+        root = self._root(repository)
+        metadata = root.stat()
+        if not root.is_dir() or (metadata.st_dev, metadata.st_ino) != self._root_inodes[repository]:
+            raise RFCError("Local workspace root changed", 409, "source_root_changed")
+        readable = os.access(root, os.R_OK | os.X_OK)
+        if not readable:
+            raise RFCError("Local workspace is unreadable", 403, "source_root_forbidden")
+        return {"readable": True, "writable": os.access(root, os.W_OK | os.X_OK)}
+
     def _root(self, repository: str) -> Path:
         if repository not in self.roots:
             raise RFCError("Local repository is outside the configured roots", 403, "source_root_forbidden")
@@ -544,7 +565,7 @@ class LocalProvider:
         path = str(PurePosixPath(ref.path or ref.identifier))
         source = self._ref(ref.repository, path)
         title = re.search(r"^#\s+(.+)$", body, re.M)
-        return {"source": source.to_dict(), "title": title[1] if title else PurePosixPath(path).stem, "body": body,
+        return {"source": source.to_dict(), "title": title[1].rstrip("\r") if title else PurePosixPath(path).stem, "body": body,
                 "revision": _digest(raw), "url": "", "state": "unknown", "native_state": "markdown",
                 "head_sha": "", "author": "", "owner": "", "owners": [], "reviewers": [],
                 "updated_at": datetime.fromtimestamp(modified, timezone.utc).isoformat()}
@@ -627,7 +648,7 @@ class LocalProvider:
         path = ref.path or ref.identifier
         if title is not None:
             heading = re.search(r"^#\s+(.+)$", body, re.M)
-            body_title = heading[1] if heading else PurePosixPath(path).stem
+            body_title = heading[1].rstrip("\r") if heading else PurePosixPath(path).stem
             if body_title != _title(title):
                 raise RFCError("The reviewed local RFC title must match its Markdown heading", 409, "preview_mismatch")
         with self._parent(ref.repository, path) as (parent, leaf, target):

@@ -12,6 +12,7 @@ from functools import lru_cache
 from types import SimpleNamespace
 
 from .models import RFCError
+from .model_status import record_model_status, safe_model_error
 
 _CJK = re.compile(r"[\u3400-\u9fff]")
 _PROTECTED = re.compile(r"https?://[^\s<>]+|`[^`]*`|⟪S\d+⟫|(?<![A-Za-z0-9_])[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\(\)|/[A-Za-z0-9_/-]+|(?<![A-Za-z0-9_])[A-Za-z]+_[A-Za-z_]+(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])[A-Z][A-Z_-]*\d+[A-Za-z0-9_-]*(?![A-Za-z0-9_])|\d+(?:[.,]\d+)*")
@@ -81,7 +82,9 @@ def source_strings(view, all_suggestions=False):
 def ui_strings():
     """Only shipped interface literals enter the public catalog, never user data."""
     result = set()
-    for name in ("app.js", "roadmap-graph.mjs", "roadmap-components.mjs", "roadmap-chat.mjs"):
+    for name in ("app.js", "roadmap-graph.mjs", "roadmap-components.mjs", "roadmap-chat.mjs", "roadmap-ui.mjs", "roadmap-workspace.mjs"):
+        if not files(__package__).joinpath("web", name).is_file():
+            continue
         source = files(__package__).joinpath("web", name).read_text(encoding="utf-8")
         # Read JS literal tokens, including dynamic UI templates, without evaluating code.
         matches = list(re.finditer(r'''(["'`])((?:\\.|(?!\1)[\s\S])*?)\1''', source))
@@ -103,6 +106,13 @@ def ui_strings():
                 if key in ("placeholder", "aria-label", "title") and value and _CJK.search(value): result.add(value)
     Interface().feed(files(__package__).joinpath("web", "index.html").read_text(encoding="utf-8"))
     return sorted(result)
+
+
+@lru_cache(maxsize=1)
+def bundled_ui():
+    """The public shipped UI catalog contains no workspace/user content."""
+    source = files(__package__).joinpath("web", "roadmap-ui-catalog.mjs").read_text(encoding="utf-8")
+    return json.loads(source.split("export const englishUI = ", 1)[1].rstrip(";\n"))
 
 
 class ZcodeTranslator:
@@ -152,6 +162,9 @@ class Translations:
         self.service = service
         self.translator = translator
         self.lock = threading.Lock()
+        self.pending_lock = threading.Lock()
+        self.requested = {}
+        self.requested_size = 0
         self.ui = ui_strings()
 
     @property
@@ -161,6 +174,8 @@ class Translations:
         if not self.enabled: return
         now = self.service.clock()
         for text in texts:
+            if scope == "_ui" and text in bundled_ui():
+                continue
             segment = hashlib.sha256(text.encode()).hexdigest()
             con.execute("""INSERT INTO translations(scope,segment,language,source,credential_id,updated) VALUES (?,?,?,?,?,?)
                 ON CONFLICT(scope,segment,language) DO UPDATE SET credential_id=excluded.credential_id,
@@ -173,24 +188,68 @@ class Translations:
     def snapshot(self, con, principal, view, language):
         if language not in ("en", "zh"): raise RFCError("Unsupported language")
         texts = source_strings(view)
-        self.ensure(con, view["id"], texts, principal.credential_id)
+        if getattr(con, "read_only", False):
+            self.request(view["id"], texts, principal.credential_id)
+        else:
+            self.ensure(con, view["id"], texts, principal.credential_id)
         return self._snapshot(con, view["id"], texts, language)
 
     def _snapshot(self, con, scope, texts, language):
         wanted = {text for text in texts if target_language(text) == language}
         rows = {row["source"]: row for row in con.execute("SELECT source,translated,status,model,updated FROM translations WHERE scope=? AND language=?", (scope, language)) if row["source"] in wanted}
         translated = {text: row["translated"] for text, row in rows.items() if row["status"] == "ready"}
+        state = con.execute("SELECT value FROM metadata WHERE key='model_status:translations'").fetchone()
+        model_status = json.loads(state["value"]) if state else {}
         failed = sum(row["status"] == "failed" for row in rows.values())
         return {"language": language, "enabled": self.enabled, "total": len(wanted), "ready": len(translated),
                 "failed": failed, "pending": len(wanted) - len(translated) - failed, "strings": translated,
                 "updated": max((row["updated"] for row in rows.values() if row["status"] == "ready"), default=None),
-                "backend": "zcode", "model": getattr(self.translator, "model", "")}
+                "backend": "zcode", "model": getattr(self.translator, "model", ""),
+                "last_model_error": model_status.get("last_model_error")}
+
+    def request(self, scope, texts, credential=""):
+        """Read requests never reserve the SQLite writer to schedule translation."""
+        if not self.enabled:
+            return
+        with self.pending_lock:
+            key = (scope, credential)
+            # Reconciliation remains the durable fallback if a process exits or
+            # a large burst fills this bounded acceleration queue.
+            values = list(texts)
+            prior_size = sum(len(text) for text in self.requested.get(key, []))
+            next_size = self.requested_size - prior_size + sum(len(text) for text in values)
+            if (key in self.requested or len(self.requested) < 128) and next_size <= 8000000:
+                self.requested[key] = values
+                self.requested_size = next_size
+
+    def _flush_requested(self):
+        with self.pending_lock:
+            requested, self.requested = self.requested, {}
+            self.requested_size = 0
+        if not requested:
+            return
+        with self.service.store.transaction() as con:
+            for (scope, credential), texts in requested.items():
+                try:
+                    allowed = self._allowed(con, scope, credential)
+                except RFCError:
+                    continue
+                self.ensure(con, scope, [text for text in texts if text in allowed], credential)
 
     def public_ui(self, language):
         if language not in ("zh", "en"): raise RFCError("Unsupported language")
-        with self.service.store.transaction() as con:
-            self.ensure(con, "_ui", self.ui)
-            return self._snapshot(con, "_ui", self.ui, language)
+        self.request("_ui", [text for text in self.ui if text not in bundled_ui()])
+        with self.service.store.read() as con:
+            snapshot = self._snapshot(con, "_ui", self.ui, language)
+            shipped = {text: translated for text, translated in bundled_ui().items()
+                       if text in self.ui and target_language(text) == language}
+            snapshot["strings"] = {**snapshot["strings"], **shipped}
+            snapshot["ready"] = len(snapshot["strings"])
+            failed = con.execute("SELECT source FROM translations WHERE scope='_ui' AND language=? AND status='failed'", (language,))
+            snapshot["failed"] = sum(row["source"] in self.ui and row["source"] not in snapshot["strings"] for row in failed)
+            snapshot["pending"] = snapshot["total"] - snapshot["ready"] - snapshot["failed"]
+            snapshot["catalog"] = "bundled"
+            return snapshot
 
     def reconcile(self):
         """Queue current authorized RFC strings. Model I/O is handled outside the DB."""
@@ -211,7 +270,7 @@ class Translations:
                     break
 
     def _allowed(self, con, scope, credential):
-        if scope == "_ui": return set(self.ui)
+        if scope == "_ui": return set(self.ui) - set(bundled_ui())
         principal = self.service._principal(con, credential)
         row = self.service._rfc(con, principal, scope)
         if json.loads(row["model"]).get("writer_id", self.service.writer_id) != self.service.writer_id: raise RFCError("Different RFC writer")
@@ -220,6 +279,7 @@ class Translations:
     def process(self, max_characters=8000):
         if not self.enabled or not self.lock.acquire(blocking=False): return {"processed": 0}
         try:
+            self._flush_requested()
             now, batch, worker = self.service.clock(), [], uuid.uuid4().hex
             with self.service.store.transaction() as con:
                 rows = con.execute("""SELECT * FROM translations WHERE (status IN ('pending','failed') AND retry_at<=?)
@@ -239,8 +299,12 @@ class Translations:
                     batch.append(dict(row)); size += len(row["source"]); identity = key
                     con.execute("UPDATE translations SET status='running',worker=?,lease_until=?,attempts=attempts+1 WHERE scope=? AND segment=? AND language=?", (worker, now + 300, row["scope"], row["segment"], row["language"]))
             if not batch: return {"processed": 0}
-            try: values = self.translator.translate(batch)
-            except Exception: values = {}
+            model_error = None
+            try:
+                values = self.translator.translate(batch)
+            except Exception as error:
+                values = {}
+                model_error = safe_model_error(error)
             ready = 0
             with self.service.store.transaction() as con:
                 try: current = self._allowed(con, *identity)
@@ -254,6 +318,10 @@ class Translations:
                     con.execute("""UPDATE translations SET status=?,translated=?,model=?,updated=?,retry_at=?,lease_until=0
                         WHERE scope=? AND segment=? AND language=? AND worker=? AND status='running' AND lease_until>?""",
                         (status, value if status == "ready" else "", getattr(self.translator, "model", ""), self.service.clock(),
-                         self.service.clock() + min(3600, 60 * 2 ** min(item["attempts"], 6)), item["scope"], item["segment"], item["language"], worker, self.service.clock()))
+                         self.service.clock() + (3600 if model_error and not model_error["retryable"] else min(3600, 60 * 2 ** min(item["attempts"], 6))), item["scope"], item["segment"], item["language"], worker, self.service.clock()))
+                if model_error:
+                    record_model_status(self.service, con, "translations", error=model_error)
+                elif values:
+                    record_model_status(self.service, con, "translations")
             return {"processed": len(batch), "ready": ready}
         finally: self.lock.release()

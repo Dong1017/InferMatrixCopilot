@@ -26,3 +26,13 @@ Enroll an existing source with `rfcs.enroll` using `{repo_id, source}` or enroll
 Read `rfc_status(rfc_id)` or `rfcs.status` for compact progress and suggestion counts. Read source prose with `rfcs.get`. Inspect candidate work through `rfcs.suggestions` with `{rfc_id, offset: 0, limit: 50}` and advance the offset while needed; optional `status` and `query` narrow the results. Show implementation facts, acceptance verdicts, freshness, blockers, and `next_actions` together. A merged PR is implementation evidence; it does not prove performance, integration, deployment, or acceptance. Use `rfcs.sync` to queue fresh source evidence and report stale/unavailable sources honestly. If `sync_status` is `requires_reauthorization`, a maintainer must enroll using a current credential before recurring tracking resumes.
 
 Use `rfcs.work` for work/attachment changes and `rfcs.decision` for human acceptance decisions, with supporting evidence and reasons. Fetch the current RFC before editing and preserve its IDs and revision. Use `rfcs.export` when the user needs a portable artifact. Do not create a second tracking ledger in knowledge pages or move an existing Personal-Agent deployment merely to use this skill.
+
+For manual changes to a source-backed RFC, call `rfcs.changes.preview` with the
+current `expected_revision` and complete candidate title/body. Present its body,
+plan and source differences and write target. Only after explicit confirmation,
+call `rfcs.changes.apply` with that exact `preview_id`, `candidate_digest`, a
+stable `idempotency_key` and the user's reason. Reuse the key on retry. A
+`review_required` response means the source-backed edit needs this workflow;
+never bypass it with a second local tracking copy. Follow `source_update` until
+synced or help resolve its conflict. `service.status` shows service readiness;
+authorized administrators can inspect `service.diagnostics` and `grants.list`.

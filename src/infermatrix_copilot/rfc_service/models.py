@@ -1,10 +1,12 @@
 """Transport-neutral RFC identities and errors; no provider or server imports."""
 from __future__ import annotations
 
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass
 from typing import Any
 
 SESSION_TTL_SECONDS = 30 * 24 * 60 * 60
+REQUEST_ID = ContextVar("rfc_request_id", default="")
 
 
 class RFCError(Exception):
@@ -26,9 +28,16 @@ class Principal:
     name: str
     admin: bool = False
     credential_id: str = ""
+    credential_expires: float | None = None
+    session_expires: float | None = None
+
+    @property
+    def expires(self) -> float | None:
+        values = [value for value in (self.credential_expires, self.session_expires) if value is not None]
+        return min(values) if values else None
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return {**asdict(self), "expires": self.expires}
 
 
 @dataclass(frozen=True)

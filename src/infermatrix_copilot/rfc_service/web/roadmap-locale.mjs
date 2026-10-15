@@ -1,8 +1,9 @@
 /* Public language preference only; translated RFC text stays in session memory. */
+import {englishUI} from "/roadmap-ui-catalog.mjs";
 let language = new URL(location.href).searchParams.get("lang");
 try { language ||= localStorage.getItem("imrfc.language"); } catch {}
 language = language === "en" ? "en" : "zh";
-let interfaceStrings = {}, privateStrings = {}, templates = [], version = 0;
+let interfaceStrings = language === "en" ? {...englishUI} : {}, privateStrings = {}, templates = [], version = 0;
 const originals = new WeakMap(), memo = new Map();
 export const currentLanguage = () => language;
 const escape = value => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -75,20 +76,27 @@ export function applyLocale(root) {
   while (walker.nextNode()) visit(walker.currentNode);
 }
 
+let catalogRequest = null;
 export async function initializeLocale() {
+  const requestedLanguage = language;
   document.documentElement.lang = language === "zh" ? "zh-CN" : "en";
-  const response = await fetch(`/roadmap-languages.json?language=${language}`, {cache: "no-store"});
-  if (response.ok) {
-    const next = (await response.json()).strings || {};
-    if (!sameStrings(interfaceStrings, next)) { interfaceStrings = next; reset(); }
-  }
   applyLocale(document.body);
   document.querySelectorAll("[data-language]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.language === language)));
+  // The shipped catalog is usable immediately; a failed translation service
+  // must never delay authentication or navigation.
+  if (catalogRequest?.language === requestedLanguage) return;
+  const request = {language: requestedLanguage}; catalogRequest = request;
+  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 5000);
+  fetch(`/roadmap-languages.json?language=${requestedLanguage}`, {cache: "no-store", signal: controller.signal}).then(async response => {
+    if (!response.ok || language !== requestedLanguage) return;
+    const next = {...(requestedLanguage === "en" ? englishUI : {}), ...((await response.json()).strings || {})};
+    if (language === requestedLanguage && !sameStrings(interfaceStrings, next)) { interfaceStrings = next; reset(); applyLocale(document.body); }
+  }).catch(() => {}).finally(() => { clearTimeout(timer); if (catalogRequest === request) catalogRequest = null; });
 }
 
 export async function changeLanguage(next) {
   language = next === "en" ? "en" : "zh";
-  privateStrings = {}; reset();
+  interfaceStrings = language === "en" ? {...englishUI} : {}; privateStrings = {}; reset();
   try { localStorage.setItem("imrfc.language", language); } catch {}
   const url = new URL(location.href); url.searchParams.set("lang", language); history.replaceState(null, "", url);
   await initializeLocale();
@@ -103,4 +111,5 @@ const observer = new MutationObserver(records => {
   for (const root of roots) applyLocale(root);
 });
 observer.observe(document.body, {subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["placeholder", "aria-label", "title"]});
+reset();
 setInterval(() => initializeLocale().catch(() => {}), 30000);

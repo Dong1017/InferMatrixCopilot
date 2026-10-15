@@ -18,10 +18,12 @@ _MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 class RFCClientError(SDKError):
     """Stable transport/domain failure without credentials in its message."""
 
-    def __init__(self, message: str, *, code: str = "rfc_error", status: int = 400):
+    def __init__(self, message: str, *, code: str = "rfc_error", status: int = 400,
+                 request_id: str = ""):
         super().__init__(message)
         self.code = code
         self.status = status
+        self.request_id = request_id
 
 
 class _NoRedirect(request.HTTPRedirectHandler):
@@ -108,7 +110,7 @@ class RFCClient:
                 detail = {}
             raise RFCClientError(str(detail.get("message") or "RFC service request refused"),
                                  code=str(detail.get("code") or "http_error"),
-                                 status=exc.code) from None
+                                 status=exc.code, request_id=str(detail.get("request_id") or "")) from None
         except (error.URLError, TimeoutError, OSError):
             raise RFCClientError("RFC service unavailable", code="transport_error", status=503) from None
         if len(raw) > _MAX_RESPONSE_BYTES:
@@ -158,8 +160,9 @@ class RFCClient:
         except RFCError as exc:
             raise RFCClientError(str(exc), code=exc.code, status=exc.status) from None
 
-    def list_rfcs(self, repo_id: str = "") -> dict[str, Any]:
-        return self.dispatch("rfcs.list", {"repo_id": repo_id} if repo_id else {})
+    def list_rfcs(self, repo_id: str = "", **filters: Any) -> dict[str, Any]:
+        """List authorized RFCs, optionally using server-side paging and filters."""
+        return self.dispatch("rfcs.list", {**filters, **({"repo_id": repo_id} if repo_id else {})})
 
     def get(self, rfc_id: str) -> dict[str, Any]:
         return self.dispatch("rfcs.get", {"rfc_id": rfc_id})
@@ -206,6 +209,28 @@ class RFCClient:
     def graph(self, rfc_id: str, **group: Any) -> dict[str, Any]:
         """Merge, rename or unmerge saved view groups without replacing tasks."""
         return self.dispatch("rfcs.graph", {**group, "rfc_id": rfc_id})
+
+    def changes_preview(self, rfc_id: str, *, expected_revision: str,
+                        **candidate: Any) -> dict[str, Any]:
+        """Freeze a complete manual candidate and its exact source differences."""
+        return self.dispatch("rfcs.changes.preview", {**candidate, "rfc_id": rfc_id,
+            "expected_revision": expected_revision})
+
+    def changes_apply(self, rfc_id: str, *, preview_id: str, candidate_digest: str,
+                      idempotency_key: str, reason: str | None = None) -> dict[str, Any]:
+        """Apply only the explicitly reviewed candidate; retries use the same key."""
+        return self.dispatch("rfcs.changes.apply", {"rfc_id": rfc_id, "preview_id": preview_id,
+            "candidate_digest": candidate_digest, "idempotency_key": idempotency_key,
+            **({"reason": reason} if reason is not None else {})})
+
+    def service_status(self) -> dict[str, Any]:
+        return self.dispatch("service.status")
+
+    def check_repository(self, repo_id: str) -> dict[str, Any]:
+        return self.dispatch("repositories.check", {"repo_id": repo_id})
+
+    def grants(self, **filters: Any) -> dict[str, Any]:
+        return self.dispatch("grants.list", filters)
 
     def operation(self, operation_id: str) -> dict[str, Any]:
         return self.dispatch("operations.get", {"operation_id": operation_id})

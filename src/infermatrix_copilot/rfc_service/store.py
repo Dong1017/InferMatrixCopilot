@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
@@ -18,6 +19,10 @@ CREATE TABLE IF NOT EXISTS rfcs(id TEXT PRIMARY KEY, repo_id TEXT NOT NULL REFER
 CREATE TABLE IF NOT EXISTS rfc_grants(rfc_id TEXT NOT NULL REFERENCES rfcs(id), user_id TEXT NOT NULL REFERENCES users(id), role TEXT NOT NULL, PRIMARY KEY(rfc_id,user_id));
 CREATE TABLE IF NOT EXISTS source_snapshots(id INTEGER PRIMARY KEY, rfc_id TEXT NOT NULL REFERENCES rfcs(id), revision TEXT NOT NULL, body TEXT NOT NULL, created REAL NOT NULL, title TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS operations(id TEXT PRIMARY KEY, actor TEXT NOT NULL REFERENCES users(id), credential_id TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL, repo_id TEXT NOT NULL, rfc_id TEXT NOT NULL DEFAULT '', payload TEXT NOT NULL, idempotency_key TEXT NOT NULL, request_digest TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', result TEXT NOT NULL DEFAULT '{}', error TEXT NOT NULL DEFAULT '', created REAL NOT NULL, updated REAL NOT NULL, worker TEXT NOT NULL DEFAULT '', lease_until REAL NOT NULL DEFAULT 0, UNIQUE(actor,idempotency_key));
+CREATE INDEX IF NOT EXISTS rfcs_updated ON rfcs(updated DESC,id);
+CREATE INDEX IF NOT EXISTS rfcs_repository ON rfcs(repo_id,updated DESC);
+CREATE TABLE IF NOT EXISTS reviewed_changes(id TEXT PRIMARY KEY, actor TEXT NOT NULL REFERENCES users(id), repo_id TEXT NOT NULL REFERENCES repositories(id), rfc_id TEXT NOT NULL REFERENCES rfcs(id), candidate TEXT NOT NULL, candidate_digest TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'previewed', apply_key TEXT NOT NULL DEFAULT '', request_digest TEXT NOT NULL DEFAULT '', result TEXT NOT NULL DEFAULT '{}', created REAL NOT NULL, expires REAL NOT NULL, updated REAL NOT NULL);
+CREATE INDEX IF NOT EXISTS reviewed_changes_scope ON reviewed_changes(actor,rfc_id,created);
 CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, actor TEXT NOT NULL, action TEXT NOT NULL, repo_id TEXT NOT NULL DEFAULT '', rfc_id TEXT NOT NULL DEFAULT '', detail TEXT NOT NULL DEFAULT '{}', created REAL NOT NULL);
 CREATE INDEX IF NOT EXISTS operations_pending ON operations(status,lease_until,created);
 CREATE TABLE IF NOT EXISTS translations(scope TEXT NOT NULL, segment TEXT NOT NULL, language TEXT NOT NULL, source TEXT NOT NULL, translated TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending', credential_id TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', attempts INTEGER NOT NULL DEFAULT 0, retry_at REAL NOT NULL DEFAULT 0, lease_until REAL NOT NULL DEFAULT 0, worker TEXT NOT NULL DEFAULT '', updated REAL NOT NULL, PRIMARY KEY(scope,segment,language));
@@ -37,11 +42,17 @@ def encode(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+class RequestConnection(sqlite3.Connection):
+    """Caches belong to one SQLite snapshot and never outlive its authorization."""
+    read_only = False
+
+
 class Store:
     def __init__(self, state_dir: str | Path):
         self.root = Path(state_dir).expanduser().resolve()
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.path = self.root / "rfc.sqlite"
+        self.work_available = threading.Event()
         con = self.connect()
         try:
             con.execute("PRAGMA journal_mode=WAL")
@@ -59,7 +70,7 @@ class Store:
             pass
 
     def connect(self) -> sqlite3.Connection:
-        con = sqlite3.connect(self.path, timeout=15, isolation_level=None)
+        con = sqlite3.connect(self.path, timeout=15, isolation_level=None, factory=RequestConnection)
         con.row_factory = sqlite3.Row
         con.execute("PRAGMA foreign_keys=ON")
         con.execute("PRAGMA busy_timeout=15000")
@@ -70,6 +81,25 @@ class Store:
         con = self.connect()
         try:
             con.execute("BEGIN IMMEDIATE")
+            con.queued_work = False
+            yield con
+            con.commit()
+            if con.queued_work:
+                self.work_available.set()
+        except BaseException:
+            con.rollback()
+            raise
+        finally:
+            con.close()
+
+    @contextmanager
+    def read(self) -> Iterator[sqlite3.Connection]:
+        """A consistent WAL snapshot that never reserves the SQLite writer."""
+        con = self.connect()
+        con.read_only = True
+        try:
+            con.execute("PRAGMA query_only=ON")
+            con.execute("BEGIN")
             yield con
             con.commit()
         except BaseException:
@@ -77,6 +107,10 @@ class Store:
             raise
         finally:
             con.close()
+
+    @staticmethod
+    def wake_on_commit(con) -> None:
+        con.queued_work = True
 
     def one(self, sql: str, params: tuple = ()) -> dict | None:
         con = self.connect()
@@ -99,6 +133,10 @@ class Store:
                     (actor, action, repo_id, rfc_id, encode(detail or {}), now))
 
     def claim(self, worker: str, now: float, lease_seconds: float = 900) -> dict | None:
+        # Empty workers poll without reserving the writer. Claiming still
+        # rechecks under the transaction so independent processes remain safe.
+        if not self.one("SELECT 1 FROM operations WHERE status='pending' OR (status='running' AND lease_until<?) LIMIT 1", (now,)):
+            return None
         with self.transaction() as con:
             # Serialize operations per RFC/repository even across independent processes.
             row = con.execute("""SELECT o.* FROM operations o

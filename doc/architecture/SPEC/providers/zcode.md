@@ -1,6 +1,6 @@
 # providers/zcode.py —— 规范
 
-<!-- verified-against: 2026-10-02 -->
+<!-- verified-against: 2026-10-16 -->
 
 `LOC ~400 · harness transport（Z.AI / GLM 订阅） · refactor-status: ok`
 
@@ -8,6 +8,10 @@
 在 Z.AI OAuth 订阅认证下，通过 `zcode` CLI 跑完**一整个** agent step。
 
 ## 功能
+已识别的模型失败事件映射为只包含固定安全消息、稳定 code 和 retryable 的
+`ZCodeFailure`；额度、限流、认证和暂时不可用分别表达。未知失败保留现有 RuntimeError
+行为；分类器不把提示、原始事件或提供方错误正文暴露给 RFC 服务。
+
 headless `zcode --prompt=... --output-format stream-json --mode plan --cwd <临时目录>
 --disallowed-tools=<非读工具>`；工具桥写进临时目录的 `.zcode/config.json`；从事件流解析
 `result.response`、`result.usage`、`session.updated.modelId` 和 `tool.updated`（`kind:

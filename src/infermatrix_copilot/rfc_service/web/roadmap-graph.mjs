@@ -2,6 +2,7 @@
 export const roadmapSVGStyles = `
 svg{font-family:system-ui,sans-serif;font-size:15px;color:#0f172a}
 svg text{fill:#0f172a;font-family:system-ui,sans-serif;font-size:15px;text-anchor:middle}
+svg text tspan[data-graph-meta]{font-size:11px}
 svg .node rect,svg .node polygon,svg .node circle{fill:#f1f5f9;stroke:#64748b;stroke-width:2px}
 svg .node.implemented rect{fill:#dcfce7;stroke:#15803d}
 svg .node.accepted rect{fill:#bbf7d0;stroke:#166534;stroke-width:3px}

@@ -134,7 +134,12 @@ def test_manual_done_and_groups_survive_sync_editor_and_restart(workspace):
     forged = copy.deepcopy(result["features"])
     forged[0]["implementation_override"] = {"state": "planned", "actor": "forged"}
     result = service.dispatch(admin, "rfcs.update", {"rfc_id": rfc["id"], "expected_revision": result["revision"],
-        "body": result["body"] + "\nEditor note.\n", "features": forged, "reason": "Edit design only"})
+        "features": forged, "reason": "Preserve implementation facts"})
+    reviewed = service.dispatch(admin, "rfcs.changes.preview", {"rfc_id": rfc["id"],
+        "expected_revision": result["revision"], "body": result["body"] + "\nEditor note.\n"})
+    result = service.dispatch(admin, "rfcs.changes.apply", {"rfc_id": rfc["id"],
+        "preview_id": reviewed["preview_id"], "candidate_digest": reviewed["candidate_digest"],
+        "idempotency_key": "manual-editor", "reason": "Edit design only"})
     assert feature(result)["implementation_override"] == original_override
     resumed = RFCService(service.store.root, {"github": provider})
     result = resumed.dispatch(admin, "rfcs.get", {"rfc_id": rfc["id"], "view": "detail"})

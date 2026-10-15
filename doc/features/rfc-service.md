@@ -23,8 +23,8 @@ token in `RFC_TOKEN` for CLI/SDK use, or use it to sign in at
 `http://127.0.0.1:8765`. A second bootstrap is refused. Tokens are user
 credentials; provider credentials are separately supplied by the operator.
 
-The server includes the web interface and a background reconciler. Its worker
-checks queued operations every 30 seconds and refreshes enrolled RFC sources
+The server includes the web interface and a background reconciler. New operations
+wake its worker immediately, with a one-second cross-process fallback, while enrolled RFC sources refresh
 when their last verification is at least one hour old by default. Administrators
 can change source refresh frequency in the service settings. Use
 `serve --interval 60` to change the worker tick, or `serve --no-worker` when a
@@ -34,7 +34,7 @@ SSH. Package deployment wrappers around the foreground process when needed.
 
 A non-loopback deployment requires `--public-url https://your-host.example` and
 a TLS reverse proxy. Browser sessions stay on the configured origin and remember
-the signed-in user for 30 days, including after closing the browser or restarting
+the signed-in user for up to 30 days, bounded by the personal token's actual expiry, including after closing the browser or restarting
 the service. The persistent HttpOnly cookie contains only an opaque session
 secret; personal tokens are not stored in browser storage. Logout, token
 revocation, token expiration, or disabling the user invalidates access immediately.
@@ -42,6 +42,40 @@ Bind the
 HTTP listener to an interface reachable by that proxy; the default listener is
 loopback. Public URLs and provider endpoints belong in operator configuration,
 not in user action payloads.
+
+## Daily workspace
+
+The default RFC view puts a compact Outcome above a graph and a task inspector.
+Select a track, search tasks or switch to the work list; removed work stays hidden
+until selected in the status filter. Clicking a task opens its owner, state,
+dependencies, linked PRs and task-specific acceptance. RFC-wide criteria are in
+the Evidence tab. Context nodes are visibly distinct from tracked tasks.
+Ctrl/Command-click selects work for reversible grouping. Details and Agent share
+one side pane; on mobile it opens as a full-screen panel.
+
+All confirmations use application forms. Failed operations retain their input
+and show a local error. Form checkpoints are scoped to the signed-in user,
+repository and RFC in this browser tab; restoring them requires fresh access.
+Logout or lost access clears private checkpoints. Refresh and language switches
+preserve filters, selection, chat, unfinished input and graph position. Public
+interface translations ship in the application, so login does not depend on a
+model or translation service.
+
+Manual source edits and Agent proposals use the same review and commit pipeline.
+Choose Edit RFC, make changes, inspect the full candidate/source differences and
+explicitly apply. An unpublished draft stays in the workspace; a source-backed
+RFC queues its exact approved version for writeback. Saved, queued, synced,
+conflict and failure states remain next to the RFC. Retrying first reconciles
+uncertain writes. Source refresh never discards a protected candidate.
+
+SDK, CLI and MCP clients use `rfcs.changes.preview` with `rfc_id`,
+`expected_revision` and the candidate `title`/`body`, followed by
+`rfcs.changes.apply` with `rfc_id`, `preview_id`, `candidate_digest`, a stable
+`idempotency_key` and a reason. Preview is not permission to publish; obtain the
+user's confirmation of the shown candidate before applying. Source-backed direct
+`rfcs.update` edits return `review_required`. Unpublished drafts retain direct
+workspace saving. Existing local/source differences discovered on upgrade are
+protected until a maintainer reviews them.
 
 ## Repositories and a draft
 
@@ -59,8 +93,7 @@ verification version and environment. Merged PRs establish implementation only;
 performance prose and historical delivery snapshots remain labeled source claims.
 Outcome actions locate the corresponding tasks or acceptance records. Authorized
 users edit the complete source in a separate dialog, with revision conflict checks
-and unsaved input preserved across close/reopen and work updates. API and storage
-formats are unchanged.
+and unsaved input preserved across close/reopen and work updates.
 
 The language switch provides English and Simplified Chinese views (`?lang=en`
 or `?lang=zh`), remembering only the public locale preference. Interface and RFC
