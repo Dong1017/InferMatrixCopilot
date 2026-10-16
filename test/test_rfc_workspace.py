@@ -17,7 +17,7 @@ def test_shipped_frontend_modules_parse_as_modules():
     for path in [MODULE.parent / "app.js", *MODULE.parent.glob("*.mjs")]:
         result = subprocess.run([NODE, "--input-type=module", "--check"],
                                 input=path.read_text(encoding="utf-8"),
-                                capture_output=True, text=True, timeout=20)
+                                capture_output=True, text=True, encoding="utf-8", timeout=20)
         assert result.returncode == 0, f"{path.name}: {result.stderr}"
 
 
@@ -51,7 +51,7 @@ const first=workspaceDefaults(), second=workspaceDefaults();
 first.viewport.push({left:100}); assert.equal(second.viewport.length,0);
 assert.equal(first.tab,'work'); assert.equal(first.mode,'graph'); assert.equal(first.removed,false);
 '''
-    result = subprocess.run([NODE, "--input-type=module"], input=program, capture_output=True, text=True, timeout=20)
+    result = subprocess.run([NODE, "--input-type=module"], input=program, capture_output=True, text=True, encoding="utf-8", timeout=20)
     assert result.returncode == 0, result.stderr
 
 
@@ -84,7 +84,7 @@ values.set('unrelated-setting','keep');checkpoints.clear();assert.equal(values.s
 const unavailable=createWorkspaceCheckpoint({storage:{getItem(){throw new Error('disabled')},setItem(){throw new Error('quota')},get length(){throw new Error('disabled')}}});
 assert.equal(unavailable.restore(scope),null);unavailable.save(scope,{query:'safe'});unavailable.forget(scope);unavailable.clear();
 '''
-    result = subprocess.run([NODE, "--input-type=module"], input=program, capture_output=True, text=True, timeout=20)
+    result = subprocess.run([NODE, "--input-type=module"], input=program, capture_output=True, text=True, encoding="utf-8", timeout=20)
     assert result.returncode == 0, result.stderr
 
 
@@ -114,5 +114,5 @@ assert.equal(workspace.restore(scope).query,'independent graph state');
 const unavailable=createChatInputCheckpoint({storage:{getItem(){throw new Error('disabled')},setItem(){throw new Error('quota')},get length(){throw new Error('disabled')}}});
 assert.equal(unavailable.restore(scope),null);unavailable.save(scope,'editing still works');unavailable.forget(scope);unavailable.clear();
 '''
-    result = subprocess.run([NODE, "--input-type=module"], input=program, capture_output=True, text=True, timeout=20)
+    result = subprocess.run([NODE, "--input-type=module"], input=program, capture_output=True, text=True, encoding="utf-8", timeout=20)
     assert result.returncode == 0, result.stderr

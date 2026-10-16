@@ -145,7 +145,7 @@ def run_contract(check, body=""):
         f"const md=createRequire(import.meta.url)({str(MARKDOWN)!r})({{html:false}});\n"
         f"const body={json.dumps(body)};\n" + check
     )
-    result = subprocess.run([NODE, "--input-type=module"], input=program, capture_output=True, text=True, timeout=20)
+    result = subprocess.run([NODE, "--input-type=module"], input=program, capture_output=True, text=True, encoding="utf-8", timeout=20)
     assert result.returncode == 0, result.stderr
 
 

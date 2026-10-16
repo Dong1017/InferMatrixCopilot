@@ -160,5 +160,5 @@ assert.equal(model.nodes.filter(n=>n.group).length,1);
 ])
 def test_graph_tracking_contract(check):
     program = "import assert from 'node:assert/strict';\n" + f"import {{graphModels,graphSource}} from {MODULE.as_uri()!r};\n" + check
-    result = subprocess.run([NODE, "--input-type=module"], input=program, capture_output=True, text=True, timeout=20)
+    result = subprocess.run([NODE, "--input-type=module"], input=program, capture_output=True, text=True, encoding="utf-8", timeout=20)
     assert result.returncode == 0, result.stderr
