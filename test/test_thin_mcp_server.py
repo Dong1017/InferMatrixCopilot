@@ -80,8 +80,9 @@ def test_tool_annotations_mark_the_read_only_surface(monkeypatch):
 
     Unannotated tools trigger a per-call approval dialog in codex and are
     auto-cancelled in its headless runs (#86), so every tool declares its
-    hints: `review` is the only tool that mutates state (reserves a Strict
-    run) or reaches the network; everything else only reads.
+    hints: `review` can reserve a Strict run and `rfc_request` can modify
+    authorized RFC state. Knowledge context tools only read source content;
+    their private session ledger does not modify knowledge or forge data.
     """
     mcp, _core = _fake_mcp(monkeypatch)
 
@@ -93,11 +94,20 @@ def test_tool_annotations_mark_the_read_only_surface(monkeypatch):
     assert review.openWorldHint is True
     for name in ("validate_direct_review", "get_review_result",
                  "get_review_status", "update_knowledge", "doc_search",
-                 "doc_read"):
+                 "doc_read", "open_knowledge_context", "read_knowledge_context",
+                 "search_knowledge_context", "related_knowledge_context",
+                 "expand_knowledge_context"):
         hints = mcp.tool_annotations[name]
         assert hints is not None, name
         assert hints.readOnlyHint is True, name
         assert hints.openWorldHint is False, name
+    for name in ("rfc_capabilities", "rfc_status"):
+        hints = mcp.tool_annotations[name]
+        assert hints.readOnlyHint is True and hints.idempotentHint is True
+        assert hints.openWorldHint is True
+    rfc_request = mcp.tool_annotations["rfc_request"]
+    assert rfc_request.readOnlyHint is False and rfc_request.destructiveHint is True
+    assert rfc_request.idempotentHint is False and rfc_request.openWorldHint is True
 
 
 def test_direct_entrypoints_do_not_resolve_repo(monkeypatch):
@@ -110,6 +120,9 @@ def test_direct_entrypoints_do_not_resolve_repo(monkeypatch):
         "update_knowledge",
         "doc_search",
         "doc_read",
+        "rfc_request",
+        "rfc_capabilities",
+        "rfc_status",
         "open_knowledge_context",
         "read_knowledge_context",
         "search_knowledge_context",
