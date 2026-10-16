@@ -1,0 +1,30 @@
+# Self-enrolled engine. Autonomous objective mode uses controller interventions
+# and one fixed model; the adapter below preserves optional gold-mode support.
+workflow: workflow-improve.improve.forensics
+kind: dynamic
+unit: step_call
+item_key: "{improve_item}"
+fingerprint:
+  covers:
+    - playbook_yaml_sha
+    - settings: [agent_model, eco_model, performance_model, llm_max_tokens]
+    - prompts: ["improve/forensics.py", "improve/lints.py", "improve/stats.py", "improve/adapters/*.py",
+                "improve/meta.py"]
+    - routing: [ECO_MODEL, PERFORMANCE_MODEL]
+    - resolved_models
+    - tools
+    - copilot_sha
+capture: full
+outcome_adapter: infermatrix_copilot.improve.adapters.meta_bench:MetaBenchAdapter
+tier2_min_items: 3
+shadow_tools: [trace_get, trace_blob, trace_query]
+shadow_executables: [python3, git, grep]
+experiment_driver: meta
+evolution:
+  paths: [src/infermatrix_copilot/improve/forensics.py, src/infermatrix_copilot/improve/lints.py]
+  settings: [ECO_MODEL, PERFORMANCE_MODEL, LLM_MAX_TOKENS]
+  tests: [test/test_improve_p1.py, test/test_improve_p2.py, test/test_improve_p4.py]
+  metric: accuracy_review
+  direction: higher
+  min_effect: 0.05
+  guards: {usd_review: lower}

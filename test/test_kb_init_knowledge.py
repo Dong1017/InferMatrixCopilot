@@ -8,6 +8,7 @@ import pytest
 from infermatrix_copilot.kb_service.init_knowledge import (
     FACETS, MAX_DOC_BYTES, SYSTEM_KNOWLEDGE, _Knowledge, knowledge_prompt, validate_sections,
 )
+from infermatrix_copilot.kb_service.init_knowledge_inputs import SYSTEM_KNOWLEDGE_V4
 from infermatrix_copilot.kb_service.init_stages import run_stage
 from infermatrix_copilot.kb_service.init_support import InitRecord
 from infermatrix_copilot.knowledge_service.lifecycle import Page
@@ -126,7 +127,7 @@ class KnowledgeGateway(CardGateway):
         self.cost = cost
 
     def call_json(self, role, *, system, prompt, validate=None, max_budget_usd=None):
-        if system != SYSTEM_KNOWLEDGE:
+        if system not in (SYSTEM_KNOWLEDGE, SYSTEM_KNOWLEDGE_V4):
             return super().call_json(role, system=system, prompt=prompt, validate=validate,
                                      max_budget_usd=max_budget_usd)
         from infermatrix_copilot.kb_service.models import ModelReply
@@ -264,7 +265,7 @@ def test_existing_knowledge_is_preserved_and_only_missing_facets_are_requested(w
 def test_sources_do_not_offer_or_attest_a_partially_cut_line(tmp_path):
     (tmp_path / "a.py").write_text("abc\n" + "x" * 100 + "\n")
     offered = _Knowledge._sources(tmp_path, ["a.py"], 12)
-    assert offered == [{"path": "a.py", "text": "1: abc", "end": 1, "total_lines": 2}]
+    assert offered == [{"path": "a.py", "text": "1: abc", "end": 1, "total_lines": 2, "language": "python"}]
 
 
 def test_removed_and_symlinked_entry_points_are_not_offered(tmp_path):

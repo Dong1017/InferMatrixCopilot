@@ -1,10 +1,20 @@
 # kb_service/ —— 规范
 
-<!-- verified-against: 2026-10-02 -->
+<!-- verified-against: 2026-10-09 -->
 
 `知识服务核心：仓库配置、账本、outbox、CLI · refactor-status: new`
 
 ## 职责
+- 通用接入：`git_source` 固定任意 Git 来源，`repo_spec` 保存经明确接受的范围；
+  `portable_init` 创建本地受审工作区，`portable_commands` 提供 onboard、register、
+  目录接受、发布和增量批次准备，不伪造已合并 PR。见 [通用知识库流程](../portable-kb.md)。
+- 功能发现：文档轮、源码轮、独立评审、最多两轮残留补查；共享完整库存和入口/契约单元，
+  单项最多三次修正，失败保持未知。`evidence_bundle` 将固定哈希行段传给后续阶段。
+- 存储与接受：`knowledge_store` 单一主存储加只读镜像；`portable_publication` 区分 foundation
+  与 final，默认只激活真实最终回执，显式 partial 仍为未完成。最终复核完整生产库存、
+  七维分别 >90%、每功能认可和 ≥85% 结构覆盖，原生认可由 `native_depth_audit` 重放。
+- `source_links` 为 GitHub、GitLab 和本地 `repo://` 源码生成固定版本引用；原 GitHub 引用
+  与历史认可正文保持一致。通用知识 pin 支持 SHA‑1/SHA‑256。
 - `config`：解析 adapter `knowledge_lifecycle`（未知键、非法模式/触发器、缺失审计插件、
   知识目录与 adapter 不一致、私有上游配 `auto_merge`、`auto_merge` 无校准集均抛
   `LifecycleConfigError`）；`load_registry` 返回按仓库名的注册表，`general` 由服务配置。
@@ -15,6 +25,11 @@
   只有 auto_merge 仓库才有非停止类写动作，shadow 与 disabled 一律不发布；
   `close`/`open_revert_pr` 总可执行）。
 - `cli`：`infermatrix-copilot kb keygen|status|pause|resume|control`。
+- `reconcile`：负责人已合并的初始化/管理知识历史的显式接收；固定目标与 active、GitHub PR/merger/当前检查、
+  完整 first-parent 提交清单、目标树的两个校验器及真实快照验证，签名计划经重新验证后才安装不可变回执。
+  scheduler 仅在签名回执重新验证且提交已进入 active ancestry 后解决对应历史 provenance 告警；
+  外部 PR 告警仅在 live API 证明同仓库、同 PR、同 head 已关闭且未合并时解决。
+  两类解决均由租约栅栏事务保留原告警与证据，不修改原模型判定或授予新知识信任。
 
 ## 不变量
 - 模块不出现任何仓库名；仓库差异只来自 adapter 配置。
@@ -27,21 +42,68 @@ stdlib + PyYAML + `cryptography`（`kb` extra）+ `.adapters` + `.knowledge_serv
 ## 测试
 `test_kb_service_core.py`。
 
+## 2026-10-08 持久夜间维护与撤回
+
+- `maintenance` 在现有 scheduler 租约内运行 Shanghai 01:00 的可恢复周期；
+  `maintenance_units` 对不变的规则和说明文本也重新质疑，快照、策略与公平分母在周期开始时固定。
+  `maintenance_audit` 读取原始版本的源码行段、校验 pin/span/hash，缺失证据保持 unknown，
+  execution_error 与 contradicted 分开。不能以旧 verdict 或最新 HEAD 代替原始证据。
+- `maintenance_store` 以附加表保存 runs/items/findings/usage/budget/requests/resolutions，
+  不改写原 intake、verdict、pin、激活和 reviewed 回执。所有执行写入受现有租约栅栏保护，
+  CLI 只可并发入队请求；每次模型调用先记不可重复派发的预算预留，恢复不能重发已预留调用。
+  每日 $50 上限含 $10 公平保留；未知价格或 API transport 不能证明硬上界时拒绝调用。
+- `maintenance_correction` 复用 owner-scoped retire/replace、保护字段与普通质量门；
+  提案不等于已修正，原始 verdict、退役与应用历史均保留。`maintenance_calibration`
+  只消费具明确人工标签和原始证据的签名案例；校准调用也纳入预算和模型记录。
+- `maintenance_commands` 提供 `kb maintain plan|run|status (--repo ID|--all)`；
+  plan/status 不调用模型，run 必须带稳定 `--request-id` 且只入队，可额外选择
+  `--calibrate` 或 `--drill`。`kb correction resolve --id ID --decision confirm|dismiss
+  --evidence JSON|@FILE` 用实际 gh 登录并检查 `KB_MAINTENANCE_OWNERS`，签名请求由持租约
+  scheduler 重新验证。confirm 必须明确 expected 及可重读原始行段；只由 scheduler 签名人工案例。
+  correction_oracle 只保存负责人显式提供的预期，dismiss 不造案例，所有人工请求不计有效夜次。
+- 默认关闭 `KB_MAINTENANCE_ENABLED`。显式成本、模型、提示词和 consumer roster 组成策略；
+  校准变化或策略变化不能复用旧就绪声明。有效夜次按冻结公开仓库分母、语义审计、真实消费者
+  撤回演练等证据判定，安静/no-op 夜次不自动构成新鲜度。
+- operational containment 签名代际独立于 active snapshot 和 paired release；现有 owner
+  SSH publisher 安装签名策略并收集真实 consumer ACK。60 秒心跳、10 分钟新鲜度、实际 release
+  字节摘要及协议版本均须匹配；高水位/签发登记/协议 latch 放在 shared state，rollback 不清除。
+  installer 与最终 review publication 共锁；Direct 区分 retrieved/injected，Strict 保留 provider
+  receipt。失效上下文 held 并保留原 verdict 供复核，不剥离已消费断言，不发布 GitHub review。
+  首次导入 consumer 更新时先独立初始化并验证 authority 根目录（0700），再获取子目录锁；
+  已存在的组/其他用户可写根目录拒绝使用，不自动修复权限。
+
+操作、证据格式及默认关闭的部署步骤见 [nightly maintenance](../knowledge-maintenance.md)。
+测试：`test_kb_maintenance_store.py`、`test_kb_maintenance_flow.py`、`test_kb_maintenance_commands.py`。
+
 ## 2026-09-28 intake 与质量门
 - `models`：生成与评审模型按 (provider, model, effort) 钉死（默认 `claude-code:claude-opus-5-5`
-  与 `codex:gpt-6-sol:medium`，评审必须与主/备用生成器不同家族）；`KB_GENERATOR_FALLBACK`
+  与 `codex:gpt-6-sol:medium`，评审必须与主/备用生成器不同家族；`KB_JUDGE_FAMILY_WAIVER=1`
+  是同后端起草+评审部署的显式操作员豁免——启动告警，且该评审标签必须重跑校准）；
+  `KB_GENERATOR_FALLBACK`
   可显式配置一个备用生成器（如 `zcode:GLM-5.3`），主模型不可用/超时/无法解析时尝试一次。
   评审、schema 修复及带花费阈值的调用均不切换（预算只为主模型预留，Zcode 无阈值能力）。
+  `KB_JUDGE=zcode:GLM-5.3` 是受支持的评审后端：zcode 的 `:effort` 后缀无效（推理档位走全局
+  `ZCODE_REASONING_LEVEL`），超时/不可解析按 fail-closed 记 `human`。
   两个生成器都失败时保持排队。每次尝试经 recorder 记录实际模型、输入、输出、用量，
   备用调用带 `fallback_from`，intake/精炼/巡检变更集注明实际生成器，重建保留原归属。
+- `judge_tuning`（2026-10-04）：评审侧唯一可进化面——两段系统提示词（含 rubric 措辞）、
+  答案→判定聚合、邻域上下文预算；`gate.py`（受保护）仅委托引用，初始值与拆出前逐字节一致，
+  候选改动经 improve 引擎配对实验 + 生产校准集双重把关。
 - `sources`：知识仓库克隆的只读读取（`knowledge_files`、`external_texts`）、只读 GitHub 客户端
   （合并 PR、PR 证据有界摘录、release/tag）、本机 Copilot 运行经验收件目录。
+  PR 证据保留 base/head 分支与 head SHA；intake 区分分支能力与当前默认分支事实，
+  新规则上下文包含完整已占用 ID（含退役与 tombstone），建议按源 PR 和 owner/topic 命名，
+  最终唯一性仍由操作应用和批次合并校验强制保证。
 - `intake`：每个事件由生成器起草类型化操作（只允许 add/edit_same_meaning/replace/retire），
   `apply_operations` 必须接受，最多两轮带精确错误的修复；多事件合并为一个变更集。
+  系统提示明确操作字段的字符串类型；未用可选字段省略或为空字符串，`new_page` 是目标路径而非布尔标志。
+  原生起草与 `kb-intake.draft` 共用 `draft_changes` 的提示，严格 schema 校验保持不变。
 - `gate`：L1 → 逐块 L2（每类块只问适用维度）→ 按 owner 目录的一致性检查；
   外部引用、protected、熔断（按仓库计算）、任何不确定 → human；L1 失败不调用模型。
 - `runtime`：collect → intake → gate → publish；shadow 只记录；变更集文件存 `changesets/<id>.json`。
 - `calibration`：按仓库的校准集评分（坏样例须全部拦下、好样例误拒 ≤ 20%）。
+  一致性检查沿用生产门禁的 changed-rule 归属，既有冲突单独保留；报告保存逐块原因和一致性详情。
+  CLI 校准模型调用写入 replayable trace，按仓库、case 和 judge/consistency 步骤标记。
 - `runner`：经标准 executor 运行 `kb-*` playbook。CLI 新增 `kb run`、`kb calibrate`。
 
 ## 2026-09-28 合并流程、激活、巡检与调度
@@ -54,6 +116,9 @@ stdlib + PyYAML + `cryptography`（`kb` extra）+ `.adapters` + `.knowledge_serv
   T2/T3 按规则页让生成器对照发版 diff 逐条给出 keep/edit/replace/retire；purge；全局熔断强制 human。
 - `scheduler`（`kb serve`）：终身持有租约；每 tick 重签控制记录、处理回执、按仓库
   advance/intake/sweep（仓库间隔离）、main 变化即激活；24 小时内 2 个知识 PR 被人关闭 → 暂停该仓库。
+- `detect_release` 的可选 observation 输出只记录本次真实 release/tag 查询；缺少 release/tag、
+  关闭 observer 或恢复旧 sweep 均保持 `not_observed`，不能用缓存基线推断当天 `no_code_update`。
+  scheduler 分别记录观察状态、实际观察 tag 与基线比较，语义审计覆盖不由该状态替代。
 - CLI：`kb serve [--once]`、`kb activate`、`kb rollback --to SHA`；`kb pause`/`kb resume` 只改代际与暂停状态。
 - 每个变更集记录其待回执的 outbox 项（`pending_item`）：未过期时不重复签发；回执只作用于与之匹配的项和
   对应的前置状态，迟到的重复项回执不改变状态。
@@ -279,6 +344,44 @@ issue（同一报告只开一个），标签不存在时不带标签重试，绝
 - `kb status` 新增 `unknown_commits`：未处置的未知提交及其接受请求的状态。
 - 测试：`test_kb_accept_unknown.py`。
 
+## 2026-10-06 负责人已合并历史的监督接收
+
+- `kb reconcile-reviewed --plan FILE --target SHA --allow-merger LOGIN --require-check NAME --reason TEXT`
+  核验当前 main 的完整 SHA 与 active 的连续 first-parent 历史；所有知识提交都绑定唯一真实已合并 PR、
+  merge SHA、父提交、完整原始 diff 哈希、允许的 merger、认证操作员和实际 review 状态。
+  指定检查须在精确 PR head 上当前成功；同一 app/context 的较早失败重试不覆盖最新结果。
+- 在目标树的独立临时导出中执行两个必须存在且成功的知识校验器；导出不能遗漏或改变 git 树的任何知识 blob，
+  被服务的 Markdown/YAML 必须为普通 UTF-8 文件。构建并加载临时快照，验证格式、所有文件哈希、树和路由。
+- 计划按 `kb-reconciliation-plan` 签名但不授予信任。`--apply FILE` 持有激活锁并重新核验所有证据，
+  main/active 或证据变化即拒绝；仅两个 pin 均未改变时重复 apply 复用同一回执。
+- 回执按不同用途 `kb-reviewed-reconciliation` 签名，包含操作员/理由/检查/校验器及快照哈希，
+  在 `reconciliations/<内容哈希>.json` 通过 fsync 和硬链接原子创建，禁止覆盖和符号链接。
+  审计和激活每次重新验证签名、仓库及精确提交清单；控制记录直接读取回执，不在 `trusted_merges` 缓存监督信任。
+  缺失回执使提交恢复未知，损坏回执拒绝激活/控制续签，后续新增知识提交仍保持未知。
+- 保持 `accept-unknown` 和自动质量门不变；不伪造 `disposed:`，不更改暂停或发布模式。
+  有待异步接受、撤回或原始 intake 候选的提交拒绝进入此路径。`kb status` 显示已核验的 `supervised_commits`。
+- 测试：`test_kb_reconcile_reviewed.py`。
+
+## 2026-10-06 已审阅源事件的监督完成
+
+- `kb reconcile-reviewed --event-coverage FILE --plan PLAN --target SHA --allow-merger LOGIN --require-check NAME --reason TEXT`
+  接收明确的 `commits` 和 `events` JSON；每项事件给出 `id`、`outcome`（`covered`、`already_covered`、`no_rule`）、
+  操作员审阅理由 `reason`，覆盖事件还须给出 `rules: [{path, rule_id}]`。路径以 `repos/` 开始，不含 `knowledge/`。
+  `no_rule` 不声称任何规则。覆盖规则必须在精确目标快照中有效，且引用该事件的原始上游 PR。
+- 只有原始 `merged_pr` payload 缺少 `merge_commit_sha` 时，可显式给该项完整 `source_merge_sha`；
+  从注册 adapter 的 `RepoLifecycle.full_name` 取得上游，实时核验 GitHub PR 的 repository/number/URL、
+  merged 状态、精确 merge/head SHA 和 merge time（原始 timestamp 存在时须相符）。此补充证明进入签名计划与回执，
+  不改写原始 payload 字节/哈希，不能覆盖既有 merge SHA；apply 与重复 apply 都从签名行保留 pin 并重新取证，漂移即拒绝。
+- 目标须已监督接收并实际激活；认证操作员、真实 owner merge、精确 head 上的当前 CI、原始事件身份和 payload 哈希、
+  规则块、两个校验器及完整快照 manifest 均进入签名计划。选择不能包含不存在的事件或拆开已有源事件 batch。
+- `--apply PLAN` 持有独占 ledger lease 和激活锁，重新验证全部证据；源事件、规则、main/active 或 CI 漂移即拒绝。
+  不同签名用途 `kb-reviewed-event-plan` / `kb-reviewed-event-settlement`，不可作为知识历史接收回执使用。
+  `event-settlements/<内容哈希>.json` 经 fsync、硬链接原子创建且禁止替换；崩溃后可用原计划完成相同的 ledger 提交。
+- 仅所选 pending/rejected/drafted 事件，或原始 detail 精确为 `no rules` 的 done 事件，可记录诚实的 `manual_reviewed_merged` 和回执引用。后者允许纠正过早丢弃，签名回执保留原始 done/no rules 决定；其他终态不得覆盖。
+  其完整源 batch 和 refinement 后代也记录 `manual_reviewed_merged`，停止重复生成；原来的失败判决和 verdict 不变。
+  只解决被完整覆盖 changeset 的人工队列，不影响其他事件、PR、发布模式或知识信任。
+- 测试：`test_kb_reviewed_events.py`。
+
 ## 2026-09-29 一致性冲突只算本次改动的
 一致性评审看整个 owner 目录，但只有**涉及本次改动的规则**（新增、编辑、退役、被替代的规则 ID）的冲突才使变更失败；
 两条都未被改动的规则之间的冲突已经在 main 上，记入该目录的 `preexisting`，不计入变更（精炼也无法修复它，否则该目录
@@ -415,7 +518,7 @@ x 必须为正。因阈值停下的调用（`stop_reason="max_budget"`）→ `Mo
   **其他** owner 的前缀，所以新前缀永远不会是吞掉别的模块或 owner 的祖先（有子模块的模块，如包根目录或仓库根，从不以自身
   目录路由）。需要超过 `MAX_ABSORB_PREFIXES`（20）个前缀的模块不吸收，改写地图卡片；卡片的新 owner 前缀同样由
   `cover_prefixes` 得出；完全无人覆盖的，每个模块一次有界的生成调用（文件名、符号签名、文件开头的 docstring
-  或注释块，字节上限；从不给函数体：签名正则匹配整行，`declaration` 截掉函数体——
+  或注释块，字节上限；旧的有限预算模式不给函数体：签名正则匹配整行，`declaration` 截掉函数体——
   花括号语言（JavaScript、Go、Rust）在整行**最早**的 `{`/`=>`/`;`/单独的 `=` 处截断，不去词法分析字符串、注释或正则字面量
   （函数体不可能出现在它们之前，默认值可能被截短，这是失败即关闭的取舍）；Python 在括号、字符串与行尾 `#` 注释之外的
   第一个 `:` 处截断；单行函数也只留声明）写一张**地图卡片**：prose 页（`type: architecture`），目的、入口、关键文件（只保留该
@@ -425,6 +528,18 @@ x 必须为正。因阈值停下的调用（`stop_reason="max_budget"`）→ `Mo
   仓库入口页链接；`components/` 已存在却没有入口页时组直接放在仓库目录下。`_routes.yaml` 只追加（保留开头注释块，
   `routes_append_only` 校验不重排、不改名、不删除）。预算用完或超过卡片上限时，已写的卡片照常成 PR，剩下的模块进
   `unfinished`；报告里列出仍无路由的模块。测试：`test_kb_init_modules.py`。
+  显式 `--unlimited-subscription` 使用 `module_prompt_version: 3` 与独立的
+  `SYSTEM_CARD_IMPL`，从固定 SHA 的共享索引提供带文件哈希、行号与完整性状态的实现片段；
+  整个卡片输入仍受 40,000 UTF-8 字节限制，按剩余文件分配预算，能放下时提供全文，否则提供
+  明确的首尾行段，未展示的行为保持未知。读取失败不使用替换字符补造源码；元数据本身超限时
+  本模块保持未完成，不发起生成。卡片不能从目录名推断开发／运行时职责，也不能在未展示配置
+  与分支时断言默认副作用；打印的手工操作须与实际执行区分。此模式仅保留每文件前四个签名，
+  以留出实现片段预算；旧模式仍保留最多四十个签名，提示词和身份不变。
+  此模式每张候选地图卡再由独立 Codex 按实际引用文件的源码片段评审一次；沿用 prose 的
+  `faithful / does_not_weaken / non_contradictory` 三项，全部为 yes 才写入。真实结论、维度、
+  原因、模型与文本哈希保存在阶段记录；拒绝或无法评审只令本卡保持未知，其他组件继续。
+  未通过的卡片不增加模块路由覆盖，也不计入功能深度认可；后续功能／核心文件目标独立验收。
+  测试：`test_kb_module_source_evidence.py`。
 
 ## 2026-09-30 kb init：阶段 3（deepen）与 shadow 开关
 - `init_support.UpstreamPin.first_parent_changes(pin, count=, max_age_days=)`：钉点 first-parent 历史里最近 `count` 个
@@ -454,6 +569,20 @@ x 必须为正。因阈值停下的调用（`stop_reason="max_budget"`）→ `Mo
   记入 notes。测试：`test_kb_init_deepen.py`。
 
 ## kb init：解释性知识（knowledge）
+
+证据补齐批次可显式设置 `KB_KNOWLEDGE_CONTEXT_VERSION=5`：从已有功能页的固定版本
+引用定位实际实现，优先保留相关测试断言，再读取引用行段及其邻近上下文。已有正文只作
+定位与背景，新说明仍须使用实际展示的源码或项目文档并经过独立评审。默认版本4的提示词
+及历史原生记录保持兼容；更换版本使用新状态目录，保留旧批次修正历史。
+
+适配器与 portable 初始化均通过 `SharedModelDispatch` 共享生成和评审槽位，默认总并发13；
+`KB_INIT_GLOBAL_CONCURRENCY` 可设置1至13，`KB_INIT_DISPATCH_DIR` 可指定同一主机的共享
+锁目录。基础和深化并行运行时不能各自创建独立槽池。原生输入、流式输出和用量继续保存
+于状态目录的 trace，未报告费用保持未知。
+
+深化补齐优先注入目标功能已认可的基础区块，按缺失维度选择完整区块，再加入组件背景。
+保留的深度页须先复核证明和正文哈希；阶段预览及最终组装为这些页面补齐缺少的 owner
+导航，避免全部维度已认可的页面因没有新提取而漏掉目录链接。
 
 `kb init REPO --stage knowledge --dry-run` 在 skeleton 和 modules 之后提炼解释性知识。
 `init_knowledge._Knowledge` 从固定源码与相关文档分别生成架构、API、配置、设计取舍、
@@ -530,7 +659,7 @@ knowledge-deepen 需要显式 feature/production coverage policy，逐项访问�
 只保存有证据的内容到最近 owner 的 `feature-depth-<id>.md`，链接功能概览与 owner 索引。
 只追加索引链接，保留已有 Direct quick map；最终仍检查地图存在且未被截断。
 源码按定义切片，可检索文件前缀之外的实现，并补充可静态解析的第一方被调函数与相关测试。
-flow 至少包含两个不同定义的直接调用；Python 校验限定符号、词法 owner 和导入目标，其它
+默认 strict 模式的 flow 至少包含两个不同定义的直接调用；Python 校验限定符号、词法 owner 和导入目标，其它
 语言检查去除注释/字符串后的声明和调用。动态对象分派不能靠同名猜测，语义仍由模型裁判复核。
 
 每维用 `kb:depth` 绑定 feature、facet、完整 pin 与正文哈希，`kb:depth-proof` 绑定精确证据
@@ -546,12 +675,117 @@ architecture/guide；同一调用独立判定各新增维度的 faithful/non_con
 增加新深度。七维齐全只说明各有代表性实现知识，不声称全行为或执行测试覆盖。
 `tools/audit_knowledge_depth.py` 在干净的固定上游 HEAD 上独立重算两组指标。
 
-先遍历全部功能，再修复缺口；恢复与显式重试同样优先处理尚无已接受维度的功能，每项每批最多两次尝试。
+先遍历全部功能，再修复缺口；恢复与显式重试同样优先处理尚无已接受维度的功能。
+默认有预算模式每项每批最多两次尝试；显式订阅无限模式改为按缺失维度定向修复。
 重复维度整项剔除，其它有界候选维度继续独立核验。逐项保存预算预留、生成草稿、裁判
 结果与已接受正文；包括第二次尝试在内，中断裁判均可复用完成的生成。恢复固定 KB baseline 与 upstream pin，
 输入变化则拒绝串用。`--budget-usd N` 可提高同批累计 ceiling；`--retry-unfinished` 显式
 重试缺口并保留花费。已发布批次不再修改，合并后用新 state directory。missing facets
 保持明确；订阅生成器 USD 为 unreported，judge 固定记账不等于账单实付。
+
+### 定向深化、认可覆盖与订阅无限模式
+
+`DepthContext.build` 接收 requested facets、previous review 与 evidence round；按入口、
+调用方/被调函数、配置 use site、异常分支和具体断言选择完整范围内的有界切片。
+生产证据依次优先声明入口、功能实现、直接依赖和调用方，分别保留功能与关联代码预算，
+并分配文件预算避免大型通用调用方挤占入口。可证明的小型调用链两端先完整提供；文件数不设四个的上限。
+测试索引包含嵌套第一方 SDK/前端套件，优先直接入口引用与实际调用；无关包标记不作为
+验证入口。固定前四文件、两个测试及前 180 行不再构成检索上限。动态关联只作为未知。
+保存生成前的完整 payload 与规范化 prompt 摘要，中断裁判复用完成的草稿；每个缺口
+保留明确原因及按调用事件去重的历史，绑定证据和上下文摘要，恢复不覆盖旧拒绝原因。
+同一证据三次未成功修复时保留阻塞原因，不盲重试；显式 retry 可补证继续。
+非 Python 调用见证绑定模块级声明、目标完整定义与调用方自己的执行范围；同名方法、
+未执行的嵌套函数和回调中的调用不能直接归属外层函数，无法证明的关系保持未知。
+
+proof `basis` 缺省 supported，旧区块不改写。verified_absent 当前只允许完整、可重放
+检查证明的验证入口缺失，绑定固定 pin、政策推导范围、版本化检测器及内容摘要；读取、
+解析和动态映射不完整均不能发证。正文明确保留测试缺口，不声称执行或通过测试。
+已关联到功能、但测试入口或断言因别名等原因未被识别的候选也保持未知；不能仅凭
+字面 test/assert 匹配为空签发缺失证明。
+两种 basis 都须独立三个维度全 yes。covered_facets/facet_ratio/complete_features 保留
+正向语义；recognized_facets/recognized_facet_ratio/recognized_complete_features 另计
+认可知识，各维分列 supported/verified_absent/unknown。
+
+可选政策 `semantic_depth: {per_facet_gt: 0.90}` 对每个维度严格执行大于目标，并要求
+每个功能至少一个认可区块；79 功能时每维至少 72，553 分母不缩减。target_met 与
+批次遍历完成分别记录。提取前复核结构覆盖；结构门槛不足先阻断，不消耗模型调用。
+默认 strict 流程中，结构覆盖与深度门槛均须满足才能发布。深度未达标 dry run 为 partial，保存预览但步骤不成功；发布阻断。
+执行 API 的 feature_ids 只限定调度范围；审计仍包含完整政策中的所有功能和维度。
+显式列表保留执行顺序并纳入输入摘要；零深度功能仍优先，之后按列表顺序开展首轮。
+并行批次各自保留检查点，合并认可页面后须重新通过全量验收，不能发布分组的部分结果。
+独立 source audit 使用相同门槛。原生认可审计读取实际 archived model_call 输入输出，
+核对最终区块与源码 pin、三个 yes 和不同模型家族；不能信任只有 receipt 字段的报告。
+判定时的编号源码正文须完整覆盖每个区块证明并匹配内容哈希，缺失区块还须绑定相同的
+重放证书；显式报告非 Codex 裁判身份则拒绝，未报告身份仍保留未知。
+
+`--unlimited-subscription` 用于 feature-discovery、modules、knowledge、knowledge-deepen
+及 widen/deepen 别名，显式要求生成和裁判两角色
+分别使用 Zcode GLM-5.3 与独立 Codex 的已认证订阅，拒绝其他模型协议、budget_usd 冲突
+及 configured fallback。预算上限 None 表示
+该模式，不使用无穷或零价格伪装；累计固定记账和原生调用用量仍记录，实际费用未报告
+保持未知。每次调用重新绑定已经检查的订阅传输，不启用 API 付费回退。
+modules/knowledge 的公共阶段预算仅在显式启用时改为 None；单独选择订阅生成器
+仍保留原记账上限。该模式绑定检查点身份，无此选项时的旧摘要保持不变；
+feature-discovery 与 knowledge-deepen 继续使用各自已有的检查点及身份实现。
+
+`--foundation-mode partial` 是显式基础知识部分发布及其新深度批次交接选项，
+不降低七维认可门槛。基础发布只重放已经结束的订阅批次，保留原生成身份、任务、
+修正次数、真实未知项与 `init_complete=false`；源码、原生证明、格式和结构覆盖
+仍须通过。新深度批次要求原始已合并发布记录，绑定模式、记录和收据哈希，
+同一完整功能目录和七维分母不变。收据、紧凑 PR 正文和 prepared 恢复契约见
+[`foundation_publication`](kb_service/foundation_publication.md)，操作入口见
+[部分发布说明](../../knowledge/partial-foundation.md)。
+
+### 2026-10-02 轻量认可、13 功能任务与轨迹留存
+
+政策可指定 `semantic_depth.acceptance_mode: lightweight`，CLI 可显式选择
+`--acceptance-mode lightweight`；缺省仍为 strict。轻量区块绑定固定源码 pin、真实展示的
+源码或项目文档引用、区间及正文哈希，允许代表性流程及明确标注的设计推断，不要求形式化
+调用链，也不生成缺失证明。每个功能的一次 Codex 调用同时判定全部新增维度，三个维度
+均 yes 才认可。保留旧 strict 区块的原文及哈希，按功能/维度去重统计 strict/lightweight
+与 supported/verified_absent/unknown；旧原生记录默认 strict。源码、原生记录、检索和
+发布使用相同政策门槛，未知项不计认可，分母不减少。
+
+轻量 validation 必须分类为 automated_runtime、automated_source_text、helper_unit 或
+documented_manual；人工步骤须来自已有文档并标明本轮未执行。测试文件名、未找到测试及
+源码字面匹配均不能冒充运行断言或核实缺失。检索分别展示已有和实际注入的模式、维度状态
+与验证类型，仍受两页和 6,000 字符预算约束。
+
+共享的源码/测试/文档索引绑定 pin、政策、完整生产范围、版本与摘要；只建立一次。
+轻量深化还从该索引定位功能源码父目录中的实际项目文档，到最近组件指南为止，
+包括相邻的 SKILL、README、设计文档和 reference；有局部正文时先保留它们，否则
+使用通用 owner 文档，不扩展到其他组件的兄弟目录。各文档共享 8 KB 完整行段预算，
+优先实际入口文件名附近的行段及评审反馈，最终组包保留已选片段；没有既有操作和
+可观察预期的文档仍保持未知，补读不表示执行测试。strict 和未配置共享索引的旧输入不变。
+旧草稿和原生审批仍核对原始保存的输入，不重写上下文或重置累计修正次数。
+轻量组包保持完整小片段，修正优先补读评审指出的符号和范围。每个缺口至多首轮加三次
+自动修正，计数在派发前落盘，恢复或显式 retry 不清零；通过的维度冻结，失败只留在该项。
+未派发评审的草稿可在原轮恢复。逐批核对格式、引用、哈希与计数，完整验收集中在交付前。
+
+`eval/knowledge-depth/run_depth_campaign.py` 默认及最大 13 个隔离功能 worker，共享
+Zcode 调度文件。默认启动间隔 15 秒、原生 429/account-1302 退避 90 秒，后续间隔可增至
+60 秒并逐步恢复；仍保留 13 个任务，供应商限流仅延迟派发，不新增内部重试或重置修正计数。
+调度等待、开始、冷却与停止事件与原生输入输出一起脱敏保存于每个 worker 的
+`init/traces/attempts/`，最终关联唯一 model_call；未完成调用及未报告账单费用保持未知。
+监控读取错误记录诊断、沿用最后安全快照，不停止其它任务。
+发现目录合并后的并行深度批次使用 `--discovery-record` 显式传入原始完成记录。
+父任务复用正式阶段的前置门禁，检查真实 PR 已合并或原记录为 empty、done、repo/pin，
+以及基线中的目录与报告哈希；原 JSON 字节摘要进入批次身份，逐 worker 原样复制，
+不重写状态或外部原生档案路径。基线已有发现报告时，即使旧适配器未启用必需标记，
+也不能省略交接。worker 在模型初始化前再核对父任务绑定，记录变化或既有副本冲突
+拒绝恢复；没有发现报告的旧流程保持原行为。
+新增轻量区块的原生审计还须绑定实际 GLM-5.3 草稿的对应维度、正文和已展示引用，以及
+Zcode 身份和无 fallback 记录；附近的无关生成调用不能证明该区块的提取归属。
+
+新授权的缺口修复批次可使用 campaign 的 `--repair-guidance`（stage 环境变量
+`KB_DEPTH_REPAIR_GUIDANCE`）。定位文件绑定固定 pin、政策和知识基线，按功能/维度保存
+准确源码或文档行段及上轮拒绝原因；其摘要进入 campaign 与检查点身份。仅从共享索引读取
+真实行段，源码/测试 24 KB、文档 8 KB，重叠合并；超限、范围无效或遗漏维度在派发前报错，
+不截断断言或用相邻功能替换。建议正文仍是非可信提示，不是证明，GLM 提取与 Codex 独立评审
+均保留；裁判同时核对功能归属。新批次保留前批完整历史，不改写旧轮次，恢复本批也不清零。
+
+交付顺序为：复核结构覆盖 → 定向深化 → 源码与原生认可记录审计 → 检索验收 → 独立审查
+→ CI → 合并。完整批次未达到政策门槛时保存真实缺口和检查点，不发布为已完成。
 
 ## 2026-09-30 kb init：校准集收割（harvest-calibration）
 - 各阶段的 `InitRecord.verdicts[rule_id]` 除 verdict/reasons/model/text_sha/page 外还保存**判定时的规则全文**
@@ -687,3 +921,128 @@ dry run 为旧快照建本地临时 baseline，再生成相同升级串与全量
 变更，保持 empty 阶段语义。提示不会增加 coverage、创建规则或改 owner 路由。
 完成合并后的完整 checkout 用 `tools/audit_review_retrieval.py` 验收 Direct 上下文交付，
 同时报告描述+路径与仅路径结果。报告在 eval/本地状态，与 breadth/depth 审计分开；不是 RQS 或缺陷召回率。
+
+## 自进化接入（2026-10-04）
+
+起草单元携带 `kb-intake.draft` 的 item、workflow 和配置指纹；起草使用该工作流已采用的最大操作数覆盖。调度器在同一服务租约内检查周度改进槽位；进化启用时调用可续跑协调器，未完成检查点优先续跑，异常单独记录。
+
+## 自主进化接入
+
+自主进化开启时起草前捕获事件与知识快照；已采用制品通过隔离代理起草 typed operations，宿主沿用已有知识发布权限与门禁。进化实验只在内存应用，不写产品知识库。
+完整 replay 的未压缩 UTF-8 JSON 上限为 64,000,000 bytes；超过上限记录 `replay_capture_deferred`，不截断全局规则 ID、tombstone 或外部引用。只有无活动 `kb-intake.draft` 制品时可继续原生固定生成器起草；活动项（包括已禁用项）或无法读取的注册表保持 pending，不执行未捕获的候选。其他捕获错误照常阻断。质量门、校准和发布授权不受此存储延期影响。
+
+## 2026-10-05 通用功能发现：文档基线与源码扩展
+
+初始化保留三个大阶段：Skeleton 建骨架，Modules/Knowledge 铺广度，
+Deepen/Acceptance 做深度并验收。新的 `feature-discovery` 位于 skeleton 与 modules
+之间；它先依据项目文档发现能力，再遍历固定源码范围寻找文档未说明的能力。
+
+```mermaid
+flowchart TD
+  P[仓库配置：SHA、范围、语言、owner、预算与目标] --> S[Skeleton]
+  S --> D[文档功能发现]
+  D --> C[源码扩展发现]
+  P --> D
+  P --> C
+  C --> R[聚合与独立评审]
+  R --> F[目录 PR：审查合并后冻结]
+  F --> B[Modules / Knowledge]
+  P --> B
+  B --> A[Deepen / Acceptance]
+  P --> A
+```
+
+新初始化配置启用 `knowledge_lifecycle.init.feature_discovery_required: true`。
+使用[通用新仓库配置模板](../templates/kb-init-new-repository.yaml)，按实际仓库调整源码范围、
+排除规则与文档入口；模板不修改既有适配器，也不改变其发布权限。
+旧适配器不配置该字段时仍使用既有显式目录；一旦开始发现批次，后续阶段不能绕过
+尚未完成或未合并的目录 PR。已有仓库可运行：
+
+```bash
+infermatrix-copilot kb init REPO --stage feature-discovery --from-existing \
+  --pin FULL_SHA --dry-run --unlimited-subscription
+```
+
+`--dry-run` 保存目录和 PR 正文供审查；省略它时沿用 init 的发布权限与 PR 流程。
+已有知识库没有本地 skeleton 记录时，目录 PR 合并后可运行
+`kb init REPO --stage modules --from-existing --pin FULL_SHA`，从已合并的仓库
+入口、owner 路由及页面复核结构，再补充导航。随后使用
+`--stage knowledge --from-existing`；已有 modules 记录仍须完成并合并，
+已有 skeleton 记录的状态与合并门禁同样保留。该模式不生成历史阶段记录，
+不绕过发现目录的源码及哈希绑定；省略 `--from-existing` 时保留原阶段顺序。
+重复初始化若遇到已合并旧批次仍保留的发布分支，可在新批次启动前设置
+`KB_INIT_BRANCH_SUFFIX=<batch-slug>`，使用 `kb/init-REPO-STAGE-SUFFIX`；未设置时
+沿用旧分支名及检查点身份。后缀仅允许 1–40 位小写字母、数字和连字符，
+首尾不能为连字符；非法值在模型调用前拒绝。配置的后缀绑定输入身份及
+已准备发布的分支，恢复发布时不能更换；不会删除或覆盖旧批次分支。
+订阅模式明确使用 Zcode GLM‑5.3 提取、Codex 独立评审，不使用 Claude Code。
+默认并发上限为 13，两轮按顺序运行，轮内共享线程池；Zcode 请求沿用共享排期。
+`KB_DISCOVERY_GENERATOR`、`KB_DISCOVERY_JUDGE`、`KB_DISCOVERY_CONCURRENCY`
+覆盖发现阶段配置；提取与评审必须属于不同模型家族。`--budget-usd` 与
+`--unlimited-subscription` 互斥。未报告实际费用时保持未知，记账值不当作发票费用。
+
+`KB_DISCOVERY_PACKET_CHARS` 设置每次提取组合的正文字符预算（整数 24000–192000，
+默认 24000）；仅组合已有完整分片，不删除或截断输入。`KB_DISCOVERY_START_INTERVAL_S`
+设置 Zcode 初始启动间隔（有限数值 1–60 秒，默认 15 秒）；原生 429/1302 仍触发共享
+冷却和自适应限速。较大的包可能仍有候选遗漏，不能据此声称所有功能已发现。
+`ZCODE_REASONING_LEVEL=low|high|max` 设置实际写入 Zcode 会话配置的推理强度，默认 max；
+Zcode 模型角色中的 `effort` 被 transport 忽略，不能代替该设置。网关追踪和原生 attempt
+均记录 `native_reasoning_level`；发现的输入身份、检查点及紧凑报告 `run_config` 同时绑定
+包大小、启动间隔和实际配置的推理强度。改变任何一项需新批次；旧检查点未记录这些
+配置时不能安全恢复，须保留旧档案并使用新的状态目录。
+返回恰好 24 个候选的分片记录 `candidate_limit_reached`，报告列出数量及任务 ID，
+作为候选可能遗漏的线索；本轮不自动拆分重采样，也不把饱和结果称为穷尽。
+
+发现使用完整文件库存和分片，不把前 N 个文件、前 N 行当作全仓库。范围、排除规则、
+文档入口与功能分母按仓库配置；未知语言使用文本和入口线索，并保留未解析关系。
+没有文档不阻断源码轮，正式功能允许 `docs: []`。目录以外的疑似第一方代码列为
+范围扩展建议，不静默改变本轮覆盖分母。源码与测试只有文本证据，本流程不执行
+上游测试，也不因未找到测试而声称没有测试。
+
+现有功能 ID 与 owner 保留。候选可成为新增功能、实现补充、别名、子能力、共享组件、
+过期声明或未知；文档声明必须找到实现证据才能成为新增正式功能。每项最多三次
+自动修正，未知不影响其他项继续。新 owner 由 modules 建立导航，目录发现不生成
+占位知识页，也不调整验收门槛或发布权限。
+
+冻结结果继续使用适配器目录下的 `knowledge-coverage.yaml`。紧凑记录保存于
+`eval/feature-discovery/REPO-PIN12.json`，绑定源码 SHA、目录哈希、发现来源、独立评审
+和未知项。完整输入、流式输出、工具调用、配置和用量保存到 init 外部状态目录的
+原生追踪档案；Git 内只保留引用与摘要。后续阶段核对目录/报告哈希及源码版本。
+已完成的分片和评审可恢复；预算耗尽留下未处理任务时保存检查点，不能标为完成。
+
+报告分开呈现文档候选、源码新增、实现补充、重复/过期/未知、失败分片和未关联范围。
+只能称“声明库存已处理”，不能证明所有功能均已发现。新目录的深度分母为 `N × 7`；
+历史目录的认可率独立保留，不能直接混用。功能发现、知识认可、生产文件结构覆盖、
+测试覆盖和真实 PR 评审效果是不同指标。
+
+首次评审支持的生产源码新候选，进入目录前必须再经一次批量 Codex 目录边界审计。
+该审计展示完整的正式功能 ID、标题和 owner，不让正式功能与候选竞争 16000 字符预算；
+有剩余空间才展示相关候选。保留首次评审，另存真实原生审计回执、审计版本、种子哈希、
+候选/首次评审集合哈希及每项候选哈希。拒绝、通道失败、别名循环或未解决的重复标题/别名
+保持未知，不触发另一轮提取修正。跨候选别名只可归属最终已认可的正式或新增父功能。
+未发布的旧检查点缺少此审计时只补审，复用完整扫描和首次评审；prepared 产物缺少审计时
+阻止发布，保留原产物。已发布历史目录保持不可变。审计预算中断保存已完成批次，恢复时
+不重复已完成的审计。显式 `--retry-unfinished` 不重置已用完的三次内容修正，仅恢复通道故障。
+
+## 2026-10-06 订阅模式基础知识并发
+
+仅显式 `knowledge --unlimited-subscription` 启用基础知识工作池。
+`KB_KNOWLEDGE_CONCURRENCY` 默认为 13，允许 1–13，并纳入阶段输入身份；
+旧有有限预算模式保持顺序执行。每个 owner/feature 的 GLM 提取及原六个独立
+Codex 区块评审在同一 worker 中顺序运行，整个池同时最多 13 个模型调用。原生 Zcode 调用复用共享节流器，默认每 5 秒启动一次；
+`KB_KNOWLEDGE_START_INTERVAL_S` 可选有限正数且不超过 60 秒，同样冻结在输入身份中。
+worker 使用独立知识视图、阶段记录和订阅传输；唯一协调器保存检查点，
+按既定任务顺序追加精确获批区块，重新核对源码证据、正文摘要及原生评审记录，
+不会重新调用模型来组装。单项通道失败保留其真实状态和已认可成果，其余任务继续。
+恢复绑定原阶段输入身份与原生归档，不生成任何替代前置阶段记录。
+
+新发现的正式功能优先使用已冻结发现报告中的完整源码行段，仍受提示词字节
+预算限制；不可完整展示的行段显式保留为缺口。引用必须落在实际展示的单个区间
+中，不以最大行号冒充中间未读取的内容。旧功能仍使用原来源选择及覆盖判定，
+已覆盖页不重新提取。预算预留/结算采用原子操作；订阅费用未报告仍为未知。
+
+完成但尚未发布的订阅知识缓存及已准备发布的恢复也必须先做只读原生证明复核。
+复核绑定原输入身份、源码 pin、KB 基点、有效 owner、两个模型的完整归档及
+精确正文/证据。失败在任何记录或发布写入前拒绝，恢复原归档后可以继续同一
+已准备的发布；已发布的历史记录保持不变。已有订阅工作检查点的输入发生变化
+时须建立新批次，不能静默覆盖或重新抽取。

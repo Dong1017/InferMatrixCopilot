@@ -23,7 +23,11 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey, Ed25519PublicKey,
 )
 
-PURPOSES = ("kb-gate-verdict", "kb-outbox-item", "kb-control", "kb-ack")
+PURPOSES = ("kb-gate-verdict", "kb-outbox-item", "kb-control", "kb-ack",
+            "kb-reconciliation-plan", "kb-reviewed-reconciliation",
+            "kb-reviewed-event-plan", "kb-reviewed-event-settlement", "kb-reviewed-orphan-hold",
+            "kb-containment-policy", "kb-containment-decision", "kb-containment-transport", "kb-maintenance-merge",
+            "kb-maintenance-resolution-request", "kb-maintenance-human-case", "kb-maintenance-calibration", "kb-maintenance-drill")
 
 
 class SignatureError(ValueError):

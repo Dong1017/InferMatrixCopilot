@@ -1,10 +1,10 @@
 ---
 title: "Qwen3-TTS 规则"
 created: 2026-07-20
-updated: 2026-09-22
+updated: 2026-10-13
 type: rule
 tags: [vllm-omni, models, serving, qwen-omni]
-sources: ["PR #5157", "PR #5202", "PR #5608", "PR #6001", "PR #6113", "PR #6523", "PR #6728", "PR #6861", vllm_omni/deploy/aura_omni.yaml, vllm_omni/deploy/qwen3_tts.yaml, vllm_omni/deploy/qwen3_tts_high_concurrency.yaml, vllm_omni/model_executor/models/aura_omni/pipeline.py, vllm_omni/model_executor/models/qwen3_tts/qwen3_tts_code2wav.py, vllm_omni/model_executor/models/qwen3_tts/prompt_embeds_builder.py, vllm_omni/model_executor/models/qwen3_tts/segmented_graph_wrapper.py, vllm_omni/model_executor/models/qwen3_tts/tokenizer_12hz/modeling_qwen3_tts_tokenizer_v2.py, vllm_omni/model_executor/stage_input_processors/chunk_size_utils.py, vllm_omni/entrypoints/openai/serving_speech.py, vllm_omni/entrypoints/openai/serving_speech_stream.py, vllm_omni/entrypoints/openai/speech_usage.py, vllm_omni/entrypoints/openai/tts_adapters/qwen3_tts.py, vllm_omni/model_executor/stage_input_processors/qwen3_tts.py, tests/e2e/online_serving/test_qwen3_tts_base.py, tests/e2e/online_serving/test_qwen3_tts_base_expansion.py, tests/entrypoints/openai_api/test_serving_speech.py, tests/entrypoints/openai_api/test_serving_speech_stream.py, tests/entrypoints/openai_api/test_tts_adapter.py, tests/model_executor/models/qwen3_tts/test_qwen3_tts_code2wav.py, tests/model_executor/models/qwen3_tts/test_qwen3_tts_incremental_decode.py, tests/model_executor/stage_input_processors/test_qwen3_tts_async_chunk.py, "PR #5048", "PR #6639"]
+sources: ["PR #5157", "PR #5202", "PR #5608", "PR #6001", "PR #6113", "PR #6523", "PR #6728", "PR #6861", vllm_omni/deploy/aura_omni.yaml, vllm_omni/deploy/qwen3_tts.yaml, vllm_omni/deploy/qwen3_tts_high_concurrency.yaml, vllm_omni/model_executor/models/aura_omni/pipeline.py, vllm_omni/model_executor/models/qwen3_tts/qwen3_tts_code2wav.py, vllm_omni/model_executor/models/qwen3_tts/prompt_embeds_builder.py, vllm_omni/model_executor/models/qwen3_tts/segmented_graph_wrapper.py, vllm_omni/model_executor/models/qwen3_tts/tokenizer_12hz/modeling_qwen3_tts_tokenizer_v2.py, vllm_omni/model_executor/stage_input_processors/chunk_size_utils.py, vllm_omni/entrypoints/openai/serving_speech.py, vllm_omni/entrypoints/openai/serving_speech_stream.py, vllm_omni/entrypoints/openai/speech_usage.py, vllm_omni/entrypoints/openai/tts_adapters/qwen3_tts.py, vllm_omni/model_executor/stage_input_processors/qwen3_tts.py, tests/e2e/online_serving/test_qwen3_tts_base.py, tests/e2e/online_serving/test_qwen3_tts_base_expansion.py, tests/entrypoints/openai_api/test_serving_speech.py, tests/entrypoints/openai_api/test_serving_speech_stream.py, tests/entrypoints/openai_api/test_tts_adapter.py, tests/model_executor/models/qwen3_tts/test_qwen3_tts_code2wav.py, tests/model_executor/models/qwen3_tts/test_qwen3_tts_incremental_decode.py, tests/model_executor/stage_input_processors/test_qwen3_tts_async_chunk.py, "PR #5048", "PR #6639", "issue #6855", "PR #8837"]
 confidence: high
 ---
 
@@ -230,3 +230,23 @@ Qwen 家族入口见 [Qwen-Omni](../qwen-omni/_index.md)。
 - 强制：每个 forward 采样一次 `is_npu_capturing = current_omni_platform.is_npu() and torch.npu.is_current_stream_capturing()`；存在 device graph 时，仅当**未**在外层 NPU capture 中才 `replay()`，capture 期间走普通/`compiled` forward 让外层图录制。无外层 capture 时仍使用内层 replay 快路径。
 - 禁止：把“非 CPU 即 FP32”重新扩到 NPU；在外层 capture 中嵌套 replay 内层 NPUGraph；或仅靠 stage 级 `PIECEWISE` workaround 声称已修复嵌套 replay 根因。
 - 验收：参数化断言 cpu/npu 不 upcast、cuda/xpu/musa upcast；`is_capturing` true/false 分别断言 skip/do replay。该合同属于共享 predictor，不证明每个 Qwen3 stage 已全图安全。^[PR #6639]
+
+## VLLM-OMNI-PR8837-HUB-SNAPSHOT — 引擎初始化前先把 Hub repo ID 解析成单一本地 snapshot
+
+- 触发：修改 Qwen3-TTS e2e 测试（如 `tests/e2e/features/prefill_phase/test_chunked_prefill_tail.py`）
+  中把 Hugging Face repo ID 同时交给 tokenizer/config 加载与多次 engine 构建的代码。
+- 强制：进入 tokenizer/config/engine 加载前，若路径不是本地目录，先用
+  `vllm_omni.transformers_utils.repo_utils.hf_api().snapshot_download(repo_id=...)` 解析一次，
+  并把返回的 snapshot 路径复用于后续全部加载与每一次 engine run；`MODEL_PREFIX` 指向的
+  既有本地目录必须继续零下载直通。
+- 禁止：让每次 engine init 都用 repo ID 重复查询远端 metadata——共享 CI token 会撞
+  repository-tree API 的 HTTP 429，使测试在 engine 初始化阶段失败；也不得借稳定化之名
+  删除既有 audio/prefill 断言。首次 snapshot 下载本身仍可能遇 Hub/网络错误，不得声称该
+  测试对 Hub 故障免疫。
+- 验收：本地目录输入不触发下载；Hub ID 只解析一次，tokenizer/config 与每次 engine run
+  均复用同一 snapshot 路径，engine 初始化阶段不再有重复的远端 metadata 查询（消除
+  Build 17081 那类每次 init 重复请求 repository-tree API 而撞 429 的模式）；chunked/
+  unchunked 音频不变量断言原样保留。仅有的一次 snapshot 下载仍可能因 Hub/网络错误而
+  失败，这是已知残余依赖，不得宣称修复后对 Hub 故障免疫，也不得把该残余失败判为回归。^[PR #8837]
+
+<!-- kb:rule status=active since=v0.30.0 -->

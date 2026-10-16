@@ -84,7 +84,7 @@ or discover repositories. The caller binds this verdict to the exact base/head."
 class _CheckpointBudget(Budget):
     """Persist an outstanding reservation before dispatch (crash-safe spend)."""
 
-    def __init__(self, limit: float, record: InitRecord, state_dir: Path):
+    def __init__(self, limit: float | None, record: InitRecord, state_dir: Path):
         super().__init__(limit, spent_usd=record.spent_usd)
         self.record, self.state_dir = record, state_dir
 
@@ -423,7 +423,7 @@ class _PrHistory(_Stage):
             return record
         prepared = save_prepared(
             InitRecord.path(rt.state_dir, record.repo, self.STAGE).with_name("pr-history-publish.json"),
-            base_sha=record.kb_base_sha, branch=f"kb/init-{record.repo}-pr-history", files=changed,
+            base_sha=record.kb_base_sha, branch=self._publication_branch(), files=changed,
             commits=commits, draft=True, title=title, body=self._body(), author=author, when=record.started_at)
         record.pr = {"prepared": str(prepared)}
         record.status = "publishing"

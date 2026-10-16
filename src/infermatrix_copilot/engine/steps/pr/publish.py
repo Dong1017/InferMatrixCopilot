@@ -290,14 +290,13 @@ def _review_payload(state: dict, *, current_head: str = "") -> tuple[dict, int]:
 
 def _current_pr_head(repo, pr: int) -> tuple[str, str]:
     """Resolve the current PR head SHA immediately before the write."""
-    code, out = _gh(["pr", "view", str(int(pr)), "--json", "commits"], cwd=repo)
+    code, out = _gh(["pr", "view", str(int(pr)), "--json", "headRefOid"], cwd=repo)
     if code != 0:
         return "", out[:400]
     try:
-        commits = json.loads(out or "{}").get("commits") or []
+        sha = str(json.loads(out or "{}").get("headRefOid") or "")
     except (AttributeError, json.JSONDecodeError):
-        commits = []
-    sha = str(commits[-1].get("oid") or "") if commits else ""
+        sha = ""
     return sha, "" if sha else "PR head SHA missing from gh response"
 
 
@@ -347,11 +346,23 @@ async def _post_review(ctx: StepContext) -> StepResult:
     payload_path = ctx.run_dir / "github_review_payload.json"
     payload_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    code, out = _gh([
-        "api", "--method", "POST",
-        f"repos/{full_name}/pulls/{int(pr)}/reviews",
-        "--input", str(payload_path),
-    ], cwd=repo)
+    from ....knowledge_service.containment import (
+        ContainmentError, configuration, knowledge_availability_check, knowledge_publication_guard,
+    )
+    try:
+        with knowledge_publication_guard():
+            if configuration()["enabled"]:
+                from ....app.run_service import read_knowledge_pin
+                usage = read_knowledge_pin(ctx.run_dir).get("knowledge_usage")
+                if not knowledge_availability_check(usage)["allowed"]:
+                    return StepResult(False, FailureKind.BLOCKED, "knowledge held; reassessment required")
+            code, out = _gh([
+                "api", "--method", "POST",
+                f"repos/{full_name}/pulls/{int(pr)}/reviews",
+                "--input", str(payload_path),
+            ], cwd=repo)
+    except ContainmentError:
+        return StepResult(False, FailureKind.BLOCKED, "knowledge policy unavailable; reassessment required")
     if code != 0:
         return StepResult(
             False,

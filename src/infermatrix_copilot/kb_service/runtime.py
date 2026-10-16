@@ -45,12 +45,13 @@ class KbRuntime:
     lease_owner: str | None = None  # set by `kb serve`, which holds the lease for its lifetime
     publisher_public_key: object | None = None
     traces: object | None = None  # trace_store.TraceStore: decisions and outcomes (model calls via the gateway)
+    maintenance: object | None = None  # opt-in durable nightly lane
     release_label: Callable[[str], str] = field(default=lambda repo: "")
     # the repository's upstream as the gate observes it (None: no facts attested)
     upstream_facts: Callable[[RepoLifecycle], object | None] = field(default=lambda lifecycle: None)
 
     @classmethod
-    def from_env(cls, settings, *, state_dir: Path | None = None) -> "KbRuntime":
+    def from_env(cls, settings, *, state_dir: Path | None = None, sync_repos: bool = True) -> "KbRuntime":
         from ..sdk._resources import adapters_root
         from .cli import DEFAULT_STATE_DIR
 
@@ -59,7 +60,7 @@ class KbRuntime:
                                     mode=os.environ.get("KB_GENERAL_MODE", "shadow"))
         registry = load_registry(Path(os.environ.get("ADAPTERS_DIR") or adapters_root()), general=general)
         ledger = Ledger(state_dir / "kb.db")
-        for lifecycle in registry.values():
+        for lifecycle in registry.values() if sync_repos else ():
             ledger.ensure_repo(lifecycle.repo, lifecycle.mode if lifecycle.enabled else "disabled")
         generator, judge = roles_from_env()
         outbox = None
@@ -74,6 +75,7 @@ class KbRuntime:
 
             publisher_key = load_public_key(Path(os.environ["KB_PUBLISHER_PUBKEY"]).read_text(encoding="utf-8"))
         from ..trace_store import TraceStore
+        from .maintenance_settings import MaintenanceConfig
 
         traces = TraceStore(state_dir / "traces")
         github = GitHubReader()
@@ -84,7 +86,7 @@ class KbRuntime:
             gateway=ModelGateway(settings, recorder=trace_recorder(traces)),
             generator=generator, judge=judge,
             knowledge=KnowledgeRepo(Path(os.environ.get("KB_KNOWLEDGE_CLONE") or state_dir / "knowledge-repo")),
-            github=github, outbox=outbox,
+            github=github, outbox=outbox, maintenance=MaintenanceConfig.from_env(),
         )
 
     # -- helpers -------------------------------------------------------------
@@ -120,24 +122,28 @@ def trace_recorder(traces):
     """Every model call (inputs, outputs, usage, failure) as a trace/1
     ``model_call`` record, under the caller's bound trace context."""
 
-    def record(entry: dict) -> None:
+    def record(entry: dict) -> dict | None:
         try:
-            traces.append(
+            return traces.append(
                 "model_call",
                 inputs={"system": entry["system"], "prompt": entry["prompt"]},
-                outputs={"reply": entry["reply"]},
-                model={k: entry.get(k, "") for k in ("role", "provider", "model", "effort", "served_model")},
+                outputs={"reply": entry["reply"],
+                         **({"native_events": entry["native_events"]} if "native_events" in entry else {})},
+                model={**{k: entry.get(k, "") for k in ("role", "provider", "model", "effort", "served_model")},
+                       **({"native_reasoning_level": entry["native_reasoning_level"]} if "native_reasoning_level" in entry else {})},
                 usage=entry.get("usage") or {}, seconds=entry.get("seconds"),
                 # spend: the requested stop threshold and the reported cost
                 # (None when unset/unknown), on failures too
                 result={"stop_reason": entry.get("stop_reason", ""),
                         "max_budget_usd": entry.get("max_budget_usd"),
                         "cost_usd": entry.get("cost_usd"),
+                        **({k: entry[k] for k in ("native_attempt_id", "native_session_ids") if k in entry}),
                         **({"fallback_from": entry["fallback_from"]} if entry.get("fallback_from") else {})},
                 error=entry.get("error", ""))
         except Exception:  # noqa: BLE001 - tracing never breaks a model call
             pass
 
+    record.begin_call = traces.begin_call
     return record
 
 
@@ -243,11 +249,49 @@ def _run_intake_locked(rt: KbRuntime, lifecycle: RepoLifecycle, *, max_events: i
             # attempt link exactly the call whose reply became the change to
             # the decision that later stages it
             key, holder = draft_key_for_event(lifecycle.repo, event["id"]), {}
+            from ..config import Settings
+            from ..improve.artifacts import runtime_settings
+            draft_settings = runtime_settings(getattr(rt, "settings", None) or Settings(), "kb-intake.draft")
             with trace_context(draft_key=key, _accepted=holder, step="draft"):
-                drafts.append(draft_changes(
-                    repo=lifecycle.repo, repo_dir=lifecycle.knowledge_dir, event_id=event["id"],
-                    evidence=event["payload"], files=base, gateway=rt.gateway,
-                    generator=rt.generator, release=release, today=today))
+                from ..improve import objectives
+                prediction = None
+                if objectives.enabled(draft_settings) and draft_settings.improve_enabled and draft_settings.improve_evolve_enabled and rt.traces is not None:
+                    from ..improve.runtime import active, execute
+                    payload = {"repo": lifecycle.repo, "repo_dir": lifecycle.knowledge_dir, "event_id": event["id"],
+                               "evidence": event["payload"], "files": base, "release": release, "today": today,
+                               "external_texts": external, "generator_model": rt.generator.model}
+                    try:
+                        objectives.capture(rt.traces, "kb-intake.draft", f"{lifecycle.repo}#{event['id']}", payload)
+                    except objectives.ReplayCaptureLimit as exc:
+                        # Ordinary pinned drafting does not require an evolution
+                        # replay. An active (even disabled) evolved workflow does.
+                        try:
+                            entry = active(draft_settings)
+                            workflows = entry.get("workflows", [])
+                            if not isinstance(workflows, list) or not all(isinstance(w, str) for w in workflows):
+                                raise ValueError("invalid active draft workflows")
+                            is_active = "kb-intake.draft" in workflows
+                        except Exception as registry_exc:
+                            raise ModelUnavailable("cannot verify active draft release: " + str(registry_exc)) from registry_exc
+                        if is_active:
+                            raise ModelUnavailable("active draft lacks a complete replay: " + str(exc)) from exc
+                    else:
+                        from ..llm import LLM
+                        try:
+                            prediction = execute(draft_settings, rt.traces, "kb-intake.draft", payload, LLM(draft_settings))
+                        except Exception as exc:
+                            raise ModelUnavailable("autonomous draft rolled back: " + str(exc)) from exc
+                if prediction is not None:
+                    from .intake import Draft
+                    from ..knowledge_service.ops import KnowledgeOperation
+                    drafts.append(Draft(event_ids=[event["id"]], operations=[KnowledgeOperation.from_dict(o) for o in prediction["operations"]],
+                                        result=None, rationale=prediction.get("rationale", ""), rejected=prediction.get("rejected", False)))
+                else:
+                    drafts.append(draft_changes(
+                        repo=lifecycle.repo, repo_dir=lifecycle.knowledge_dir, event_id=event["id"],
+                        evidence=event["payload"], files=base, gateway=rt.gateway,
+                        generator=rt.generator, release=release, today=today,
+                        max_operations=max(1, min(6, draft_settings.kb_draft_max_operations))))
             if accepted_key(key, holder):
                 accepted[event["id"]] = accepted_key(key, holder)
         except ModelUnavailable as exc:
@@ -347,7 +391,7 @@ def gate_and_stage(rt: KbRuntime, lifecycle: RepoLifecycle, owner: str, *, kind:
                      "l1_issues": [i.to_dict() for i in decision.l1.issues]})
     from .companion import needs_companion, stage_companion
 
-    if needs_companion(decision) and not hold and not force_human and operations:
+    if needs_companion(decision) and kind not in {"correction", "maintenance_calibration"} and not hold and not force_human and operations:
         # the change is fine except for citations outside knowledge/: draft the
         # companion PR that updates them; this change waits for it
         stage_companion(rt, lifecycle, owner, changeset_id, operations, decision, external, base_sha)
@@ -362,6 +406,8 @@ def publish(rt: KbRuntime, lifecycle: RepoLifecycle, changeset_id: str) -> str:
     (verdict signing, the merge item, activation) is driven by the scheduler once the
     publisher reports the PR."""
     changeset = rt.ledger.changeset(changeset_id)
+    if changeset["kind"] == "maintenance_calibration":
+        return "maintenance_calibration"
     if changeset["status"] != "gated":
         return changeset["status"]
     state = rt.ledger.repo_state(lifecycle.repo)
@@ -370,6 +416,12 @@ def publish(rt: KbRuntime, lifecycle: RepoLifecycle, changeset_id: str) -> str:
             or rt.outbox is None:
         rt.ledger.update_changeset(changeset_id, status="shadow_recorded")
         return "shadow_recorded"
+    if changeset["kind"] == "correction":
+        from .maintenance import correction_publishable
+        reason = correction_publishable(rt, changeset)
+        if reason:
+            rt.ledger.update_changeset(changeset_id, status="maintenance_held", detail={**changeset["detail"], "maintenance_hold": reason})
+            return "maintenance_held"
     if not calibration_current(rt, lifecycle):
         # auto_merge is only as good as the judge: no current passing
         # calibration for THIS judge and THIS case set, no publication
@@ -386,7 +438,7 @@ def publish(rt: KbRuntime, lifecycle: RepoLifecycle, changeset_id: str) -> str:
         "branch": f"kb/{lifecycle.repo}/{changeset_id}",
         "files": {f"knowledge/{rel}": text for rel, text in data["files"].items()},
         "deleted": [f"knowledge/{rel}" for rel in data.get("deleted", [])],
-        "title": f"knowledge({lifecycle.repo}): {len(detail['operations'])} change(s) from intake",
+        "title": f"knowledge({lifecycle.repo}): {len(detail['operations'])} change(s) from {changeset['kind']}",
         "body": _pr_body(changeset_id, detail),
     })
     rt.ledger.update_changeset(changeset_id, status="pr_requested")

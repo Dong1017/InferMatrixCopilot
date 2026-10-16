@@ -48,7 +48,8 @@ install.cmd --repo-path D:\path\to\vllm-omni
 ```
 
 安装器**自动识别本机的 Codex、Claude Code 和 Cursor**，为识别到的每一个注册
-MCP 与五个 Skill（`imreview` / `imdesign` / `imcifix` / `imupdate` / `imkbinit`），并创建
+MCP 与插件中的 Skill（包括 `imreview` / `imdesign` / `imcoding` / `imcifix` /
+`imupdate` / `imkbinit`），并创建
 `~/.infermatrix-copilot/.env`。
 
 **装完必须重启宿主。**
@@ -80,6 +81,10 @@ codex mcp list
 ```text
 Use InferMatrixCopilot in Direct mode to review this PR.
 ```
+
+实现功能时，Codex 使用 `$imcoding <需求或设计>`，Claude Code 和 Cursor 使用
+`/imcoding <需求或设计>`。宿主 Agent 会在目标仓库内实现代码、完成集成并运行
+相关验证；已有 `imdesign` 设计包可直接作为输入。
 
 ## 5. Direct 一次审查会发生什么
 

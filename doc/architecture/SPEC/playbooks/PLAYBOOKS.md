@@ -1,6 +1,6 @@
 # playbooks/*.yaml —— 规范
 
-<!-- verified-against: 2026-10-02 -->
+<!-- verified-against: 2026-10-05 -->
 
 `9 个文件 · 声明式编排数据 · refactor-status: ok`
 
@@ -59,9 +59,22 @@ success, steps[]`。
 知识服务的合并推进、发版巡检与快照激活；candidate 状态，由 `kb serve` 调度或 `kb run` 手动运行。
 
 ## kb-init（candidate）
-为一个仓库建知识库：单步 `knowledge.init`，每次运行一个阶段（skeleton → modules → knowledge（解释性知识）→ deepen + 生命周期开关 →
+为一个仓库建知识库：单步 `knowledge.init`，每次运行一个阶段（skeleton → feature-discovery（显式启用）→ modules → knowledge（解释性知识）→ deepen + 生命周期开关 →
 pr-history → harvest-calibration），每阶段一个由人合并的 PR。只由 `kb init REPO --stage S` 运行，不经 `kb serve`，不写服务账本。
+`feature-discovery` 先提取文档功能基线，再遍历固定源码与测试库存；独立评审后的目录 PR
+合并后冻结，下游核对目录哈希与源码版本。新初始化模板启用发现；旧仓库保持兼容。
+`from_existing` 可用于发现、modules 与解释性知识：缺少本地 skeleton 记录时
+核验已合并入口与 owner 页面；已有阶段记录及发现目录仍保留完成和合并门禁。
+默认 GLM‑5.3 提取、Codex 独立评审，共享并发 13；支持 `from_existing`、
+`retry_unfinished`、`budget_usd` 或 `unlimited_subscription`。未知项不增加正式功能计数，
+原生追踪归档在 Git 外。详细契约见 [`../kb_service.md`](../kb_service.md)。
 `pr-history` 默认回溯 1000 个已合并上游 PR；可传 `pr_count` 和累计花费上限 `budget_usd`。
 每个非空知识升级一个 commit，汇成一个 draft PR，完整 Codex 审阅通过后才 ready。
 `knowledge` 可传 `from_existing` 从已合并索引与路由增补（保留已有阶段记录的门禁），
 可显式传 `subscription_generator` 使用声明订阅计费的生成器；未报告的订阅费用不伪造为 USD。
+独立 knowledge-deepen 可传 `unlimited_subscription`，同时检查生成与裁判订阅；不兼容
+budget_usd，固定记账仍可观察。启用语义政策时 partial 预览不能当作阶段成功。
+
+## 自进化接入（2026-10-04）
+
+`workflow-improve` 通过 mode 区分元基准、旧周期与进化协调器；CLI、playbook 和周度调度共用协调器。`improve.evolve_publish` 是 push 风险步骤，只有候选 pr-ready 且任务 post、ALLOW_POST、ALLOW_PUSH 门均开放时才写独立进化 outbox。

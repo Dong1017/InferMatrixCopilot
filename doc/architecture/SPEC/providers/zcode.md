@@ -2,7 +2,7 @@
 
 <!-- verified-against: 2026-10-16 -->
 
-`LOC ~400 · harness transport（Z.AI / GLM 订阅） · refactor-status: ok`
+`harness transport（Z.AI / GLM 订阅） · refactor-status: ok`
 
 ## 职责
 在 Z.AI OAuth 订阅认证下，通过 `zcode` CLI 跑完**一整个** agent step。
@@ -20,6 +20,9 @@ argv 单参数上限 128KiB）。
 
 ## 公开契约
 `ZCodeTransport`（`auth_gap`、`run_session`、`complete`）、`spec = PROVIDERS["zcode"]`。
+`complete(..., native_event_sink=None)` 保留无工具、隔离临时目录调用；显式传入 sink 时
+实时交付原生事件，`supports_native_events=True`。`native_snapshot()` 只返回提供方实际报告的
+用量与模型；缺失的 token、缓存和 USD 字段保持未知，不补造零值。
 
 ## 不变量（**C1**、**C2**）
 - **会话 cwd 永远是自有临时目录，不是 PR worktree。** zcode 从 cwd 加载 `.env`，并从 cwd
@@ -36,8 +39,14 @@ argv 单参数上限 128KiB）。
   `Read` 读附件时才保留 `Read`，且任何读到临时目录之外的调用都让这次调用失败。
   one-shot 的局部配置关闭 memory/use、skills、plugins、subagent 和 MCP，并把 CLI storage
   放入会话临时目录；避免保留下来的 Read 接触宿主自动记忆。工具桥会话同样关闭 memory/use。
-- **失败的运行不能读成空评审。** 非零退出或流里没有 `result` 事件（未超时时）直接抛
-  `RuntimeError`，带上 zcode 自己的 stderr。
+- **失败的运行不能读成空评审。** 非零退出或流里没有 `result` 事件（未超时时），普通调用
+  和原生事件调用先将已识别失败转换为固定安全消息的 `ZCodeFailure`；未知失败仍抛
+  `RuntimeError`，保留 zcode 自己的 stderr 诊断。
+- **原生日志的持久化不能截断 CLI 输出。** 原生事件模式将 stdout/stderr 接到每次调用自有的
+  临时普通文件，宿主按独立偏移实时读取并逐事件留痕；不对共享写描述符 seek。
+  ZCode 的退出 watchdog 不等待管道缓冲排空，慢速留痕时普通文件避免丢失已完成回答。
+  进程结束后仍排空所有输出及末尾非换行片段，再严格核验 `result`；超时只约束仍在运行的
+  CLI，已退出进程的日志排空不误判为模型超时。异常／中断仍回收该调用的进程组和临时文件。
 - **模型按次钉死，再断言。** zcode 没有 `--model`；一个会话取其个人 provider 配置里的
   `defaultModelSelection`，且仅当该条目**可选**（0.16.9 的 `resolveInitialModelSelection` 要求
   `options.reasoningLevel` 存在，否则静默回退到目录里第一个模型——这就是过去手写条目"不起作用"的原因），
@@ -61,7 +70,9 @@ argv 单参数上限 128KiB）。
 stdlib + `.base` + `..agent_loop.AgentOutcome` + `..llm` 的类型与 `ModelMismatchError`。
 
 ## 测试
-`test_provider_zcode.py`（离线，事件形状取自 zcode 0.16.9 实跑）；2026-09-30 用真实 zcode 做过
+`test_provider_zcode.py`（离线，事件形状取自 zcode 0.16.9 实跑）与
+`test_zcode_stream_spool.py` 覆盖无工具隔离、模型钉住、两种调用路径的安全失败分类、
+慢速 sink 的完整输出、真实超时和中断回收；2026-09-30 用真实 zcode 做过
 一次端到端冒烟（工具桥 `read_file` 被调用，`bridge_trace.jsonl` 有记录）。
 
 `complete()` 接受并忽略 `max_budget_usd`；`stops_at_spend` 为 False（CLI 无花费阈值，`ModelGateway` 请求阈值时在派发前拒绝）。

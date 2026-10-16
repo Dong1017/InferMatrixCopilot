@@ -41,7 +41,7 @@ from .init_budget import Budget, Price, generator_reservation, load_prices, pric
 from .models import ModelGateway, ModelReply, ModelRole, ModelUnavailable
 
 INIT_DIR = "init"
-STAGES = ("skeleton", "modules", "knowledge", "deepen", "pr-history", "harvest-calibration")
+STAGES = ("skeleton", "feature-discovery", "modules", "knowledge", "deepen", "pr-history", "harvest-calibration")
 INDEPENDENT_STAGES = ("knowledge-deepen",)
 KNOWLEDGE_PREFIX = "knowledge/"
 ALLOW_PUSH_ENV = "ALLOW_PUSH"
@@ -49,13 +49,18 @@ ALLOW_POST_ENV = "ALLOW_POST"
 AUTHOR_ENV = "KB_INIT_GIT_AUTHOR"
 CLONE_ENV = "KB_INIT_KNOWLEDGE_CLONE"
 _AUTHOR = re.compile(r"(?P<name>[^<>]+?)\s*<(?P<email>[^<>\s]+@[^<>\s]+)>")
-_SHA = re.compile(r"[0-9a-f]{40}")
+_SHA = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})")
 # what an init PR may write, repository-relative
 INIT_PATHS = (
     re.compile(r"knowledge/(?:repos/[A-Za-z0-9._-]+|general)/(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+\.(?:md|yaml)"),
     re.compile(r"knowledge/repos/_index\.md"),   # the shared list a new repository is added to
     re.compile(r"adapters/[A-Za-z0-9_-]+/manifest\.yaml"),
     re.compile(r"adapters/[A-Za-z0-9_-]+/kb-calibration/cases/[A-Za-z0-9._-]+\.json"),
+)
+# These paths need an exact publication scope, never a generic init permission.
+DISCOVERY_PATHS = (
+    re.compile(r"adapters/[A-Za-z0-9_-]+/knowledge-coverage\.yaml"),
+    re.compile(r"eval/feature-discovery/[A-Za-z0-9._-]+-[0-9a-f]{12}\.json"),
 )
 MAX_DOC_FILES = 40
 MAX_DOC_BYTES = 200_000
@@ -93,6 +98,7 @@ class InitRecord:
     history: dict = field(default_factory=dict)           # pr-history selection, checkpoints and commit plan
     review: dict = field(default_factory=dict)            # aggregate review, bound to the exact base/head
     depth: dict = field(default_factory=dict)             # independent semantic-depth checkpoints
+    discovery: dict = field(default_factory=dict)         # feature discovery checkpoints and frozen catalog
 
     @staticmethod
     def path(state_dir: Path, repo: str, stage: str) -> Path:
@@ -163,8 +169,12 @@ class UpstreamPin:
         listing = self._git("ls-remote", "--symref", "origin", "HEAD").decode(errors="replace")
         match = re.search(r"^ref:\s+(refs/heads/\S+)\s+HEAD$", listing, re.MULTILINE)
         if match is None:
-            raise InitError(f"{self.full_name} does not report a default branch")
-        self._git("symbolic-ref", "HEAD", match.group(1))
+            # A local source can intentionally have a detached HEAD and no origin.
+            # Fetch that exact object; do not fabricate a default branch.
+            self._git("fetch", "--quiet", "origin", "+HEAD:refs/kb/source-head")
+            self._git("update-ref", "--no-deref", "HEAD", self._git("rev-parse", "refs/kb/source-head").decode().strip())
+        else:
+            self._git("symbolic-ref", "HEAD", match.group(1))
 
     def resolve(self, ref: str) -> str:
         sha = self._git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}").decode().strip()
@@ -173,24 +183,13 @@ class UpstreamPin:
         return sha
 
     def export(self, pin: str, dest: Path) -> Path:
-        """The tree at ``pin`` as plain files (``git archive``; members that
-        would land outside ``dest`` are refused)."""
-        data = self._git("archive", "--format=tar", pin)
-        dest = Path(dest)
-        dest.mkdir(parents=True, exist_ok=True)
-        root = dest.resolve()
-        with tarfile.open(fileobj=io.BytesIO(data)) as archive:
-            for member in archive.getmembers():
-                target = (dest / member.name).resolve()
-                if not target.is_relative_to(root) or member.issym() or member.islnk():
-                    continue  # links and escapes are not docs or code we read
-                if member.isdir():
-                    target.mkdir(parents=True, exist_ok=True)
-                elif member.isfile():
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    source = archive.extractfile(member)
-                    target.write_bytes(source.read() if source is not None else b"")
-        return dest
+        """Materialize exact committed blobs, without Git archive attributes."""
+        from .git_source import GitSource
+        from .sources import SourceError
+        try:
+            return GitSource(self.path).export(pin, dest)
+        except SourceError as exc:
+            raise InitError(str(exc)) from exc
 
     def observer(self, pin: str, *, pull=None) -> PinnedObserver:
         return PinnedObserver(self.path, self.full_name, pin, pull=pull)
@@ -248,7 +247,7 @@ def collect_docs(root: Path, globs: tuple[str, ...], *, max_files: int = MAX_DOC
 
 @dataclass
 class InitRuntime:
-    settings: Any
+    settings: Any = field(repr=False)
     state_dir: Path
     registry: dict
     gateway: ModelGateway
@@ -257,12 +256,16 @@ class InitRuntime:
     knowledge: Any                    # sources.KnowledgeRepo
     github: Any                       # sources.GitHubReader
     prices: dict[str, Price] = field(default_factory=load_prices)
-    environ: Mapping[str, str] = field(default_factory=lambda: dict(os.environ))
+    environ: Mapping[str, str] = field(default_factory=lambda: dict(os.environ), repr=False)
     clock: Callable[[], float] = time.time
     gh_run: Callable[..., subprocess.CompletedProcess] = subprocess.run
     upstream_remote: Callable[[str], str] | None = None   # full_name -> clone URL (tests)
     pull: Callable[[str, int], dict] | None = None        # PR lookup for pinned claims (tests)
     subscription_generator: bool = False
+    unlimited_subscription: bool = False
+    discovery_concurrency: int = 13
+    portable_spec: Any = None
+    discovery_paths: tuple[str, ...] | None = None
 
     @property
     def init_dir(self) -> Path:
@@ -289,10 +292,14 @@ class InitRuntime:
         traces = TraceStore(state_dir / INIT_DIR / "traces")
         clone = Path(os.environ.get(CLONE_ENV) or state_dir / INIT_DIR / "knowledge-repo")
         ensure_knowledge_clone(clone)
+        from .model_dispatch import SharedModelDispatch
+
+        gateway = ModelGateway(settings, recorder=trace_recorder(traces))
+        gateway.configure_dispatch(SharedModelDispatch())
         return cls(
             settings=settings, state_dir=state_dir,
             registry=load_registry(Path(os.environ.get("ADAPTERS_DIR") or adapters_root())),
-            gateway=ModelGateway(settings, recorder=trace_recorder(traces)),
+            gateway=gateway,
             generator=generator, judge=judge,
             knowledge=KnowledgeRepo(clone), github=GitHubReader(),
         )
@@ -320,9 +327,11 @@ def generate(rt: InitRuntime, budget: Budget, init, *, system: str, prompt: str,
     """One generator call, reserved first: threshold + one worst-case request.
     Raises ``PriceError`` (no price: nothing is dispatched), ``BudgetExhausted``
     or ``ModelUnavailable``."""
-    if rt.subscription_generator:
+    if rt.subscription_generator or rt.unlimited_subscription:
+        if rt.unlimited_subscription and rt.generator.fallback is not None:
+            raise ModelUnavailable("unlimited subscription generation must not configure a fallback", allow_fallback=False)
         if not rt.gateway.subscription_billing(rt.generator):
-            raise ModelUnavailable("subscription generator needs an authenticated subscription backend")
+            raise ModelUnavailable("subscription generator needs an authenticated subscription backend", allow_fallback=False)
         # No API spend threshold applies to this explicitly selected coding
         # subscription. Preserve unreported USD and token usage; subscription
         # fees are outside the stage's separate judge USD accounting.
@@ -346,6 +355,11 @@ def judge(rt: InitRuntime, budget: Budget, init, block, *, base: Mapping[str, st
     as verdict ``human`` with ``reasons["model"]`` set."""
     from .gate import judge_block
 
+    if rt.unlimited_subscription:
+        if rt.judge.fallback is not None:
+            raise ModelUnavailable("unlimited subscription judgment must not configure a fallback", allow_fallback=False)
+        if not rt.gateway.subscription_billing(rt.judge):
+            raise ModelUnavailable("subscription judge needs an authenticated subscription backend", allow_fallback=False)
     with budget.reserve(init.judge_call_usd) as reservation:
         verdict = judge_block(block, base=dict(base), head=dict(head), evidence=evidence,
                               gateway=rt.gateway, judge=rt.judge)
@@ -390,7 +404,7 @@ def other_path_problems(other: Mapping[str, tuple[str | None, str | None]],
     init may write, and each gets its own check (design §9.3)."""
     problems: list[str] = []
     for path, (before, after) in sorted(other.items()):
-        if path.startswith(KNOWLEDGE_PREFIX) or not any(p.fullmatch(path) for p in INIT_PATHS):
+        if path.startswith(KNOWLEDGE_PREFIX) or not any(p.fullmatch(path) for p in INIT_PATHS + DISCOVERY_PATHS):
             problems.append(f"init may not write {path}")
         elif check_other is None:
             problems.append(f"no check for {path}")
@@ -464,6 +478,8 @@ class InitPublisher:
     clone: Path                      # the knowledge repository clone (KnowledgeRepo.path)
     repository: str                  # owner/name of the knowledge repository
     run: Callable[..., subprocess.CompletedProcess] = subprocess.run
+    # A discovery publication may write only these two exact repo-relative files.
+    allowed_paths: tuple[str, ...] = ()
 
     def _git(self, *args: str, env: Mapping[str, str] | None = None, input: bytes | None = None,
              auth: bool = False) -> str:
@@ -508,7 +524,8 @@ class InitPublisher:
         """The change as ONE commit on ``base_sha`` (scratch index; dates from
         ``when`` so a retry rebuilds the same SHA)."""
         for path in files:
-            if not any(p.fullmatch(path) for p in INIT_PATHS) or ".." in path.split("/"):
+            allowed = path in self.allowed_paths if self.allowed_paths else any(p.fullmatch(path) for p in INIT_PATHS)
+            if not allowed or ".." in path.split("/"):
                 raise InitError(f"refusing to write {path}")
         if self._git("cat-file", "-t", base_sha) != "commit":
             raise InitError(f"base {base_sha[:12]} is not a commit")

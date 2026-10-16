@@ -1,10 +1,17 @@
 # engine/agent_runtime/ —— 规范
 
-<!-- verified-against: 2026-10-02 -->
+<!-- verified-against: 2026-10-06 -->
 
 `LOC ~1690（7 个文件） · 引擎（受治理的 agent 运行时） · refactor-status: ok`
 
 ## 职责
+
+含 `_repositories.yaml` 的固定快照默认采用 `knowledge_context_profile="adaptive"`；
+旧快照默认 legacy，也可显式选择。`doc_search` / `doc_read` / `doc_related`、规则与
+`doc_context_briefing` 共用 run 私有累计会话，`doc_context_expand` 必须给原因且保留
+源码/输出留白。实际注入正文和哈希写 trace，runner直接注入已围栏的 `model_content`。
+跨仓库 target 只选择已确认依赖，授权由 Settings 固定传入；模型工具不能授予权限。
+
 
 开启 `profile_briefing_enabled` 且证据包含 `pr_diff` 时，runner 使用既有 diff parser 提取
 路径，通过 `doc_related` 在首个模型调用前注入同一有界知识背景。内容放入 untrusted
@@ -108,3 +115,7 @@ step 专属的 prompt/lens 住在各自的 step 文件里（例如 `steps/review
 cheap-seat 与按 pass 路由、MoA harness 成员、考古工具）。有两条教训被编码在上面的不变量
 里而不是写成散文：**预算保证属于代码，不属于 prompt**；以及**无法履约的路由决策必须
 大声失败** —— 因为本轮战役已经测到过三条与其标签不符的 arm。
+
+## 自进化接入（2026-10-04）
+
+影子 agent 使用严格只读 scope，知识检索与 repo map 受读根约束，拒绝知识写入工具。API 与 harness 调用均记录 trace/1；工作流的采集和配置指纹由执行器绑定，普通生产运行保持既有工具能力。

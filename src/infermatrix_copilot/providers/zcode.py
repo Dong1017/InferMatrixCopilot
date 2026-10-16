@@ -56,10 +56,13 @@ import json
 import logging
 import os
 import re
+import signal
+import time
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 from functools import cached_property
 from pathlib import Path
 
@@ -167,6 +170,7 @@ def _known_model_failure(events: list[dict]) -> ZCodeFailure | None:
 class ZCodeTransport(HarnessTransport):
     """zcode CLI (headless prompt mode) as a Strict backend."""
 
+    supports_native_events = True
     spec = PROVIDERS["zcode"]
 
     @cached_property
@@ -287,7 +291,7 @@ class ZCodeTransport(HarnessTransport):
         return path
 
     def _run(self, text: str, *, session: Path, timeout_s: float,
-             tool_less: bool = False, model: str = "") -> tuple[list[dict], bool]:
+             tool_less: bool = False, model: str = "", native_event_sink=None) -> tuple[list[dict], bool]:
         """One CLI invocation → (parsed events, timed_out). A timeout kills
         the process but keeps the partial stream as salvage material.
         `tool_less` also removes the native reads unless an oversized prompt
@@ -317,6 +321,8 @@ class ZCodeTransport(HarnessTransport):
                     if k in os.environ})
         if model:
             env[_PERSONAL_CONFIG_ENV] = str(self._write_model_config(session, model))
+        if native_event_sink is not None:
+            return self._stream_run(cmd, session, env, timeout_s, native_event_sink)
         timed_out = False
         returncode, stderr = 0, ""
         try:
@@ -357,6 +363,138 @@ class ZCodeTransport(HarnessTransport):
         return events, timed_out
 
     @staticmethod
+    def _stream_run(cmd, session, env, timeout_s, sink):
+        """Journal private regular-file spools without backpressuring the CLI.
+
+        ZCode writes stream events without awaiting pipe backpressure, then
+        forces process exit after a short grace period. A durable event sink
+        can therefore lose even a completed result through an output pipe.
+        POSIX regular-file writes are synchronous in Node; anonymous files
+        keep the full output while we journal it at the sink's own pace.
+        """
+        events, stderr, buffers = [], [], {"stdout": b"", "stderr": b""}
+
+        def line(channel, raw):
+            text = raw.decode("utf-8", "replace")
+            if channel == "stdout":
+                try:
+                    event = json.loads(text)
+                except ValueError:
+                    event = None
+                if isinstance(event, dict):
+                    events.append(event)
+                    sink(event)
+                    return
+            if channel == "stderr":
+                stderr.append(text)
+            sink({"type": "native." + channel, "text": text})
+
+        # TemporaryFile creates mode-0600 anonymous files in our session;
+        # no named raw-output file persists or enters session attachments.
+        with tempfile.TemporaryFile(mode="w+b", buffering=0, dir=session) as stdout, \
+                tempfile.TemporaryFile(mode="w+b", buffering=0, dir=session) as stderr_file:
+            spools = {"stdout": stdout, "stderr": stderr_file}
+            offsets = {channel: 0 for channel in spools}
+            proc = subprocess.Popen(cmd, cwd=str(session), env=env, stdin=subprocess.DEVNULL,
+                                    stdout=stdout, stderr=stderr_file, start_new_session=True)
+            timed_out = False
+            group_stopped = False
+            stop_lock = threading.Lock()
+
+            def kill(*, at_deadline=False):
+                nonlocal group_stopped, timed_out
+                with stop_lock:
+                    if group_stopped or (at_deadline and proc.poll() is not None):
+                        return
+                    group_stopped = True
+                    if at_deadline:
+                        timed_out = True
+                    try:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+
+            # A slow sink must neither postpone a real producer timeout nor
+            # turn draining an already-exited producer into a false timeout.
+            watchdog = threading.Timer(timeout_s, lambda: kill(at_deadline=True))
+            watchdog.daemon = True
+            watchdog_started = False
+
+            def emit(channel, raw, *, best_effort=False):
+                if not best_effort:
+                    line(channel, raw)
+                    return
+                try:
+                    line(channel, raw)
+                except BaseException:
+                    pass  # retain the original interruption / sink failure
+
+            def drain(channel, *, best_effort=False):
+                # pread must not move the shared child descriptor's offset:
+                # seek/read on it could make the CLI overwrite prior output.
+                chunk = os.pread(spools[channel].fileno(), 65536, offsets[channel])
+                offsets[channel] += len(chunk)
+                buffers[channel] += chunk
+                while b"\n" in buffers[channel]:
+                    raw, buffers[channel] = buffers[channel].split(b"\n", 1)
+                    emit(channel, raw, best_effort=best_effort)
+                return bool(chunk)
+
+            def tails(*, best_effort=False):
+                for channel in buffers:
+                    raw, buffers[channel] = buffers[channel], b""
+                    if raw:
+                        emit(channel, raw, best_effort=best_effort)
+
+            try:
+                watchdog.start()
+                watchdog_started = True
+                while True:
+                    alive = proc.poll() is None
+                    if not alive:
+                        # The leader has finished; no owned descendant may
+                        # keep growing a spool after its completed invocation.
+                        kill()
+                    changed = False
+                    for channel in spools:
+                        changed = drain(channel) or changed
+                    if not alive and not changed:
+                        tails()
+                        break
+                    if not changed:
+                        time.sleep(0.02)
+                proc.wait()
+            except BaseException:
+                # Stop production first, then preserve all bytes already
+                # spooled, including tails lacking a final newline. Sink
+                # failures must never replace the original interruption.
+                kill()
+                proc.wait()
+                for channel in spools:
+                    try:
+                        while drain(channel, best_effort=True):
+                            pass
+                    except BaseException:
+                        pass
+                tails(best_effort=True)
+                raise
+            finally:
+                # This process group belongs only to this invocation.
+                watchdog.cancel()
+                if watchdog_started:
+                    watchdog.join()
+                kill()
+                proc.wait()
+        if not timed_out and (proc.returncode != 0 or not any(e.get("type") == "result" for e in events)):
+            known = _known_model_failure(events)
+            if known is not None:
+                raise known
+            detail = " ".join(stderr[-3:])[:400]
+            raise RuntimeError(f"zcode exited {proc.returncode} without a result event"
+                               + (f": {detail}" if detail else ""))
+        return events, timed_out
+
+    @staticmethod
     def _final_text(events: list[dict]) -> str:
         for event in reversed(events):
             if event.get("type") == "result":
@@ -377,6 +515,24 @@ class ZCodeTransport(HarnessTransport):
                 usage.input_tokens = int(raw.get("inputTokens") or 0)
                 usage.output_tokens = int(raw.get("outputTokens") or 0)
         return usage
+
+    @classmethod
+    def native_snapshot(cls, events: list[dict]) -> dict:
+        """Reported native facts; omitted counters and invoice cost are unknown."""
+        usage, served_model = {}, ""
+        keys = {"inputTokens": "input_tokens", "outputTokens": "output_tokens",
+                "cacheReadInputTokens": "cache_read_input_tokens",
+                "cacheCreationInputTokens": "cache_creation_input_tokens", "costUsd": "cost_usd"}
+        for event in events:
+            payload = event.get("payload")
+            if event.get("type") == "session.updated" and isinstance(payload, dict) and payload.get("modelId"):
+                served_model = str(payload["modelId"])
+            if event.get("type") == "result" and isinstance(event.get("usage"), dict):
+                raw = event["usage"]
+                usage = {target: raw[source] for source, target in keys.items()
+                         if isinstance(raw.get(source), (int, float)) and not isinstance(raw[source], bool)}
+        return {"served_model": served_model, "usage": usage,
+                "text": cls._final_text(events)}
 
     @staticmethod
     def _tool_calls(events: list[dict]) -> list[tuple[str, dict]]:
@@ -495,7 +651,7 @@ class ZCodeTransport(HarnessTransport):
     def complete(self, *, system: str, messages: list[dict],
                  model: str = "", max_tokens: int | None = None,
                  role: str = "", effort: str = "",
-                 max_budget_usd: float | None = None) -> Reply:
+                 max_budget_usd: float | None = None, native_event_sink=None) -> Reply:
         """Tool-less one-shot in an empty scratch cwd with no bridge. Every
         native read is removed, except `Read` when the prompt is too big for
         argv and rides an attachment — then any read outside the scratch dir
@@ -506,7 +662,8 @@ class ZCodeTransport(HarnessTransport):
             events, timed_out = self._run(
                 flatten_messages(system, messages), session=session,
                 timeout_s=self.settings.strict_backend_timeout_s,
-                tool_less=True, model=model or self.settings.strict_backend_model)
+                tool_less=True, model=model or self.settings.strict_backend_model,
+                **({"native_event_sink": native_event_sink} if native_event_sink is not None else {}))
         finally:
             shutil.rmtree(session, ignore_errors=True)
         violations = self._audit(self._tool_calls(events),
@@ -521,8 +678,5 @@ class ZCodeTransport(HarnessTransport):
         return Reply(
             blocks=[Block(type="text", text=text)] if text else [],
             stop_reason="max_tokens" if timed_out else "end_turn",
-            usage={"input_tokens": usage.input_tokens,
-                   "output_tokens": usage.output_tokens,
-                   "cache_read_input_tokens": 0,
-                   "cache_creation_input_tokens": 0},
+            usage=self.native_snapshot(events)["usage"],
             model=usage.served_model)

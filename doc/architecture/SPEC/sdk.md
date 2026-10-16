@@ -27,6 +27,18 @@
   可逆节点分组；`chat_*` 提供私有会话、异步任务、分页事件和完整候选差异确认。
   Bearer 身份来自宿主配置，权限、版本与事实校验由共享应用执行；远端故障不改写
   另一套本地状态。验证见 `test_rfc_work_controls.py`、`test_rfc_chat_integration.py`。
+- 显式自适应知识协议：`ContextBudget`、`DirectClient.open_knowledge_context` /
+  `plan_adaptive` / `read_knowledge_context` / `search_knowledge_context` /
+  `related_knowledge_context` / `expand_knowledge_context`。仅 `model_content` 是实际注入
+  正文；引用没有 SDK 额外 excerpt。会话默认 24k、最大累计 64k，计量单位和实际用量
+  未知状态明确返回；规则、导航、相关知识和补读同预算。旧 v1 `plan` 默认两页/6k 不变。
+- 自适应会话支持 SHA-1/SHA-256 pin，可从私有运行 SQLite 恢复原冻结 view；签发的
+  review context 绑定完整请求。旧 v1 completion 的 SHA-1 校验不因新增知识协议放宽。
+  `allowed_knowledge_repositories` 是 DirectClient 构造时的主机权限配置，不是工具授权。
+- capabilities 的支持仓库来自固定视图 registry；新仓库不要求打包 adapter。
+  `StrictRuntimeConfig` 在 registry 已识别仓库时允许不填 forge full_name；这只提供
+  知识身份兼容，不承诺旧 Strict PR 获取链路支持所有 forge 或无 forge PR。
+
 - `get_capabilities()` / `DirectClient.capabilities()` 返回 typed
   `Capabilities`：distribution/SDK/Direct/Strict/Quality/Knowledge 版本、resource revision、支持仓库、
   expected-head/structured-result/post-false/file-lock/idempotency 能力与 worker 上限。
@@ -98,10 +110,10 @@
   validator 缺失则写前 fail closed，执行失败/超时则逐 byte rollback 全部目标页。
   同一 work checkout 的 writer 以 process 内 mutex 与位于系统临时目录的
   `flock` 串行化；等待后的 SHA 复核让第二个 stale writer 失败，不会覆盖首个结果。
-- **知识 orchestration 留在宿主**：SDK 不 clone、调用 model、管理 ledger、commit、
+- **知识出版 orchestration 留在宿主**：SDK 不 clone、调用 model、管理出版 ledger、commit、
   push、开 PR 或 schedule。ReviewBot 必须向 `KnowledgeCurator` 传 dedicated work
   checkout，并继续拥有重试、artifact 与本地补丁导出；SDK 也绝不写 packaged
-  knowledge tree。
+  knowledge tree。自适应 DirectClient 仅管理知识上下文的运行账本，不代替知识出版治理。
 - SDK、Quality API 版本常量为 `1.0.0`；Direct 为 `1.1.0`，Strict 为 `1.4.0`
   （1.1 新增 `finding_dispositions`；1.2 新增 `findings`；1.3 新增显式 recheck；
   1.4 新增 `StrictRuntimeConfig.max_workers`），Knowledge 为 `1.1.0`
@@ -114,7 +126,8 @@
 
 ## 依赖方向
 
-`sdk.v1.models` 为纯 stdlib 模型；`direct` import-time 只依赖模型与资源解析，
+`sdk.v1.models` 为纯 stdlib 模型；`direct` import-time 依赖模型、资源解析与知识上下文／
+containment helper，但不创建运行账本或读取宿主配置，
 函数调用时才向下进入 `direct_routing`；`strict` 构造时才向下进入
 headless `app.RunService`。`sdk.v1.knowledge` 是兼容导出，实际实现位于
 `knowledge_service.curation`；后者只依赖 stdlib、公开模型和显式 work checkout，
@@ -154,3 +167,10 @@ Direct 1.1 / Strict 1.3 accept typed `CarriedFinding` inputs (unique IDs, source
 ## 2026-09-29 未测公开函数候选
 `DirectReviewRequest` 新增可选 `diff`（冻结 head 的 unified diff），`DirectReviewPlan` 新增
 `untested_public_api`（`direct_routing` 的同名块，默认空字典）。两者都是可选增量字段，旧调用方不受影响（#164）。
+
+
+## 2026-10-08 Signed containment
+
+Opt-in protocol 1 exports `knowledge_maintenance_status`, `knowledge_usage_record`, `knowledge_availability_check`, `knowledge_publication_guard` and `knowledge_policy_install`. DirectClient and StrictRuntimeConfig accept explicit maintenance configuration. Usage accepts an exact privately issued provider context; arbitrary caller hashes cannot mint provenance. Retrieved and actually injected units are separate from conservative Strict snapshot scope. Current generation is checked at Direct validation and Strict polling; held Strict results retain the original result with top-level state `held`. Hosts hold the publication guard around final admissibility and the external write; the installer drains that same lock before signed policy publication and ACK. ACK includes actual current knowledge snapshot/tree and corrected-content observations, separately from protocol readiness. No service private key crosses this SDK boundary.
+
+Direct plan receipts bind a provider-private durable delivery session. Adaptive follow-up read/search/related deliveries and continuations after expansion join the same session before returning; legacy `read_document(review_context_id=...)` pages join their original review's session as well. `validate` and the generic final `knowledge_availability_check` resolve all delivered dependencies, including when the host reuses its initial receipt after another SDK instance resumes an adaptive session. Caller-supplied session IDs cannot create that binding. Enforced document reads require the existing provider-issued `review_context_id` and include it in `DocumentPage.to_dict()` so identical pages in concurrent reviews retain separate provenance. The optional field is omitted when empty; disabled standalone reads retain compatibility. SDK retrieval does not claim model injection; the host records actual injection separately.

@@ -1,10 +1,10 @@
 ---
 title: "Cosmos3 规则"
 created: 2026-07-20
-updated: 2026-09-26
+updated: 2026-10-11
 type: rule
 tags: [vllm-omni, models, diffusion]
-sources: ["PR #4657", "PR #5001", "PR #5634", "PR #6049", docs/features/session_state_manager.md, recipes/cosmos3/Cosmos3-Nano.md, vllm_omni/diffusion/models/cosmos3/, vllm_omni/model_extras/cosmos3.py, vllm_omni/model_extras/registry.py, vllm_omni/experimental/world_models/adapters/state_cosmos3_adapter.py, vllm_omni/platforms/rocm/platform.py, tests/diffusion/models/cosmos3/test_session_memory_equivalence.py, tests/diffusion/models/cosmos3/test_cosmos3_pipeline.py, "PR #6107", "PR #5614", "PR #6325", "PR #6913", "PR #6920", "PR #7427", "PR #7971"]
+sources: ["PR #4657", "PR #5001", "PR #5634", "PR #6049", docs/features/session_state_manager.md, recipes/cosmos3/Cosmos3-Nano.md, vllm_omni/diffusion/models/cosmos3/, vllm_omni/model_extras/cosmos3.py, vllm_omni/model_extras/registry.py, vllm_omni/experimental/world_models/adapters/state_cosmos3_adapter.py, vllm_omni/platforms/rocm/platform.py, tests/diffusion/models/cosmos3/test_session_memory_equivalence.py, tests/diffusion/models/cosmos3/test_cosmos3_pipeline.py, "PR #6107", "PR #5614", "PR #6325", "PR #6913", "PR #6920", "PR #7427", "PR #7971", "PR #7592", "PR #5712"]
 confidence: high
 ---
 
@@ -173,3 +173,21 @@ confidence: high
 - 强制：T2I、video 与 policy checkpoint 共享 `model_type=cosmos3_omni` 和同一 `model_index.json` `_class_name`。`OMNI_PIPELINES` 不得注册可被该 metadata 自动命中的 `cosmos3_omni`。policy 用 `cosmos3_policy`，omni overlay 用 `cosmos3_omni_deploy`，两者都不声明 `hf_architectures` / `diffusers_class_name`，只经 YAML `pipeline:` 选中。单 stage overlay 必须 `async_chunk: false`；`guardrails: false` 等 stage extras 只有选中该 key 后才会合并。无 `--deploy-config` 时 T2I/video 仍走 CLI 单 stage fallback；`--no-guardrails` 仍是 CLI-only 路径。
 - 禁止：为了让 `--deploy-config` 生效而把 `cosmos3_omni` 做成 auto-detect（会吞掉 policy/video）；静默丢弃 deploy YAML 却宣称 guardrails/stage extras 已生效。
 - 验收：断言 `cosmos3_omni` 不在 registry、opt-in key 无 auto-capture 字段；`cosmos3_omni.yaml` 经 `merge_pipeline_deploy` 得到 `guardrails is False` 与 `final_output_type="video"`。^[PR #7971]
+
+
+## COSMOS-8a — 采样状态与 transformer forward 必须分开控制 dtype
+
+- 触发：修改 Cosmos3 noise、scheduler/CFG state、conditioning mask 或 transformer 输入/输出 cast。
+- 强制：默认 sampling_dtype 为 FP32；初始 latent、条件图像/控制 mask、action/sound 和 scheduler 更新沿该 dtype 保持。仅在 predict_noise 的指定模型输入边界递归转 model dtype，transformer tensor/tuple 输出再转 sampling dtype。
+- 禁止：把默认 sampling state 随 BF16 权重整体降精度；遗漏 nested list/tuple 的输入 cast，或让 transformer 输出 dtype 反向决定 scheduler dtype。代码允许显式 sampling_dtype override，不能把默认策略写成禁止任何 override。
+- 验收：断言默认 FP32 state、BF16 model boundary 和 FP32 prediction return；覆盖 tensor/tuple、nested media、action/sound、transfer 以及显式同 model dtype 的 control。改变默认精度还须固定输入与 seed 比较输出质量，shape smoke 不能替代。^[PR #7592]
+
+## VLLM-OMNI-PR5712-COSMOS3-VIDEO-TRANSPORT — uint8 视频直通必须逐字节保持历史呈现，guardrail 与非 np 输出留在浮点通道
+
+- 触发：修改 `vllm_omni/diffusion/models/cosmos3/pipeline_cosmos3.py` 的 `_cosmos3_media_output`、Cosmos3 guardrail adapter，或共享 `postprocess/device_reduction.py` / `media.py` / `ipc.py` 中 `enable_device_postprocess`、`preserve_input_dtype`、uint8 frames 编码与 Cosmos3 视频输出传输路径。
+- 强制：device-side reduction 默认关闭，只能经 `--video-output-transport` 的 `enable_device_postprocess` 显式开启。`_cosmos3_media_output` 仅在 output rank、纯五维 `[B,C,T,H,W]` 视频、无图像/audio/action 等辅助输出、未启用 CPU/layerwise/distributed-layerwise offload、无 guardrails 且 `output_type` 未设置或为 `"np"` 时才创建 `DiffusionMediaOutput`；该判定与开关状态无关，开关只决定 transport 准备后是否出现 `VideoTensorEncoding.UINT8_FRAMES`（关闭时仍为浮点传输）。uint8 直通要求 worker 在 D2H/IPC 前把 `[B,C,T,H,W]` 转为 contiguous `[B,T,H,W,C]` uint8 frames，在 decode dtype 内反归一后再做 float32 缩放与取整（`preserve_input_dtype=True`），按 64 MiB 时间块预算分块且不得改动输入张量；转换 OOM 必须回退浮点传输，插值等 float consumer 约束由共享 transport 裁决。
+- 强制：guardrail 视频保留原浮点路径与 float32 guardrail 算术：分类器收到 uint8 display 字节，adapter 返回 float32 归一浮点（[-1,1] 往返，测试容差 atol=1/127.5），未加载 guardrail 时原对象直通。其余一律走 legacy 路径：非 output rank、含辅助输出、非五维视频、offload、`"pil"`/`"pt"`/`"latent"` 时返回 legacy `DiffusionOutput`（`media` 为 None），不得改变返回类型或把 decoded pixels 当 latents 暴露。
+- 禁止：把 uint8 传输做成默认行为或新增采样 flag、私有 output type、auxiliary-media contract、engine postprocessing hook；为 guardrail、pil/pt/latent、offload、非 output rank 或含辅助输出的路径启用直通；在 decode dtype 之外反归一造成 display 字节漂移；OOM 时静默改变输出契约；把 byte parity 宣称成量化后浮点值不变——它只指最终 display/encoding 字节；也不得据此改动 Wan 的默认 reduction 算术。
+- 验收：参数化覆盖 fp16/bf16/fp32 × CPU/CUDA display-byte parity（含 bf16 舍入边界与饱和值）、chunk 边界（1 字节与 64 MiB）、guardrail 输入与修改输出的全字节、`output_type` 全集、aux payload IPC round-trip、offload gate、插值与初期/后期 OOM 回退。对完全合规的输入（output rank、纯五维视频、无辅助输出、无 offload、无 guardrails、`output_type` 为 None/`"np"`）断言无论开关状态 `media` 均存在且初始 `prepared_for_transport` 为假，开关只决定 transport 准备后编码是否为 `UINT8_FRAMES`；对 guardrail、非 np output_type、offload、含辅助输出或非 output rank 的路径断言 `media` 为 None 并走 legacy 后处理。`check_video_safety` 无 guardrail 时返回原对象、有 guardrail 时保持输入/输出的 dtype/device 合同。^[PR #5712]
+
+<!-- kb:rule status=active since=v0.30.0 -->

@@ -1,6 +1,18 @@
 # knowledge_service/ — provider curation components
 
-<!-- verified-against: 2026-10-02 -->
+<!-- verified-against: 2026-10-09 -->
+
+Pinned source identities and depth markers accept full SHA-1 or SHA-256 Git
+commits. Evidence bodies, stored hashes and native approval semantics remain
+unchanged; accepting a wider object identity never renews an old approval.
+
+`PinnedObserver` reuses successful Git tree and blob reads by full commit SHA
+and path within one observer. Concurrent readers share its lock and cache;
+mutable references are resolved on each call before choosing a cache key, and
+returned top-level sets cannot mutate cached values. A fresh observer reads
+again, read failures are never cached, and live PR metadata is always fetched.
+This avoids repeated Git subprocesses during checkpoint evidence replay while
+preserving the same source text and evidence hashes.
 
 The provider owns knowledge curation beneath the public SDK v1 facade.
 `KnowledgeCurator` composes four domain components over one explicit work
@@ -36,8 +48,26 @@ reported as reconciliation.
 
 `signing` provides Ed25519 envelopes whose signature covers a purpose tag plus
 the canonical JSON payload, so a signature made for one purpose (gate verdict,
-outbox item, control record, publisher ack) never verifies for another. It
+outbox item, control record, publisher ack, reconciliation plan, supervised
+reconciliation receipt) never verifies for another. Plans use
+`kb-reconciliation-plan`; only revalidated receipts use the distinct
+`kb-reviewed-reconciliation` purpose, and neither can be replayed as an
+automatic gate verdict or publisher action. A separately reviewed historical
+hold uses `kb-reviewed-orphan-hold`, binding its exact queue row, original
+settled sources and active canonical rules without changing model verdicts or
+granting publication trust. Its signature cannot be replayed as an event
+settlement or reconciliation, including by relabelling the envelope. Signing
 needs only `cryptography`.
+
+`containment` implements the opt-in consumer protocol independently of knowledge
+snapshots and physical releases: signed fresh policies, durable monotonic
+high-water state, private provider issuance and usage receipts, availability
+checks and a shared installation/publication fence. Invalid signatures, stale
+policy, replay or unavailable issued knowledge fail closed. It does not create
+authority decisions or model judgements. Signing also separates containment,
+authenticated transport, maintenance resolution, human case, calibration, drill
+and short-lived merge authorization purposes. See
+[containment.md](knowledge_service/containment.md).
 
 ## 2026-09-28 verdict
 `verdict` defines the signed gate verdict (`kb-gate-verdict/1`): identity

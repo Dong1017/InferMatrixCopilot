@@ -1,6 +1,6 @@
 # cli/ —— 规范
 
-<!-- verified-against: 2026-10-02 -->
+<!-- verified-against: 2026-10-16 -->
 
 `LOC ~1420（6 个文件） · 接口 + 编排门面 · refactor-status: ok`
 
@@ -105,3 +105,7 @@ RFC 子命令原样转发与共享入口：`test_rfc_integration.py`；服务契
 进度查询与发布操作由 RFC 服务处理；这条路径不经过维护任务的 planner 或 run 状态。
 `--post`、内容摘要、权限与操作恢复均遵循 RFC 服务契约，不能由 Copilot 的 `--yes`
 替代。
+
+## 自进化接入（2026-10-04）
+
+`infermatrix-copilot improve …` 在通用 argparse 之前分派到 `improve.cli.main`；工作流检查、候选生成、实验、发布和账本查询使用该入口。

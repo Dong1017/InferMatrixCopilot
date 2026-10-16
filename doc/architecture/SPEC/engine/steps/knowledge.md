@@ -1,6 +1,6 @@
 # engine/steps/knowledge.py —— 规范
 
-<!-- verified-against: 2026-10-02 -->
+<!-- verified-against: 2026-10-06 -->
 
 `知识服务的 knowledge.* 步骤 · refactor-status: new`
 
@@ -23,7 +23,7 @@ auto_merge 仓库写 outbox 的 `open_pr` 项，shadow 只记录）。逻辑全�
 ## 2026-09-30 `knowledge.init`（kb init）
 参数 `repo`、`stage`、`dry_run`（缺省 true）、`pin`。用自己的 `InitRuntime`（`kb_service/init_support.py`），**不**经
 `_runtime`/`_lifecycle`：服务运行时会打开 `kb.db`，且 `_lifecycle` 拒绝未启用的仓库，而为未启用的仓库建库正是 init 的目的。
-调 `init_stages.run_stage`；`InitError`/`NotImplementedError` 与状态 `blocked` 的记录都返回 BLOCKED。`state_updates`：
+调 `init_stages.run_stage`；`InitError`/`NotImplementedError` 与状态 `blocked`/`partial` 的记录都返回 BLOCKED。`state_updates`：
 `kb_init_stage`、`kb_init_status`、`kb_init_pr`。它是本模块里唯一直接写 GitHub 的步骤：经仓库主人的 `gh` 开一个由人合并的
 PR，且只在 `ALLOW_PUSH=1` 与 `ALLOW_POST=1` 同时成立、非 dry run、上游非私有时。测试：`test_kb_init_skeleton.py`。
 
@@ -32,4 +32,24 @@ PR，且只在 `ALLOW_PUSH=1` 与 `ALLOW_POST=1` 同时成立、非 dry run、�
 
 `knowledge-deepen` 另接收 `budget_usd` 与 `retry_unfinished`，逐功能保存七维实现知识、
 累计预算与草稿。`from_existing` 允许 knowledge/knowledge-deepen 从已合并 KB 开始。
+`unlimited_subscription` 显式传入两角色订阅无限模式；预算和语义完成门槛由同一 stage owner 处理。
 `kb widen` / `kb deepen` 经同一 playbook/step 指定这两个知识阶段，旧规则 deepen 保持原契约。
+
+## 2026-10-06 显式基础知识部分发布
+
+`foundation_mode` 缺省 `strict`，未显式选择时不添加部分发布参数。
+`partial` 只允许订阅无限的 `knowledge`，或带原始 `foundation_record` 的
+`knowledge-deepen`；CLI 的 `--foundation-record` 经步骤转换为 `Path`，以
+`foundation_record_path` 传给 `run_stage`。不兼容的阶段、缺失记录和非法模式由
+stage 拒绝，步骤返回 BLOCKED，不能以参数缺失自动降级为部分发布。
+
+`knowledge` 的显式部分发布只重放原批次的真实任务和独立评审，不追加模型调用，
+不重置修正次数，也不改变生成身份。新深度批次将模式及原发布记录/收据哈希纳入
+身份；七维认可门槛和完整目录分母保持不变。`published` 只表示 PR 已发布，
+仍须单独保留 `init_complete=false`、六维基础知识缺口与结构覆盖结果。
+原始 `blocked`/`partial` 状态仍返回 BLOCKED；不能把这些状态当作已完成。
+
+证明与发布收据契约由 [`foundation_publication`](../../kb_service/foundation_publication.md)
+负责，使用入口见[部分发布说明](../../../../knowledge/partial-foundation.md)。
+接口测试：`test_kb_foundation_partial_interfaces.py`；原生证明和门槛测试：
+`test_kb_foundation_explicit_partial.py`。

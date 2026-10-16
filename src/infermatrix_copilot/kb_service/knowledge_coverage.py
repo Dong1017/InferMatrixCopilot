@@ -11,6 +11,7 @@ import ast
 import fnmatch
 import hashlib
 import json
+import math
 import os
 import re
 import subprocess
@@ -50,8 +51,8 @@ def feature_metadata(text: str, feature) -> str:
     return page.render()
 
 
-_FILE = re.compile(r"<!-- kb:file path=(\S+) pin=([a-f0-9]{40}) sha256=([a-f0-9]{64}) -->\n(.*?)\n<!-- /kb:file -->", re.S)
-_FACET = re.compile(r"<!-- kb:knowledge owner=feature-([a-z0-9-]+) facet=([a-z]+) pin=([a-f0-9]{40})"
+_FILE = re.compile(r"<!-- kb:file path=(\S+) pin=((?:[a-f0-9]{40}|[a-f0-9]{64})) sha256=([a-f0-9]{64}) -->\n(.*?)\n<!-- /kb:file -->", re.S)
+_FACET = re.compile(r"<!-- kb:knowledge owner=feature-([a-z0-9-]+) facet=([a-z]+) pin=((?:[a-f0-9]{40}|[a-f0-9]{64}))"
                     r"(?: verdict=(pass|unsure|unjudged))? -->")
 _SLUG = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")
 _LEXICAL_NO_CODE = re.compile(r'''"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|/\*[\s\S]*?\*/|//[^\n]*|<!--[\s\S]*?-->''')
@@ -78,16 +79,22 @@ class CoveragePolicy:
     required: bool = True
     filenames: tuple[str, ...] = FILENAMES
     catalog_sources: tuple[str, ...] = ()
+    semantic_depth_per_facet_gt: float | None = None
+    semantic_depth_acceptance_mode: str = "strict"
 
 
-def policy_path(repo: str) -> str:
-    return f"adapters/{repo}/knowledge-coverage.yaml"
+def policy_path(repo: str, adapter_dir: str | Path | None = None) -> str:
+    """Use the adapter's actual directory; keep canonical callers compatible."""
+    name = Path(adapter_dir).name if adapter_dir is not None else repo
+    return f"adapters/{name}/knowledge-coverage.yaml"
 
 
-def _paths(value: object, name: str) -> tuple[str, ...]:
-    if not isinstance(value, list) or not value or any(not isinstance(x, str) or not x for x in value):
+def _paths(value: object, name: str, *, allow_empty: bool = False, allow_root: bool = False) -> tuple[str, ...]:
+    if not isinstance(value, list) or (not value and not allow_empty) or any(not isinstance(x, str) or not x for x in value):
         raise ValueError(f"{name} must be a non-empty path list")
     for path in value:
+        if allow_root and path in (".", "./"):
+            continue
         if path.startswith("/") or "\\" in path or any(p in ("", ".", "..") for p in path.rstrip("/").split("/")):
             raise ValueError(f"{name} needs safe repository-relative paths")
     return tuple(value)
@@ -97,7 +104,7 @@ def load_policy(text: str, repo_dir: str) -> CoveragePolicy:
     data = yaml.safe_load(text)
     if not isinstance(data, dict) or type(data.get("schema_version")) is not int or data["schema_version"] != 1:
         raise ValueError("knowledge coverage needs schema_version: 1")
-    if set(data) - {"schema_version", "core", "features", "required", "catalog_sources"}:
+    if set(data) - {"schema_version", "core", "features", "required", "catalog_sources", "semantic_depth"}:
         raise ValueError("unknown knowledge coverage policy key")
     core = data.get("core")
     if not isinstance(core, dict) or set(core) - {"roots", "exclude", "suffixes", "filenames", "target"}:
@@ -108,12 +115,29 @@ def load_policy(text: str, repo_dir: str) -> CoveragePolicy:
     required = data.get("required", True)
     if not isinstance(required, bool):
         raise ValueError("required must be a boolean")
+    semantic = data.get("semantic_depth")
+    semantic_target = None
+    semantic_mode = "strict"
+    if semantic is not None:
+        if not isinstance(semantic, dict) or "per_facet_gt" not in semantic \
+                or set(semantic) - {"per_facet_gt", "acceptance_mode"}:
+            raise ValueError("semantic_depth needs per_facet_gt and optional acceptance_mode")
+        semantic_mode = semantic.get("acceptance_mode", "strict")
+        if semantic_mode not in ("strict", "lightweight"):
+            raise ValueError("semantic_depth acceptance_mode must be strict or lightweight")
+        semantic_target = semantic["per_facet_gt"]
+        if isinstance(semantic_target, bool) or not isinstance(semantic_target, (int, float)) \
+                or not math.isfinite(semantic_target) or not 0 <= semantic_target < 1:
+            raise ValueError("semantic_depth per_facet_gt must be finite and in [0, 1)")
+        semantic_target = float(semantic_target)
     extensions = tuple(core.get("suffixes", SUFFIXES))
-    if not extensions or any(s not in SUFFIXES for s in extensions):
-        raise ValueError("unsupported production-code suffix")
+    if not extensions or any(not isinstance(s, str) or not re.fullmatch(r"\.[A-Za-z0-9][A-Za-z0-9._+-]*", s)
+                             for s in extensions):
+        raise ValueError("production-code suffixes must be safe literal extensions")
     filenames = core.get("filenames", list(FILENAMES))
-    if not isinstance(filenames, list) or any(name not in FILENAMES for name in filenames):
-        raise ValueError("unsupported production-code filename pattern")
+    if not isinstance(filenames, list) or any(not isinstance(name, str) or not name or "/" in name
+                                              or "\\" in name or name in (".", "..") for name in filenames):
+        raise ValueError("production-code filename patterns must be safe basenames")
     features, seen = [], set()
     if not isinstance(data.get("features"), list) or not data["features"]:
         raise ValueError("a non-empty explicit feature inventory is required")
@@ -132,17 +156,20 @@ def load_policy(text: str, repo_dir: str) -> CoveragePolicy:
             raise ValueError("feature page must belong to its declared owner")
         features.append(Feature(item["id"], item["title"], item["owner"],
                                 _paths(item["source_globs"], "source_globs"),
-                                _paths(item["docs"], "docs"), page,
+                                _paths(item["docs"], "docs", allow_empty=True), page,
                                 _paths(item["entry_points"], "entry_points") if "entry_points" in item else ()))
         seen.add(item["id"])
-    return CoveragePolicy(_paths(core.get("roots"), "core roots"),
-                          _paths(core.get("exclude"), "core exclude"), extensions,
+    return CoveragePolicy(_paths(core.get("roots"), "core roots", allow_root=True),
+                          _paths(core.get("exclude", []), "core exclude", allow_empty=True), extensions,
                           tuple(features), float(target), required, tuple(filenames),
-                          _paths(data["catalog_sources"], "catalog_sources") if "catalog_sources" in data else ())
+                          _paths(data["catalog_sources"], "catalog_sources") if "catalog_sources" in data else (),
+                          semantic_target, semantic_mode)
 
 
 def matches(path: str, patterns: tuple[str, ...]) -> bool:
-    return any(fnmatch.fnmatchcase(path, pattern) for pattern in patterns)
+    return any(fnmatch.fnmatchcase(path, pattern)
+               or (pattern.startswith("**/") and fnmatch.fnmatchcase(path, pattern[3:]))
+               for pattern in patterns)
 
 
 def inventory(tree: Path, policy: CoveragePolicy) -> list[str]:
@@ -157,7 +184,7 @@ def inventory(tree: Path, policy: CoveragePolicy) -> list[str]:
         if not file.is_file() or file.is_symlink():
             continue
         path = file.relative_to(tree).as_posix()
-        if not any(path.startswith(root.rstrip("/") + "/") or path == root for root in policy.roots):
+        if not any(root in (".", "./") or path.startswith(root.rstrip("/") + "/") or path == root for root in policy.roots):
             continue
         if (file.suffix not in policy.suffixes and not matches(file.name, policy.filenames)) or matches(path, policy.exclude):
             continue
@@ -264,7 +291,8 @@ def render_contract(full_name: str, pin: str, path: str, raw: str) -> str | None
         return None
     body, _ = contract
     end = len(raw.splitlines())
-    ref = f"[完整声明与实现](https://github.com/{full_name}/blob/{pin}/{quote(path, safe='/')}#L1-L{end})"
+    from .source_links import source_link
+    ref = f"[完整声明与实现]({source_link(full_name, pin, path, 1, end)})"
     return f"**`{path}`**\n\n{body}\n\n源码依据：{ref}。"
 
 
@@ -277,8 +305,8 @@ def contract_block(full_name: str, pin: str, path: str, raw: str) -> str | None:
 
 
 def _citations(text: str, tree: Path, full_name: str, pin: str) -> set[str]:
-    pattern = re.compile(r"https://github\.com/" + re.escape(full_name) + r"/blob/" + pin
-                         + r"/([^\s)#]+)#L(\d+)(?:-L(\d+))?")
+    from .source_links import source_base
+    pattern = re.compile(re.escape(source_base(full_name, pin)) + r"([^\s)#]+)#L(\d+)(?:-L(\d+))?")
     valid = set()
     for encoded, start, end in pattern.findall(text):
         path = unquote(encoded)
@@ -356,29 +384,48 @@ def audit_coverage(head: dict[str, str], tree: Path, policy: CoveragePolicy,
         has_source = (bool(feature.entry_points) and set(feature.entry_points) <= refs.intersection(production)) \
             if feature.entry_points else any(matches(p, feature.source_globs) for p in refs.intersection(production))
         has_docs = all((tree / p).is_file() for p in feature.docs) and bool(refs.intersection(feature.docs))
-        complete = bool(implemented) and has_source and has_docs and len(text.strip()) >= 500 and set(FACETS) <= facets
+        doc_requirement_met = not feature.docs or has_docs
+        complete = bool(implemented) and has_source and doc_requirement_met and len(text.strip()) >= 500 and set(FACETS) <= facets
         features[feature.id] = {"title": feature.title, "page": feature.page,
                                 "covered": complete, "missing_facets": sorted(set(FACETS) - facets),
                                 "source_evidence": has_source, "doc_evidence": has_docs,
-                                "implemented": bool(implemented)}
+                                "documentation_required": bool(feature.docs), "doc_requirement_met": doc_requirement_met,
+                                "implemented": bool(implemented), "basic_explanation": len(text.strip()) >= 500}
     covered.intersection_update(files)
     core_ratio = len(covered) / len(files) if files else 0.0
     feature_count = sum(f["covered"] for f in features.values())
     missing_catalogs = [p for p in policy.catalog_sources if not (tree / p).is_file() or (tree / p).is_symlink()]
     return {"pin": pin, "full_name": full_name, "required": policy.required,
             "definitions": {
-                "feature": "Every declared feature has six cited facets, documentation and production entry points. "
+                "feature": "Every declared feature has six cited facets, production entry points and any documentation required by its policy. "
                            "This is inventory coverage, not proof of exhaustive feature discovery or runtime correctness.",
                 "core_file": "A production file has a cited explanation or a hash-verified static interface/dependency record. "
                              "This is structural knowledge coverage, not exhaustive behavior analysis or test coverage."},
             "catalog_sources": {"declared": list(policy.catalog_sources), "missing": missing_catalogs},
             "met": bool(files) and not missing_catalogs and core_ratio >= policy.target and feature_count == len(features),
+            "structural": {"met": bool(files) and not missing_catalogs and core_ratio >= policy.target
+                           and all(f["implemented"] for f in features.values()),
+                           "inventory_valid": bool(files), "catalog_valid": not missing_catalogs,
+                           "core_target_met": bool(files) and core_ratio >= policy.target,
+                           "implementation_scope_met": all(f["implemented"] for f in features.values()),
+                           "source_evidence_features": sum(f["source_evidence"] for f in features.values()),
+                           "doc_requirement_features": sum(f["doc_requirement_met"] for f in features.values()),
+                           "basic_explanation_features": sum(f["basic_explanation"] for f in features.values()),
+                           "total_features": len(features)},
             "core": {"target": policy.target, "covered": len(covered), "total": len(files),
                      "ratio": core_ratio, "roots": list(policy.roots), "exclude": list(policy.exclude),
                      "suffixes": list(policy.suffixes), "filenames": list(policy.filenames), "covered_files": sorted(covered),
                      "missing_files": sorted(set(files) - covered), "contract_files": len(cards),
                      "stale_contracts": sorted(stale)},
             "features": {"target": 1.0, "covered": feature_count, "total": len(features), "items": features}}
+
+
+def coverage_targets_met(report: dict, foundation_mode: str = "strict") -> bool:
+    """Separate structural prerequisites from six-facet foundation completion."""
+    if foundation_mode not in ("strict", "partial"):
+        raise ValueError("foundation_mode must be strict or partial")
+    return (report.get("met") is True if foundation_mode == "strict"
+            else report.get("structural", {}).get("met") is True)
 
 
 def add_contract_pages(head: dict[str, str], tree: Path, policy: CoveragePolicy, owners: list[Owner],

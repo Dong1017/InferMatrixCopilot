@@ -19,6 +19,7 @@ PRs) when people close two of its auto-generated PRs unmerged within 24 hours.
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 import traceback
@@ -58,6 +59,34 @@ class Scheduler:
             return True
         return False
 
+    def _improve_cycle(self):
+        """Run the weekly improvement cycle when its slot has passed; the
+        settings come from the runtime when it carries them, else the env."""
+        rt = self.rt
+        if rt.traces is None:
+            return None
+        settings = getattr(rt, "settings", None)
+        if settings is None:
+            from ..config import Settings
+
+            settings = Settings()
+        if not getattr(settings, "improve_enabled", False):
+            return None
+        from ..improve.cycle import ledger_dir_for, maybe_run_weekly
+
+        if getattr(settings, "improve_evolve_enabled", False):
+            from ..improve.cycle import is_due, _cursor
+            from ..improve.coordinator import run
+            cursor = _cursor(ledger_dir_for(settings))
+            checkpoint = ledger_dir_for(settings) / "coordinator.json"
+            incomplete = checkpoint.is_file() and json.loads(checkpoint.read_text()).get("state") == "running"
+            if incomplete or is_due(rt.clock(), float(cursor.get("last_run_at") or 0), weekday=settings.improve_cycle_weekday,
+                      hour=settings.improve_cycle_hour):
+                return run(settings, rt.traces, now=rt.clock())
+            return None
+
+        return maybe_run_weekly(rt.traces, settings, ledger_dir_for(settings), now=rt.clock())
+
     def _record(self, repo: str, event: str, **detail) -> None:
         entry = {"at": self.rt.clock(), "repo": repo, "event": event, **detail}
         self.log.append(entry)
@@ -72,6 +101,14 @@ class Scheduler:
             rt.outbox.transition(lambda: None)
             if rt.publisher_public_key is not None:
                 merge.apply_acks(rt, rt.outbox.collect_acks(rt.publisher_public_key))
+        try:
+            from .containment import collect_consumer_updates, refresh_policy, native_ack
+            from .maintenance_store import MaintenanceStore
+            collect_consumer_updates(rt, store=MaintenanceStore(rt.ledger, lease_owner=rt.lease_owner))
+            refresh_policy(rt)  # freshness continues during an intake pause
+            native_ack(rt)  # readiness of this lease-owning consumer, not an installer
+        except Exception as exc:
+            self._record("*", "containment_error", error=repr(exc))
         for lifecycle in rt.registry.values():
             if not lifecycle.enabled:
                 continue
@@ -79,6 +116,14 @@ class Scheduler:
                 self._repo_tick(lifecycle)
             except Exception as exc:  # isolate repositories from each other
                 self._record(lifecycle.repo, "error", error=repr(exc), trace=traceback.format_exc()[-2000:])
+        try:  # the meta-improvement engine's weekly cycle (design §4): same
+              # lease, its own slot, isolated like every other tick item
+            report = self._improve_cycle()
+            if report is not None:
+                self._record("*", "improve_cycle", units=report.get("units"),
+                             proposals=len(report.get("proposals_opened") or []))
+        except Exception as exc:
+            self._record("*", "error", error=repr(exc), trace=traceback.format_exc()[-2000:])
         if self._due("archive", self.archive_every):
             try:  # the weekly off-machine copy of the traces (pulled by the publisher)
                 archive = make_archive(rt)
@@ -125,6 +170,25 @@ class Scheduler:
         except Exception as exc:  # a fetch failure etc. must not stop the service
             self._record("*", "activation_error", error=repr(exc))
 
+        try:
+            from .reconcile import settle_reconciled_holds
+            from .external import settle_closed_holds
+            resolved = settle_reconciled_holds(rt) + settle_closed_holds(rt)
+            if resolved:
+                self._record("*", "holds_resolved", ids=resolved)
+        except Exception as exc:
+            self._record("*", "hold_settlement_error", error=repr(exc))
+
+        try:
+            from .maintenance import advance_corrections, tick
+            for event in advance_corrections(rt):
+                self._record("*", "correction", **event)
+            report = tick(rt)  # persisted Shanghai slot; independent of releases
+            if report is not None:
+                self._record("*", "maintenance", **report)
+        except Exception as exc:
+            self._record("*", "maintenance_error", error=repr(exc), trace=traceback.format_exc()[-2000:])
+
     def _repo_tick(self, lifecycle) -> None:
         rt = self.rt
         for event in merge.advance(rt, lifecycle):
@@ -153,7 +217,21 @@ class Scheduler:
                 self._record(lifecycle.repo, "intake", new_events=new, changeset=changeset_id, status=status)
         if lifecycle.full_name and self._due(f"release:{lifecycle.repo}", self.release_every):
             upstream = UpstreamRepo(rt.state_dir / "upstream" / f"{lifecycle.repo}.git", lifecycle.full_name)
-            sweep = detect_release(rt, lifecycle, upstream)
+            previous_baseline = rt.ledger.get_cursor(lifecycle.repo, "sweep_baseline") or ""
+            observation = {}
+            sweep = detect_release(rt, lifecycle, upstream, observation=observation)
+            target_baseline = (sweep or {}).get("to_sha") or rt.ledger.get_cursor(lifecycle.repo, "sweep_baseline") or ""
+            source_status = "not_observed"
+            if observation.get("status") == "observed" and previous_baseline and target_baseline:
+                source_status = "no_code_update" if previous_baseline == target_baseline else "code_update_detected"
+            elif observation.get("status") == "observed" and target_baseline and not previous_baseline:
+                source_status = "baseline_initialized"
+            rt.ledger.set_cursor(lifecycle.repo, "maintenance_source_observation", json.dumps({
+                "checked_at": rt.clock(), "scope": "release_baseline", "trigger": lifecycle.release.trigger,
+                "status": source_status, "from_sha": previous_baseline, "to_sha": target_baseline,
+                "observation_status": observation.get("status", "not_observed"),
+                "observed_tag": observation.get("tag", ""),
+            }, sort_keys=True))
             if sweep is not None:
                 # the release audit feeds the sweep hints; baseline drift becomes a
                 # companion PR that runs in parallel and never blocks the sweep
@@ -206,10 +284,43 @@ class Scheduler:
         rt.ledger.enqueue_human(repo if repo != "*" else next(iter(rt.registry)), reason)
         self._record(repo, "paused", reason=reason)
 
+    def _containment_heartbeat(self, stop, owner):
+        """A separate SQLite connection keeps freshness independent of models."""
+        from types import SimpleNamespace
+        from .ledger import Ledger
+        from .containment import collect_consumer_updates, refresh_policy, native_ack
+        from .maintenance_store import MaintenanceStore
+        ledger = Ledger(self.rt.ledger.path, clock=self.rt.clock)
+        heartbeat_rt = SimpleNamespace(**{**vars(self.rt), "ledger": ledger, "lease_owner": owner})
+        try:
+            while not stop.is_set():
+                started = time.monotonic()
+                try:
+                    ledger.heartbeat(owner)  # refuses a lost scheduler lease
+                    store = MaintenanceStore(ledger, lease_owner=owner)
+                    collect_consumer_updates(heartbeat_rt, store=store)
+                    if stop.is_set():
+                        break
+                    refresh_policy(heartbeat_rt)
+                    if stop.is_set():
+                        break
+                    native_ack(heartbeat_rt)
+                except Exception as exc:
+                    self._record("*", "containment_heartbeat_error", error=repr(exc))
+                stop.wait(max(1, 45 - (time.monotonic() - started)))
+        finally:
+            ledger.close()
+
     def serve(self, stop: threading.Event | None = None, *, once: bool = False) -> None:
         stop = stop or threading.Event()
+        heartbeat_stop = threading.Event()
         with self.rt.ledger.lease() as owner:
             self.rt.lease_owner = owner
+            heartbeat = None
+            if getattr(self.rt, "containment_policy_dir", None) or os.environ.get("KB_CONTAINMENT_POLICY_DIR"):
+                heartbeat = threading.Thread(target=self._containment_heartbeat, args=(heartbeat_stop, owner),
+                                             name="kb-containment-heartbeat", daemon=True)
+                heartbeat.start()
             try:
                 while not stop.is_set():
                     started = time.monotonic()
@@ -218,4 +329,7 @@ class Scheduler:
                         return
                     stop.wait(max(1.0, self.tick_seconds - (time.monotonic() - started)))
             finally:
+                heartbeat_stop.set()
+                if heartbeat is not None:
+                    heartbeat.join(timeout=45)
                 self.rt.lease_owner = None

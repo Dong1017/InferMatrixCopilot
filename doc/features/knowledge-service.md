@@ -62,6 +62,14 @@ export KB_GENERATOR_FALLBACK=zcode:GLM-5.3
 因为预算只为主模型预留且 Zcode 无法执行阈值。
 调用记录位于 `$KB_STATE_DIR/traces/records/`。
 
+`KB_JUDGE` 可把评审切到其他后端（如 `zcode:GLM-5.3`，与 GPT-6 Sol 并列的受支持后端）。
+zcode 评审的 `:effort` 后缀无效——推理档位由全局 `ZCODE_REASONING_LEVEL`（默认 `max`）决定；
+zcode 无花费阈值能力，评审超时或不可解析按既有 fail-closed 语义记 `human`，绝不自动合并。
+同一后端既起草又评审（GLM 生成 + GLM 评审）时，必须显式设置 `KB_JUDGE_FAMILY_WAIVER=1`：
+每次启动记录警告，且该评审标签的校准记录必须重跑（`kb calibrate`），否则 auto_merge 保持
+`calibration_required`。评审侧的可进化面在 `kb_service/judge_tuning.py`（提示词、rubric 措辞、
+聚合策略、上下文预算）；`gate.py` 是受保护文件，只经人审 PR 变更。
+
 运行经验（来源②）：`pr_debug` 的已验证修复记录经 `KB_BUGFIX_DIR`（同机，与运行侧 `KNOWLEDGE_INTAKE_DIR`
 配为同一目录）与 `KB_BUGFIX_MAILBOX`（异机，`owner/repo#N`，只接受 `KB_BUGFIX_AUTHORS` 列出的作者）进入 intake。
 
@@ -81,6 +89,30 @@ infermatrix-copilot kb rollback --to <sha>   # 回指到较早的快照（下一
 有人绕过门禁直接合并/推送知识变更时，服务立即暂停该仓库、停止激活新快照、告警，并开出撤回 PR（不自动合并）；
 合并精确的撤回 PR 并 `kb resume` 后恢复，被撤回的内容会作为新候选重新过门禁；也可以用 `kb accept-unknown <sha>` 让该提交本身完整通过门禁后保留它（通过才算处置，仍需 `kb resume`）。发版巡检在上游新 release 后运行
 T1/T2/T3 与 purge，每个规则页一个变更集，全部经过质量门。
+
+初始化、增加 owner 目录、修改顶层入口或校验器时，负责人合并的 PR 可能包含普通自动规则门禁不接受的路径。
+`kb reconcile-reviewed` 是这种已合并历史的显式操作员接收流程：以服务密钥签名，先生成可检查的计划，再重新核验后写入不可变回执。
+要求当前 main 的完整 SHA、当前 active 的连续 first-parent 历史、每个知识提交对应的唯一真实已合并 PR、
+允许的负责人 merger 与认证操作员，以及精确 PR head 上指定的当前成功检查。保留实际 review 状态，不虚构 APPROVED。
+在固定目标树上必须通过两个知识校验器与真实快照加载、格式、哈希和路由检查；缺失、失败或进行中的检查均拒绝。
+
+```bash
+infermatrix-copilot kb reconcile-reviewed --plan reconciliation.json \
+  --target <full-main-sha> --allow-merger <owner-login> --require-check suite \
+  --reason 'Owner-authorized recovery of merged initialization and administration'
+# 检查计划中的提交、PR、操作员、检查和校验哈希后，再明确执行：
+infermatrix-copilot kb reconcile-reviewed --apply reconciliation.json
+infermatrix-copilot kb status
+infermatrix-copilot kb resume --all
+infermatrix-copilot kb activate
+```
+
+需提供 `KB_GITHUB_READ_TOKEN` 以核验认证操作员（沿用负责人的现有只读 API 凭据）。计划本身不产生信任；
+apply 重新核验所有证据，main 或 active 改变、证据变化时要求新计划。两个 pin 不变时重复 apply 返回同一回执。
+回执在 `$KB_STATE_DIR/reconciliations/`，应随恢复备份保留；审计、激活和控制记录每次直接校验其签名与完整提交范围，
+不缓存此类信任。新知识提交仍会阻塞激活；删除或破坏回执不能续签旧信任。
+接收不写 `disposed:`，不解除暂停，不更改 shadow/auto_merge，也不替代自动候选的完整质量门。
+已有异步接受、撤回或待 intake 候选的提交必须先处理完，不能由此流程绕过。
 
 评审服务读取知识：将 `KNOWLEDGE_ROOT` 指向 `$KB_STATE_DIR/active`。
 

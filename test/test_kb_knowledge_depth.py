@@ -106,6 +106,27 @@ def _baseline(world, *, features=1):
     return load_policy(yaml.safe_dump(policy), "repos/toy")
 
 
+def _complete_breadth(world, policy):
+    """A strict semantic campaign starts from a structurally covered baseline."""
+    from infermatrix_copilot.kb_service.knowledge_coverage import FACETS as BREADTH_FACETS, contract_block
+    from test_kb_init_skeleton import _git
+
+    pin = _git(world["upstream"], "rev-parse", "HEAD")
+    files = {}
+    for feature in policy.features:
+        path = "knowledge/" + feature.page
+        text = (world["origin"] / path).read_text()
+        for facet in BREADTH_FACETS:
+            text += f"\n<!-- kb:knowledge owner=feature-{feature.id} facet={facet} pin={pin} -->\n\n"
+            text += "Engine.step validates integer input and calls the helper function to return the incremented value.\n\n"
+            text += f"[Implementation](https://github.com/o/toy/blob/{pin}/pkg/core.py#L3-L6) "
+            text += f"[Guide](https://github.com/o/toy/blob/{pin}/docs/guide.md#L1-L2)\n"
+        for source in ("pkg/core.py", "pkg/util.py"):
+            text += "\n" + contract_block("o/toy", pin, source, (world["upstream"] / source).read_text()) + "\n"
+        files[path] = text
+    _commit(world["origin"], files, "merge structurally covered feature baseline")
+
+
 def _run(world, gateway, *, budget=10, retry=False):
     lifecycle = _modules_lifecycle()
     lifecycle = replace(lifecycle, init=replace(lifecycle.init, budget_usd=budget))
@@ -152,6 +173,54 @@ def test_depth_budget_resume_retains_accepted_work_and_cumulative_spend(world):
     assert after.depth["done"] and after.coverage["semantic_depth"]["complete_features"] == 2
     assert all(after.depth["accepted"][p] == text for p, text in accepted.items())
     assert len(gateway.depth_calls) == 2
+
+
+def test_fresh_depth_batch_reconnects_retained_pages_without_model_calls(world):
+    policy = _baseline(world)
+    first = _run(world, DepthGateway())
+    page = "knowledge/" + depth_page(policy.features[0])
+    retained = _tree(first)[page]
+    # The accepted foundation index stays immutable in the new baseline.
+    # Only already checked depth prose is retained for the new batch.
+    _commit(world["origin"], {page: retained}, "retain checked depth in new baseline")
+    index = "knowledge/repos/toy/components/core/_index.md"
+    assert page.rsplit("/", 1)[1] not in (world["origin"] / index).read_text()
+
+    gateway = DepthGateway()
+    rt = _runtime(world, gateway, state_dir=world["tmp"] / "fresh-depth")
+    record = run_stage(rt, _modules_lifecycle(), "knowledge-deepen", dry_run=True,
+                       from_existing=True, subscription_generator=True)
+    assert record.status == "dry_run", record.problems
+    assert gateway.depth_calls == []
+    assert record.coverage["semantic_depth"]["recognized_facets"] == 7
+    assert page.rsplit("/", 1)[1] in _tree(record)[index]
+    assert (world["origin"] / page).read_text() == retained
+    assert page not in record.files
+
+
+def test_target_foundation_late_facet_precedes_other_owner_pages():
+    from types import SimpleNamespace
+    from infermatrix_copilot.kb_service.init_knowledge_depth import _KnowledgeDepth
+
+    feature = SimpleNamespace(id="zeta", page="repos/demo/components/core/feature-zeta.md")
+    pin = "a" * 40
+    marker = lambda facet, verdict="pass": (
+        f"<!-- kb:knowledge owner=feature-zeta facet={facet} pin={pin} verdict={verdict} -->\n")
+    validation = marker("validation") + "Actual helper asserts the saved result. [Test](actual-test.py)\n"
+    current = "Large source metadata.\n" * 300 + marker("architecture") + "Long introduction.\n" * 200
+    current += marker("api", "unsure") + "Unsupported API claim.\n" + validation
+    current += "<!-- kb:file path=pkg/core.py -->\n" + "Static inventory.\n" * 500
+    stage = object.__new__(_KnowledgeDepth)
+    stage.head, stage.record = {feature.page: current}, SimpleNamespace(pin=pin)
+    background = {"repos/demo/components/core/_index.md": "Unrelated navigation.\n" * 500,
+                  "repos/demo/components/core/feature-alpha.md": "Another feature.\n" * 500,
+                  feature.page: current}
+    context = stage._feature_existing_context(feature, ["validation"], background)
+    assert next(iter(context)) == feature.page
+    assert context[feature.page].startswith(validation)
+    assert "Unsupported API claim" not in context[feature.page]
+    assert "Static inventory" not in context[feature.page]
+    assert sum(len(text.encode()) for text in context.values()) <= 4000
 
 
 def test_interrupted_judge_reuses_completed_extraction(world):

@@ -1,6 +1,6 @@
 # engine/steps/pr/ —— 规范
 
-<!-- verified-against: 2026-09-26 -->
+<!-- verified-against: 2026-10-08 -->
 
 `LOC ~1988（6 个文件） · step 库（PR） · refactor-status: ok`
 
@@ -45,7 +45,9 @@ rebase，不修改配置 checkout 的分支或文件，不推送。该树是一�
 - `ci.push` 对 `pr_review` / `pr_quality` 无条件拒绝推送；其他任务仍委托给 `guard_push`（**C4**）。
 - **`pr.fetch_diff`：一个 head 统治一切**（PR2 重构后）。head 由
   `_resolve_pr_head` **恰好解析一次**，stale 门、fetch、diff、worktree 全部
-  从这一个答案推导（`_fetch_at_one_head`）。fetch 走 run 域强制目的 ref
+  从这一个答案推导（`_fetch_at_one_head`）。解析请求明确包含 `headRefOid`，
+  不能用可能截断为前 100 条的 `commits` 列表末项推断 head；权威字段缺失时
+  仍按既有未解析 head 路径处理，钉住的请求拒绝继续。fetch 走 run 域强制目的 ref
   `refs/imx/<run_id>/{base,head}`（取代旧的机会主义 tracking ref +
   `FETCH_HEAD` —— 对着可能陈旧的 `origin/<base>` 取 merge-base 会把无关的
   上游漂移当成 PR 的工作），且 `_fetch_pinned` 把取到的 head 与 API 报告的
@@ -64,6 +66,8 @@ rebase，不修改配置 checkout 的分支或文件，不推送。该树是一�
 - **`pr.post_review` 始终使用 `event="COMMENT"`**，模型 verdict 不授予批准或阻塞 PR 的权限。
 - **`pr.post_review` 只发一条 GitHub review + inline thread**，且先把每条发现的位置
   对照已抓取的 diff 校验过 —— **绝不是一串独立评论**。
+  写入前同样通过 `headRefOid` 验证当前 head，不能使用截断 commit 列表；
+  缺少权威 head 时不提交 review。
 - `diff_text` 和 `gate_report` 都可以经 state 注入，因此网络之下的每条路径都可离线测试；
   `gh` 不可用时降级为 BLOCKED，**绝不崩溃**。
 - `pr.checkout_branch` 把推导出的 `PushPolicy` **序列化后发布**（**B2**）——
@@ -78,6 +82,9 @@ rebase，不修改配置 checkout 的分支或文件，不推送。该树是一�
 - `pr.fetch_ci_failures` 经 profile 选定的 CI provider 富化日志，否则记一条
   `capability_gap`（**E2**）；`pr.group_failures` 按**归一化后**的签名分组。
 - `pr.post_review` 是**双闸**的（**C5**）。
+- 启用知识撤回协议后，`pr.post_review` 在实际 GitHub 写入处持有消费端发布锁，
+  复查本次固定知识回执的可用性。缺失、失效或命中撤回的回执会阻止发布并要求重评；
+  策略安装与发布共用该锁，确认回执不能越过尚未结束的旧代际写入。
 - `pr.harvest_debug_knowledge` **只在真实推送后落盘**（push 输出存在且非 dry-run，
   且至少一组修复同时有 root_cause 与 verification —— 与 debug memory 同一门槛），
   投递到两个**彼此独立**的 sink：`settings.knowledge_intake_dir`（同主机落盘）与
@@ -104,7 +111,7 @@ rebase，不修改配置 checkout 的分支或文件，不推送。该树是一�
 `..agent_runtime`。
 
 ## 测试
-`test_pr_steps.py`（含钉 ref run 域隔离、head 移动检测、stale expected_head
+`test_pr_steps.py`（含截断 commit 列表下的权威 head 解析、钉 ref run 域隔离、head 移动检测、stale expected_head
 BLOCK、worktree 分键/拒外来树、report-only rebase 的隔离与失效树拦截）、
 `test_push_and_steps.py`、
 `test_knowledge_harvest.py`（harvest step + executor crash-then-resume）、
@@ -118,3 +125,7 @@ BLOCK、worktree 分键/拒外来树、report-only rebase 的隔离与失效树�
 读/写轴是显式的：`fetch` 只读，`publish` 装着两个 risk=push 的 step。
 K3/K4/K7 的精简（require_repo/published/from_state）已在各子模块落地。
 `_enrich_ci_logs` 保持为通往 `ci/providers` 的**薄接缝**。
+
+## 自进化接入（2026-10-04）
+
+影子模式下 `pr.fetch_diff`、gate 和 CI 取数从可信控制器准备的 `pr_snapshot` 读取；快照缺少必要字段即阻塞，不回退到实时网络。基线和候选共用冻结的 base/head 与上下文。

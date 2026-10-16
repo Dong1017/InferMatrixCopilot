@@ -1,7 +1,7 @@
 ---
 title: "web-frontend"
 created: 2026-10-01
-updated: 2026-10-01
+updated: 2026-10-09
 type: index
 tags: [jiuwenswarm]
 sources: []
@@ -105,3 +105,38 @@ sources: []
 - [计划模式与多入口切换限制：实现深读](feature-depth-plan-mode.md)
 - [会话产物列表、预览与下载：实现深读](feature-depth-artifacts.md)
 - [语音输入、回复朗读与停止：实现深读](feature-depth-speech-interaction.md)
+- [IDE Webview 会话统计栏与每轮迷你图（chat.html）](feature-chat-session-stats-dashboard.md)
+- [代码模式分支选择器（CodeBranchSelector）](feature-code-mode-branch-selector.md)
+- [代码模式提交/推送对话框（CodeCommitPushControl）](feature-code-mode-commit-push.md)
+- [上下文占用指示器（ContextUsageIndicator：环形触发器/悬浮提示/明细弹层）](feature-context-usage-indicator.md)
+- [Vite Dev WS Traffic Logger (/__dev/ws-log)](feature-dev-ws-traffic-logger.md)
+- [前端增量 ESLint 门禁（lint-changed.mjs）](feature-frontend-incremental-lint-gate.md)
+- [Web 通道本机目录/可执行文件选择器（directory_picker）](feature-web-native-directory-picker.md)
+- [会话分享图导出：任务注册表与无头渲染器](feature-share-image-export.md)
+- [Web 资产发布流程（prepare/commit/轮询/提交锁）](feature-web-asset-publish-flow.md)
+- [Web 前端中英双语 i18n 初始化（jiuwenswarm/channels/web/frontend）](feature-web-i18n-zh-en.md)
+- [RSI 自我改进实验页（创建/列表/配置回显）](feature-rsi-experiment-ui.md)
+
+- [Chat Session Stats Bar and Per-Turn Mini Charts：实现深读](feature-depth-chat-session-stats-dashboard.md)
+
+- [代码模式分支选择器（初始化/切换/创建分支）：实现深读](feature-depth-code-mode-branch-selector.md)
+
+- [提交/推送对话框（commit、push、commit_push）：实现深读](feature-depth-code-mode-commit-push.md)
+
+- [上下文占用指示器（环形/悬浮提示/明细弹层）：实现深读](feature-depth-context-usage-indicator.md)
+
+- [Vite Dev WS Traffic Logger (/__dev/ws-log)：实现深读](feature-depth-dev-ws-traffic-logger.md)
+
+- [增量 ESLint 门禁（相对基线只报新增诊断）：实现深读](feature-depth-frontend-incremental-lint-gate.md)
+
+- [RSI 自我改进实验页（创建/列表/配置回显）：实现深读](feature-depth-rsi-experiment-ui.md)
+
+- [Session Share-Image Export (Job Registry + Headless Renderer)：实现深读](feature-depth-share-image-export.md)
+
+- [Web 资产发布流程（prepare/commit/轮询/提交锁）：实现深读](feature-depth-web-asset-publish-flow.md)
+
+- [Web 前端中英双语 i18n 初始化：实现深读](feature-depth-web-i18n-zh-en.md)
+
+- [Web 通道本机目录/可执行文件选择器（跨平台后端链）：实现深读](feature-depth-web-native-directory-picker.md)
+
+- [web-frontend 审查规则](rules.md) — 配额导航开关必须走完整 HTML 注入链并清理残留导航。

@@ -24,19 +24,19 @@ from ..knowledge_service.l1 import Block
 from ..knowledge_service.lifecycle import Page
 from ..knowledge_service.ops import page_over_capacity
 from ..knowledge_service.pinned_claims import check_rules, evidence_for
-from ..profiles.languages import suffixes
 from .init_budget import BudgetExhausted
-from .init_coverage import Owner, make_include
+from .init_coverage import Owner
 from .init_stages import _Chain, _Stage, _numbered, _one_line, _page_frontmatter, neutral_headings
 from .init_support import InitRecord, classify_verdict, generate, judge
-from .init_knowledge_inputs import SYSTEM_KNOWLEDGE, knowledge_prompt, source_owner, source_owners
+from .init_knowledge_inputs import SYSTEM_KNOWLEDGE, knowledge_prompt, source_owner, source_owners, foundation_evidence
 from .models import ModelUnavailable
+from .init_knowledge_parallel import offered_ranges, parallelism, run_jobs, restore_jobs, preferred_sources, start_interval, range_is_offered, related_test_sources
 
 FACETS = ("architecture", "api", "configuration", "tradeoffs", "features", "validation")
 MAX_SOURCE_BYTES = 100_000
 MAX_DOC_BYTES = 30_000
 MAX_FILES = 60
-_MARKER = re.compile(r"<!-- kb:knowledge owner=([a-z0-9-]+) facet=([a-z]+) pin=([0-9a-f]{40})"
+_MARKER = re.compile(r"<!-- kb:knowledge owner=([a-z0-9-]+) facet=([a-z]+) pin=((?:[0-9a-f]{40}|[0-9a-f]{64}))"
                      r"(?: verdict=(pass|unsure|unjudged))? -->")
 _OWNER = re.compile(r"[a-z0-9][a-z0-9-]{0,40}")
 
@@ -72,6 +72,8 @@ def validate_sections(data: dict) -> None:
 @dataclass
 class _Knowledge(_Stage):
     STAGE = "knowledge"
+    foundation_mode: str = "strict"
+    foundation_record_path: Path | None = None
 
     def _chain(self) -> _Chain:
         if not self.from_existing:
@@ -98,15 +100,18 @@ class _Knowledge(_Stage):
         return _Chain(key=f"existing:{self._base_sha}", problems=problems)
 
     def _precheck(self) -> list[str]:
-        from .knowledge_coverage import load_policy, policy_path
+        from .knowledge_coverage import load_policy
 
-        text = self.rt.knowledge.show(self._base_sha, policy_path(self.lifecycle.repo))
+        path = self._coverage_policy_path()
+        text = self.overlay.get(path) or self.rt.knowledge.show(self._base_sha, path)
         if text:
             try:
                 policy = load_policy(text, self.repo_dir)
             except (ValueError, TypeError) as exc:
                 return [f"knowledge coverage policy: {exc}"]
             self.coverage_policy = policy
+            if self.foundation_mode == "partial" and policy.semantic_depth_per_facet_gt is None:
+                return ["partial foundation requires a final semantic-depth acceptance policy"]
             for feature in policy.features:
                 existing = self.base.get(feature.page)
                 if existing:
@@ -116,34 +121,131 @@ class _Knowledge(_Stage):
         return []
 
     def _input_options(self) -> dict:
-        from .knowledge_coverage import policy_path
+        from .foundation_context import context_version
+        path = self._coverage_policy_path()
+        text = self.overlay.get(path) or self.rt.knowledge.show(self._base_sha, path) or ""
+        options = {"knowledge_policy": hashlib.sha256(text.encode()).hexdigest(),
+                   "from_existing": self.from_existing,
+                   "knowledge_prompt_version": context_version(self.rt) if self.rt.unlimited_subscription else 3}
+        if self.rt.unlimited_subscription:
+            options["foundation_parallel"] = {"version": 1, "workers": parallelism(self.rt),
+                                               "zcode_start_interval_s": start_interval(self.rt)}
+        return options
 
-        text = self.rt.knowledge.show(self._base_sha, policy_path(self.lifecycle.repo)) or ""
-        return {"knowledge_policy": hashlib.sha256(text.encode()).hexdigest(),
-                "from_existing": self.from_existing, "knowledge_prompt_version": 3}
+    def _discovery_gate(self, chain: _Chain, pin: str) -> None:
+        self._knowledge_run_pin = pin
+        super()._discovery_gate(chain, pin)
+
+    def _cache_reusable(self, previous: InitRecord) -> bool:
+        if previous.status == "published":
+            return True  # Preserve immutable historical publication records.
+        if self.rt.unlimited_subscription and previous.status != "published":
+            self._validate_unpublished_checkpoint(previous, previous.inputs_digest)
+        if self.STAGE == "knowledge" and self.foundation_mode == "partial":
+            return False  # Reconstruct a truthful publication-only scope from the saved native tasks.
+        return not (self.rt.unlimited_subscription and previous.unfinished)
+
+    def _resume_input_problems(self, previous: InitRecord, digest: str) -> list[str]:
+        if self.rt.unlimited_subscription and previous.status != "published":
+            # Raise before generic _blocked writes: restoring an archive must
+            # leave the same genuine prepared publication resumable.
+            self._validate_unpublished_checkpoint(previous, digest)
+        if self.STAGE == "knowledge":
+            from .foundation_publication import verify_prepared_receipt
+            verify_prepared_receipt(self, previous)
+        return super()._resume_input_problems(previous, digest)
+
+    def _validate_unpublished_checkpoint(self, previous: InitRecord, digest: str) -> None:
+        from .init_knowledge_parallel import validate_checkpoint
+        validate_checkpoint(self, previous, digest)
+
+    def _restore_progress(self, previous: InitRecord | None) -> list[str]:
+        if self.STAGE == "knowledge" and self.foundation_mode == "partial" and previous is not None:
+            self._validate_unpublished_checkpoint(previous, self.record.inputs_digest)
+            from .foundation_publication import validate_initial_scope
+            validate_initial_scope(self, previous)
+        if (self.rt.unlimited_subscription and previous is not None
+                and previous.coverage.get("foundation_jobs")
+                and previous.inputs_digest != self.record.inputs_digest):
+            from .init_support import InitError
+            raise InitError("foundation inputs changed; create a new pinned batch")
+        if (self.rt.unlimited_subscription and previous is not None
+                and previous.inputs_digest == self.record.inputs_digest):
+            from copy import deepcopy
+            self.record.coverage["foundation_jobs"] = deepcopy(previous.coverage.get("foundation_jobs", {}))
+            self.budget.spent_usd = previous.spent_usd
+        return []
+
+    def _publish(self, changed: dict[str, str]) -> InitRecord:
+        targets = self.record.coverage.get("knowledge", {}).get("targets", {})
+        if self.STAGE == "knowledge" and getattr(self.rt, "portable_spec", None):
+            from .knowledge_coverage import coverage_targets_met
+
+            owners = self.record.coverage.get("knowledge", {}).get("owners", {})
+            self.record.coverage["foundation"] = {
+                "mode": "partial", "tier": "foundation", "init_complete": False,
+                "foundation_targets_met": targets.get("met") is True,
+                "structural_targets_met": coverage_targets_met(targets, "partial"),
+                "catalog_binding": self.record.discovery.get("catalog_binding", {}),
+                "unknown_features": {key: list(item.get("missing_facets", []))
+                    for key, item in targets.get("features", {}).get("items", {}).items()
+                    if item.get("missing_facets")},
+                "unknown_owners": {key: [facet for facet, status in item.get("facets", {}).items()
+                    if status != "covered"] for key, item in owners.items()
+                    if any(status != "covered" for status in item.get("facets", {}).values())},
+                "unknown_core_files": list(targets.get("core", {}).get("missing_files", [])),
+                "claim": "Accepted foundation retains supported context and explicit unknowns; "
+                         "it does not establish seven-facet final acceptance or executed tests."}
+            self.record.notes.append("portable foundation preview: unsupported facets remain unknown; "
+                                     "final semantic-depth and structural targets are unchanged")
+            return super()._publish(changed)
+        if self.STAGE == "knowledge" and self.foundation_mode == "partial":
+            from .foundation_publication import freeze_receipt
+            freeze_receipt(self, changed)
+            return super()._publish(changed)
+        if (self.rt.unlimited_subscription and not self.dry_run
+                and targets.get("required") is True and targets.get("met") is not True):
+            return self._blocked(["foundation targets incomplete; native progress retained; "
+                                  "resume this same pinned publication batch to fill missing knowledge"])
+        return super()._publish(changed)
+
+    def _resume(self, previous: InitRecord) -> InitRecord:
+        if self.STAGE == "knowledge" and self.foundation_mode == "partial":
+            from .init_stages import render_pr_body
+            from .init_support import load_prepared, save_prepared
+            # The common run path has already replayed native/source/receipt
+            # and checked the frozen catalog, branch and generation identity.
+            prepared = load_prepared(previous.pr["prepared"])
+            body = render_pr_body(previous, self.lifecycle)
+            if prepared["body"] != body:
+                save_prepared(Path(previous.pr["prepared"]), **{**prepared, "body": body})
+        return super()._resume(previous)
 
     def _build(self, tree: Path) -> InitRecord:
         if self.route_source == "none":
             return self._blocked(["knowledge needs owner routes: run and merge skeleton and modules first"])
         if any(not o.path.startswith(self.repo_dir + "/") for o in self.owners):
             return self._blocked(["knowledge owner pages must belong to this repository"])
-        if not suffixes(self._language()):
-            return self._blocked(["knowledge needs a supported adapter repo.language"])
-        include = make_include(self.lifecycle.init.source_roots, self.lifecycle.init.exclude,
-                               tuple(s for lang in ("python", "rust", "go", "javascript") for s in suffixes(lang)))
+        from .feature_discovery_index import build_for_stage
+
+        self.source_index = build_for_stage(tree, self)
+        publication_only = self.foundation_mode == "partial"
+        if publication_only and not getattr(self, "coverage_policy", None):
+            return self._blocked(["partial foundation publication requires an explicit coverage policy"])
+        visited_owners, visited_features = [], []
+        if publication_only and not self.record.coverage.get("foundation_jobs", {}).get("tasks"):
+            return self._blocked(["partial foundation publication requires a genuine saved native batch"])
         files: dict[str, list[str]] = {}
         unrouted = []
         policy = getattr(self, "coverage_policy", None)
-        if policy is not None:
-            from .knowledge_coverage import inventory
-
-            paths = inventory(tree, policy)
-        else:
-            paths = [file.relative_to(tree).as_posix() for file in sorted(tree.rglob("*"))
-                     if file.is_file() and include(file.relative_to(tree).as_posix())]
+        paths = list(self.source_index.production)
+        for failure in self.source_index.failures:
+            self.record.checklist.append(f"source index {failure['path']}: {failure['operation']} failed; retained as unknown")
         routes = self.owners
         owners = source_owners(paths, routes, policy)
         self.owners = list(owners.values())
+        if self.rt.unlimited_subscription:
+            restore_jobs(self)
         for rel in paths:
             hits = source_owner(rel, routes, owners)
             if hits:
@@ -164,7 +266,9 @@ class _Knowledge(_Stage):
                     return self._blocked([f"knowledge target {page} must be an explanatory architecture or guide page"])
         report = {}
         claims, evidence = {}, []
+        owner_jobs = []
         for position, name in enumerate(order):
+            visited_owners.append(name)
             owner = owners[name]
             page = self._page_for(owner)
             existing = self.head.get(page, "")
@@ -186,21 +290,32 @@ class _Knowledge(_Stage):
                             "source_files": len(files[name]), "shown_files": 0}
             if not requested:
                 continue
-            source = self._sources(tree, sorted(files[name], key=lambda p: (-churn[p], p)), MAX_SOURCE_BYTES)
+            if publication_only:
+                continue  # No fourth extraction or review: existing task proofs were replayed by restore_jobs.
+            tests = related_test_sources(self, files[name]) if self.rt.unlimited_subscription else []
+            test_bytes = sum(len(item["text"].encode()) for item in tests)
+            source = self._sources(tree, sorted(files[name], key=lambda p: (-churn[p], p)), MAX_SOURCE_BYTES - test_bytes)
+            source.extend(tests)
             docs = self._docs_for(tree, owner)
-            offered = {item["path"]: item["end"] for item in source + docs}
-            report[name]["shown_files"] = len(source)
-            report[name]["partial_files"] = [item["path"] for item in source if item["end"] < item["total_lines"]]
+            offered = offered_ranges(source + docs)
+            report[name]["shown_files"] = len(source) - len(tests)
+            report[name]["partial_files"] = [item["path"] for item in source if not item.get("test_context") and item["end"] < item["total_lines"]]
             self.record.unfinished.extend(f"{name}: byte cap truncated {path}"
                                           for path in report[name]["partial_files"])
-            if len(source) < len(files[name]):
-                self.record.unfinished.append(f"{name}: source cap showed {len(source)} of {len(files[name])} files")
+            if len(source) - len(tests) < len(files[name]):
+                self.record.unfinished.append(f"{name}: source cap showed {len(source) - len(tests)} of {len(files[name])} files")
             payload = {"repository": self.lifecycle.full_name, "pin": self.record.pin, "owner": name,
                        "facets": requested, "files": source, "docs": docs,
                        "existing_knowledge": self._bounded_context(existing_pages),
                        "language_sample": self._language_sample(),
                        "related_owners": [{"owner": o.owner, "scope_prefixes": list(o.prefixes)}
                                           for o in self.owners]}
+            if self.rt.unlimited_subscription:
+                from .foundation_context import context_version
+                payload["foundation_prompt_version"] = context_version(self.rt)
+                owner_jobs.append({"owner": owner, "page": page, "payload": payload,
+                                   "offered": offered, "requested": requested})
+                continue
             try:
                 data = generate(self.rt, self.budget, self.lifecycle.init, system=SYSTEM_KNOWLEDGE,
                                 prompt=knowledge_prompt(payload), validate=validate_sections).data
@@ -222,23 +337,36 @@ class _Knowledge(_Stage):
                 break
             except ModelUnavailable as exc:
                 self.record.unfinished.append(f"knowledge owner {name}: unusable draft: {exc}")
+        if owner_jobs:
+            for job, results in run_jobs(self, owner_jobs):
+                name = job["owner"].owner
+                for key, text, entries, label in results:
+                    facet = key.rsplit(":", 1)[-1]
+                    claims[key] = text
+                    evidence.extend(entries)
+                    report[name]["facets"][facet] = "covered"
+                for facet in job["requested"]:
+                    verdict = self.record.verdicts.get(f"knowledge:{name}:{facet}", {})
+                    if verdict.get("verdict") in ("unsure", "unjudged"):
+                        report[name]["facets"][facet] = "needs_review"
         for name in order:
             report.setdefault(name, {"page": self._page_for(owners[name]),
                                      "facets": dict.fromkeys(FACETS, "missing"),
                                      "source_files": len(files[name]), "shown_files": 0})
         totals = {f: sum(r["facets"][f] == "covered" for r in report.values()) for f in FACETS}
-        self.record.coverage = {"knowledge": {"owners": report, "covered_by_facet": totals,
+        self.record.coverage["knowledge"] = {"owners": report, "covered_by_facet": totals,
                                               "total_owners": len(order), "unrouted_files": unrouted,
-                                              "pin": self.record.pin}}
+                                              "pin": self.record.pin}
         missing = [f"{name}/{facet}" for name, r in report.items() for facet, status in r["facets"].items()
                    if status != "covered"]
         self.record.unfinished.extend(f"missing knowledge: {item}" for item in missing)
         if not any(n.startswith("knowledge stopped:") for n in self.record.notes):
             self.record.notes.append(f"knowledge stopped: all {len(order)} source owners visited; "
                                      f"{len(missing)} facets remain unsupported or stale")
-        from .knowledge_coverage import add_contract_pages, audit_coverage, load_policy, matches, policy_path
+        from .knowledge_coverage import add_contract_pages, audit_coverage, load_policy, matches
 
-        policy_text = self.rt.knowledge.show(self._base_sha, policy_path(self.lifecycle.repo))
+        policy_path_ = self._coverage_policy_path()
+        policy_text = self.overlay.get(policy_path_) or self.rt.knowledge.show(self._base_sha, policy_path_)
         if policy_text:
             try:
                 policy = load_policy(policy_text, self.repo_dir)
@@ -248,23 +376,53 @@ class _Knowledge(_Stage):
                                          full_name=self.lifecycle.full_name, pin=self.record.pin,
                                          today=self.today, tags=self.tags, link_page=self._link_page)
             targets = audit_coverage(self.head, tree, policy, full_name=self.lifecycle.full_name, pin=self.record.pin)
+            feature_jobs = []
             for feature in policy.features:
+                visited_features.append(feature.id)
+                if publication_only:
+                    continue
                 if targets["features"]["items"][feature.id]["covered"]:
                     continue
                 paths = [p.relative_to(tree).as_posix() for p in tree.rglob("*")
                          if p.is_file() and matches(p.relative_to(tree).as_posix(), feature.source_globs)]
-                source = self._sources(tree, list(dict.fromkeys(list(feature.entry_points) + sorted(paths))), MAX_SOURCE_BYTES)
+                source_paths = list(dict.fromkeys(list(feature.entry_points) + sorted(paths)))
+                tests = related_test_sources(self, source_paths) if self.rt.unlimited_subscription else []
+                test_bytes = sum(len(item["text"].encode()) for item in tests)
+                source = preferred_sources(self, tree, feature.id, source_paths, MAX_SOURCE_BYTES - test_bytes)
+                source.extend(tests)
                 docs = self._sources(tree, list(feature.docs), MAX_DOC_BYTES)
-                if not source or not docs:
-                    self.record.unfinished.append(f"feature {feature.id}: missing source or documentation")
+                discovery = self._discovery_catalog()
+                bundle = discovery.get("evidence_bundles", {}).get(feature.id)
+                if bundle:
+                    from .evidence_bundle import materialize_bundle, bounded_spans
+                    try:
+                        spans = materialize_bundle(bundle, tree, pin=self.record.pin,
+                                                   catalog_hash=discovery["catalog_sha256"])
+                    except (ValueError, OSError, UnicodeError) as exc:
+                        return self._blocked([f"discovery evidence handoff: {exc}"])
+                    source = bounded_spans([s for s in spans if s["kind"] != "doc"] + source, MAX_SOURCE_BYTES)
+                    docs = bounded_spans([s for s in spans if s["kind"] == "doc"] + docs, MAX_DOC_BYTES)
+                if self.rt.unlimited_subscription:
+                    from .foundation_context import context_version, feature_context
+                    if context_version(self.rt) == 5:
+                        source, docs = feature_context(self, feature, source, docs,
+                            source_limit=MAX_SOURCE_BYTES, doc_limit=MAX_DOC_BYTES)
+                if not source:
+                    self.record.unfinished.append(f"feature {feature.id}: missing readable source")
                     continue
-                offered = {f["path"]: f["end"] for f in source + docs}
+                offered = offered_ranges(source + docs)
                 missing_facets = targets["features"]["items"][feature.id]["missing_facets"] or list(FACETS)
                 payload = {"repository": self.lifecycle.full_name, "pin": self.record.pin,
                            "owner": "feature-" + feature.id, "feature": feature.title, "facets": missing_facets,
                            "files": source, "docs": docs,
                            "existing_knowledge": self._bounded_context({feature.page: self.head.get(feature.page, "")}),
                            "language_sample": self._language_sample()}
+                if self.rt.unlimited_subscription:
+                    payload["foundation_prompt_version"] = context_version(self.rt)
+                    feature_jobs.append({"owner": Owner("feature-" + feature.id, feature.page, ()),
+                                         "page": feature.page, "payload": payload,
+                                         "offered": offered, "requested": missing_facets})
+                    continue
                 try:
                     data = generate(self.rt, self.budget, self.lifecycle.init, system=SYSTEM_KNOWLEDGE,
                                     prompt=knowledge_prompt(payload), validate=validate_sections).data
@@ -282,6 +440,11 @@ class _Knowledge(_Stage):
                     break
                 except ModelUnavailable as exc:
                     self.record.unfinished.append(f"feature {feature.id}: unusable draft: {exc}")
+            if feature_jobs:
+                for job, results in run_jobs(self, feature_jobs):
+                    for key, text, entries, label in results:
+                        claims[key] = text
+                        evidence.extend(entries)
             targets = audit_coverage(self.head, tree, policy, full_name=self.lifecycle.full_name, pin=self.record.pin)
             targets["policy_sha256"] = hashlib.sha256(policy_text.encode()).hexdigest()
             self.record.coverage["knowledge"]["targets"] = targets
@@ -295,6 +458,16 @@ class _Knowledge(_Stage):
             for feature in policy.features:
                 if feature.page in self.head:
                     self.head[feature.page] = feature_metadata(self.head[feature.page], feature)
+        if publication_only:
+            self.record.coverage["foundation_scope"] = {
+                "version": 1, "kind": "publication-only reconstruction",
+                "complete": visited_owners == order and visited_features == [f.id for f in policy.features],
+                "owners": visited_owners, "features": visited_features,
+                "index_sha256": self.source_index.sha256,
+                "index_identity": self.source_index.identity,
+                "index_failures": self.source_index.failures,
+                "terminal_tasks": sorted(self.record.coverage["foundation_jobs"]["tasks"]),
+                "native_dispatches": 0}
         return self._conclude(claims, evidence)
 
     def _page_for(self, owner: Owner) -> str:
@@ -312,7 +485,10 @@ class _Knowledge(_Stage):
             source = tree / path
             if not source.is_file() or source.is_symlink():
                 continue  # a feature policy may still name an entry removed at this pin
-            raw = source.read_text(encoding="utf-8", errors="replace")
+            try:
+                raw = source.read_text(encoding="utf-8")
+            except (OSError, UnicodeError):
+                continue  # shared inventory records unreadable inputs explicitly
             if not raw.strip():
                 continue
             text = _numbered(raw, max(0, limit - used))
@@ -327,7 +503,9 @@ class _Knowledge(_Stage):
                 break
             text = "\n".join(numbered)
             end = len(numbered)
-            out.append({"path": path, "text": text, "end": end, "total_lines": len(original)})
+            from .feature_discovery_index import language_for
+            out.append({"path": path, "text": text, "end": end, "total_lines": len(original),
+                        "language": language_for(path)})
             used += len(text.encode("utf-8"))
         return out
 
@@ -340,11 +518,19 @@ class _Knowledge(_Stage):
         # the shared skeleton excerpt can end before this component's guide.
         if not hasattr(self, "_doc_index"):
             self._doc_index = []
-            for file in doc_files(tree, self.lifecycle.init.doc_globs):
+            shared = getattr(self, "source_index", None)
+            candidates = [tree / path for path in shared.docs] if shared else doc_files(tree, self.lifecycle.init.doc_globs)
+            for file in candidates:
                 if file.is_symlink():
                     continue
-                with file.open("rb") as stream:
-                    excerpt = stream.read(MAX_DOC_BYTES).decode("utf-8", "replace").lower()
+                if shared:
+                    entry = shared.entries[file.relative_to(tree).as_posix()]
+                    if entry["status"] != "ready":
+                        continue
+                    excerpt = entry["text"].lower()
+                else:
+                    with file.open("rb") as stream:
+                        excerpt = stream.read(MAX_DOC_BYTES).decode("utf-8", "replace").lower()
                 self._doc_index.append((file.relative_to(tree).as_posix(), file.stem.lower(), excerpt))
         for path, stem, excerpt in self._doc_index:
             adjacent = any(path.startswith(prefix) for prefix in owner.prefixes)
@@ -392,7 +578,8 @@ class _Knowledge(_Stage):
         key = f"knowledge:{owner.owner}:{facet}"
         entries = []
         for entry in section["evidence"]:
-            if entry["path"] not in offered or entry["end"] > offered[entry["path"]]:
+            ranges = offered.get(entry["path"], [])
+            if not range_is_offered(ranges, entry["start"], entry["end"]):
                 self.record.dropped.append({"rule_id": key, "page": page, "why": "evidence outside shown input"})
                 return None
             try:
@@ -401,20 +588,11 @@ class _Knowledge(_Stage):
                 self.record.dropped.append({"rule_id": key, "page": page, "why": str(exc)})
                 return None
         title = _one_line(data.get("title")) or f"{owner.owner} knowledge"
-        heading = _one_line(section.get("title")) or facet.capitalize()
-        text = neutral_headings(f"## {heading}\n\n" + section["body"].strip())
-        if section["interpretation"] == "inference":
-            text = text.replace("\n\n", "\n\nInference / 设计推断（非作者历史意图）：\n\n", 1)
+        text = self._render_section(section, entries)
         problems = check_rules({key: text}, self.observer)
         if problems:
             self.record.dropped.append({"rule_id": key, "page": page, "why": "; ".join(problems)})
             return None
-        citations = []
-        for entry in entries:
-            url = (f"https://github.com/{self.lifecycle.full_name}/blob/{self.record.pin}/"
-                   f"{quote(entry.path, safe='/')}#L{entry.start}-L{entry.end}")
-            citations.append(f"[{entry.path}:L{entry.start}–L{entry.end}]({url})")
-        text += "\n\nSources / 来源：" + ", ".join(citations) + "\n"
         front = _page_frontmatter(title, kind="architecture", today=self.today, tags=self.tags)
         verdict = judge(self.rt, self.budget, self.lifecycle.init, Block("prose", page, "", "prose",
                         hashlib.sha256(text.encode()).hexdigest()), base={},
@@ -427,6 +605,32 @@ class _Knowledge(_Stage):
             if label != "fail":
                 self.record.unfinished.append(f"{owner.owner}/{facet}: {label}; draft retained in model traces for review")
             return None
+        return self._append_approved(owner, page, title, facet, text, entries, label)
+
+    def _judge_evidence(self, entries):
+        payload = getattr(self, "_foundation_payload", {})
+        if self.rt.unlimited_subscription and payload.get("foundation_prompt_version") in (4, 5):
+            return foundation_evidence(self, payload)
+        return super()._judge_evidence(entries)
+
+    def _render_section(self, section, entries):
+        facet = section["facet"]
+        heading = _one_line(section.get("title")) or facet.capitalize()
+        text = neutral_headings(f"## {heading}\n\n" + section["body"].strip())
+        if section["interpretation"] == "inference":
+            text = text.replace("\n\n", "\n\nInference / 设计推断（非作者历史意图）：\n\n", 1)
+        citations = []
+        for entry in entries:
+            from .source_links import source_link
+            url = source_link(self.lifecycle.full_name, self.record.pin, entry.path, entry.start, entry.end)
+            citations.append(f"[{entry.path}:L{entry.start}–L{entry.end}]({url})")
+        text += "\n\nSources / 来源：" + ", ".join(citations) + "\n"
+        return text
+
+    def _append_approved(self, owner, page, title, facet, text, entries, label="pass"):
+        """Coordinator assembly of the exact independently approved prose."""
+        key = f"knowledge:{owner.owner}:{facet}"
+        front = _page_frontmatter(title, kind="architecture", today=self.today, tags=self.tags)
         marker = f"<!-- kb:knowledge owner={owner.owner} facet={facet} pin={self.record.pin} verdict={label} -->"
         current = self.head.get(page, front)
         proposed = current.rstrip() + "\n\n" + marker + "\n\n" + text + "\n"

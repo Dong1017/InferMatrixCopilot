@@ -1,7 +1,7 @@
 ---
 title: "PersonaPlex"
 created: 2026-09-02
-updated: 2026-09-06
+updated: 2026-10-06
 type: index
 tags: [vllm-omni, models, model-executor]
 sources: ["PR #4771", vllm_omni/model_executor/models/personaplex/, vllm_omni/model_executor/models/personaplex/duplex/, vllm_omni/deploy/personaplex.yaml]
@@ -28,7 +28,7 @@ confidence: high
 | 遇到什么 | 查看哪里 |
 |---|---|
 | stage、frame、codec/session 状态和 serving 边界 | [architecture](architecture.md) |
-| frame accounting、de-delay、lease、greedy/config 门禁 | [rules](rules.md) |
+| frame accounting、de-delay、lease、greedy/config 门禁、Mimi codebook prefix与vectorized prefill | [rules](rules.md) |
 
 ## 什么时候查这里
 
@@ -36,3 +36,7 @@ confidence: high
   session cleanup 或 WebSocket reconnect。
 - 共享 full-duplex 生命周期转到 [Serving rules](../../components/serving/rules.md)，共享
   runner hook/config projection 转到 [Model Executor rules](../../components/model-executor/rules.md)。
+
+- [PersonaPlex live append 与 Mimi graph 合同](rules-live-graphs.md)。
+
+- [PersonaPlex streaming 表与 codec 输入合同](rules-streaming-state.md)。

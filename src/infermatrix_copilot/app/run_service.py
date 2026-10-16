@@ -211,6 +211,15 @@ class RunService:
         reconcile as sole writer."""
         run_dir = self.run_root / run_id
         env = dict(os.environ)
+        from ..knowledge_service.containment import configuration
+        maintenance = configuration(getattr(self, "knowledge_maintenance", None))
+        if maintenance["enabled"]:
+            env["KB_CONTAINMENT_CONFIG"] = json.dumps(maintenance)
+            from ..knowledge_service.containment import knowledge_availability_check
+            pin = read_knowledge_pin(run_dir)
+            if not knowledge_availability_check(pin.get("knowledge_usage"), config=maintenance)["allowed"]:
+                rs.mark(run_dir, rs.FAILED, note="knowledge containment requires reassessment")
+                return
         # Belt to the policy's braces. Strict used to be handed ALLOW_POST=1
         # when this server allowed it, because Strict specs could carry
         # post=True; the policy now refuses that, so leaving the env gate open
@@ -231,6 +240,7 @@ class RunService:
         env["DEFAULT_REPO"] = self.settings.default_repo
         env["REPO_PATHS"] = json.dumps(self.settings.repo_paths)
         env["REPO_FULL_NAMES"] = json.dumps(self.settings.repo_full_names)
+        env["ALLOWED_KNOWLEDGE_REPOSITORIES"] = json.dumps(self.settings.allowed_knowledge_repositories)
         # The child re-authorizes the request's `repo_path`, so it must judge it
         # against the SAME roots and identities this server did — otherwise the
         # re-check silently validates against different config than the parent.
@@ -383,12 +393,27 @@ class RunService:
             # EFFECTIVE knowledge_dir (a deployment may configure its own), and
             # KNOWLEDGE_ROOT is cleared at launch, so a relaunch under a newly
             # configured root cannot review with a snapshot while reporting this
-            configured = Path(self.settings.knowledge_dir).resolve()
-            if configured != view.root.resolve():
-                snapshot = "unverified"
-            knowledge_dir = str(configured)
+            effective_root = Path(self.settings.knowledge_dir).resolve()
+            if effective_root != view.root.resolve():
+                view = KnowledgeView(effective_root, f"unverified:{effective_root}")
+                snapshot = view.public_snapshot
+            knowledge_dir = str(effective_root)
         pin = {"snapshot": snapshot, "tree_sha256": view.tree_sha256,
                "knowledge_dir": knowledge_dir, "knowledge_root": env_root}
+        from ..knowledge_service.containment import configured, configuration, _issue_usage
+        maintenance = getattr(self, "knowledge_maintenance", None)
+        if configuration(maintenance)["enabled"]:
+            spec = json.loads((self.run_root / run_id / "request.json").read_text())
+            selector = str(spec.get("repo") or "")
+            from ..kb_service.repo_spec import resolve_snapshot_repo
+            binding = resolve_snapshot_repo(view, selector)
+            if binding is None:
+                raise RuntimeError("containment requires a registered pinned repository")
+            with configured(maintenance):
+                usage = _issue_usage({"scope": "snapshot", "repository": binding.repo_id,
+                    "review_id": run_id, "knowledge_snapshot": view.public_snapshot,
+                    "knowledge_tree_sha256": view.tree_sha256}, mode="strict", view=view)
+            pin["knowledge_usage"] = usage
         path = self.run_root / run_id / KNOWLEDGE_PIN
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(pin, sort_keys=True), encoding="utf-8")
@@ -557,17 +582,30 @@ class RunService:
     def _docs(self, repo: str) -> KnowledgeDocs:
         """Build the same repo-scoped knowledge view used by workflow agents."""
         from ..adapters.base import AdapterRegistry
+        from ..knowledge_view import KnowledgeView, _load_view
+        from ..kb_service.repo_spec import resolve_snapshot_repo
 
         repo = repo or self.settings.default_repo
-        if repo not in self.settings.mcp_allowed_repos:
+        current = KnowledgeView.current()
+        kdir = Path(self.settings.knowledge_dir).resolve()
+        if current.verified or current.root.resolve() == kdir:
+            view = current
+        elif (kdir.parent / "MANIFEST.json").is_file():
+            view = _load_view(str(kdir.parent))
+        else:
+            view = KnowledgeView(kdir, f"unverified:{kdir}")
+        binding = resolve_snapshot_repo(view, repo)
+        if repo not in self.settings.mcp_allowed_repos and (binding is None or binding.repo_id not in self.settings.mcp_allowed_repos):
             raise PolicyError(f"repo {repo!r} is not permitted")
+        if binding is not None:
+            return KnowledgeDocs(view.root, binding.knowledge_slice, verify=view.path)
         try:
             adapter = AdapterRegistry(self.settings.adapters_dir).resolve(
                 name=repo.replace("-", "_"))
         except Exception as exc:
             raise PolicyError(f"no knowledge adapter for repo {repo!r}") from exc
         kn = adapter.manifest.get("knowledge") or {}
-        return KnowledgeDocs(self.settings.knowledge_dir, kn.get("repo_subdir"))
+        return KnowledgeDocs(view.root, kn.get("repo_subdir"), verify=view.path)
 
     def doc_search(self, query: str, repo: str = "", limit: int = 40) -> dict:
         """Search general + the selected repo's curated Markdown knowledge."""

@@ -12,7 +12,7 @@ import pytest
 from infermatrix_copilot.kb_service.calibration import load_cases, run_calibration
 from infermatrix_copilot.kb_service.config import RepoLifecycle
 from infermatrix_copilot.kb_service.gate import changes_between, run_gate
-from infermatrix_copilot.kb_service.intake import draft_changes
+from infermatrix_copilot.kb_service.intake import draft_changes, draft_prompt
 from infermatrix_copilot.kb_service.ledger import Ledger
 from infermatrix_copilot.kb_service.models import (
     ModelGateway, ModelReply, ModelRole, ModelUnavailable, parse_json_object, roles_from_env,
@@ -142,7 +142,124 @@ def test_gateway_records_every_call_and_fails_closed():
     assert records and records[0]["requested"] == "codex:gpt-6-sol:medium"
 
 
+GLM_JUDGE = ModelRole("judge", "zcode", "GLM-5.3")
+
+
+def test_zcode_judge_backend_round_trips_and_is_recorded():
+    """zcode:GLM-5.3 is a first-class judge backend: the label survives the
+    gateway unchanged, the reply is parsed, and every call is recorded."""
+    records = []
+
+    class Transport:
+        stops_at_spend = False
+
+        def __init__(self):
+            self.kwargs = []
+
+        def complete(self, **kw):
+            self.kwargs.append(kw)
+            body = json.dumps({"dimensions": {"faithful": "yes"}, "reasons": {}})
+            return SimpleNamespace(blocks=[SimpleNamespace(text=body)], stop_reason="end_turn",
+                                   usage={}, model=kw.get("model", "GLM-5.3"))
+
+    transport = Transport()
+    gateway = ModelGateway(None, transport_factory=lambda p: transport, recorder=records.append)
+    reply = gateway.call_json(GLM_JUDGE, system="s", prompt="p")
+    assert reply.role.label() == "zcode:GLM-5.3" and reply.data["dimensions"]["faithful"] == "yes"
+    assert transport.kwargs[0]["model"] == "GLM-5.3"
+    assert records[0]["requested"] == "zcode:GLM-5.3"
+    assert records[0]["provider"] == "zcode"
+
+
+def test_gate_with_a_zcode_judge_uses_the_same_instrument():
+    add = [Op("add", PAGE, "DEMO-2a", _rule("DEMO-2a", "PR #11"))]
+    decision = _gate(add, _judge_all("yes"))
+    assert decision.status == "pass"
+    assert all(b.verdict == "pass" for b in decision.blocks)
+
+
+# -- judge tuning surface -------------------------------------------------------------
+
+def test_judge_tuning_is_the_single_source_the_gate_uses():
+    """judge_tuning is the evolvable surface; gate.py must delegate to it and
+    stay byte-identical to the pre-extraction baseline (evolution starts
+    from the production behaviour, never from a silent rewording). The
+    digests pin the shipped baseline — recorded when the module was
+    extracted from gate.py (7aa922dd9^)."""
+    import hashlib
+
+    from infermatrix_copilot.kb_service import gate, judge_tuning
+
+    assert gate.JUDGE_SYSTEM is judge_tuning.JUDGE_SYSTEM
+    assert gate.CONSISTENCY_SYSTEM is judge_tuning.CONSISTENCY_SYSTEM
+    assert gate.NEIGHBOUR_LIMIT is judge_tuning.NEIGHBOUR_LIMIT == 30
+
+    baseline = {
+        "JUDGE_SYSTEM": "2d120ade58b9ac32c0af4b0ad8854205f80fbfcad4e89ff2204b47028ec0781d",
+        "CONSISTENCY_SYSTEM": "db4fd2396f0400f9d45311f0c1460d181d83f8b64489c142c398bd1eca3f0b97",
+    }
+    for name, expected in baseline.items():
+        actual = hashlib.sha256(getattr(judge_tuning, name).encode()).hexdigest()
+        assert actual == expected, (
+            f"{name} drifted from the production baseline the evolution "
+            "engine starts from; rewording must arrive as an engine candidate, "
+            "not as part of another change")
+
+
+def test_verdict_aggregation_keeps_the_fail_closed_ordering():
+    from infermatrix_copilot.kb_service.judge_tuning import verdict_from_answers
+
+    assert verdict_from_answers({"faithful": "yes", "actionable": "yes"}) == "pass"
+    assert verdict_from_answers({"faithful": "no", "actionable": "yes"}) == "fail"
+    assert verdict_from_answers({"faithful": "no", "actionable": "unsure"}) == "fail"
+    assert verdict_from_answers({"faithful": "unsure", "actionable": "yes"}) == "human"
+    assert verdict_from_answers({}) == "pass"  # the empty dimension set (no applicable L2)
+
+
+def test_a_tuned_stricter_rubric_flows_through_the_gate(monkeypatch):
+    """The delegation is real: editing judge_tuning changes gate behaviour —
+    the hook evolution candidates use (a stricter aggregation fails blocks
+    the baseline sent to people). Candidates edit the judge_tuning source in
+    the arm tree; here the same edit is simulated on the imported symbol."""
+    from infermatrix_copilot.kb_service import gate
+
+    add = [Op("add", PAGE, "DEMO-2a", _rule("DEMO-2a", "PR #11"))]
+    original = gate.verdict_from_answers
+
+    def strict(answers):
+        return "fail" if "unsure" in answers.values() else original(answers)
+
+    monkeypatch.setattr(gate, "verdict_from_answers", strict)
+    assert _gate(add, _judge_all("unsure")).status == "fail"
+    monkeypatch.undo()
+    assert _gate(add, _judge_all("unsure")).status == "human"
+
+
 # -- drafting and gate --------------------------------------------------------------
+
+def _draft_context(evidence, files=None, *, event_id=1):
+    prompt = draft_prompt("demo", evidence, files or _tree(), "repos/demo", event_id=event_id)
+    return json.loads(prompt.split("\n", 1)[1].split("\n\n<untrusted_data>", 1)[0])
+
+
+def test_draft_sees_ids_on_unrelated_pages_and_permanent_reservations():
+    files = {**_tree(), "repos/other/rules.md": _rule("OTHER-hidden"),
+             "repos/demo/_tombstones.yaml": "schema_version: 1\nids:\n  - id: DEMO-purged\n"}
+    context = _draft_context({"changed_files": ["demo/core/q.py"]}, files)
+    assert [page["page"] for page in context["related_pages"]] == [PAGE]
+    assert context["existing_rule_ids"] == ["DEMO-1a", "DEMO-purged", "OTHER-hidden"]
+
+
+def test_independent_pr_drafts_get_distinct_namespaces_and_refinement_keeps_all_sources():
+    first = _draft_context({"source_reference": "PR #6926"})
+    second = _draft_context({"source_reference": "PR #7777"})
+    assert first["new_rule_id_namespaces"] == ["DEMO-PR6926"]
+    assert second["new_rule_id_namespaces"] == ["DEMO-PR7777"]
+    refined = _draft_context({"evidence": [{"source_reference": "PR #7777"},
+                                           {"source_reference": "PR #6926"}]}, event_id=0)
+    assert refined["new_rule_id_namespaces"] == ["DEMO-PR6926", "DEMO-PR7777"]
+    assert _draft_context({"source_reference": "run r1"}, event_id=42)["new_rule_id_namespaces"] == ["DEMO-E42"]
+
 
 def test_draft_repairs_on_lifecycle_error():
     answers = iter([
@@ -355,6 +472,8 @@ def test_calibration_scoring():
             return {"verdict": "consistent", "conflicts": []}
         dims = json.loads(prompt.split("<untrusted_data>\n", 1)[1].rsplit("\n</untrusted_data>", 1)[0])
         text = json.dumps(dims["change"], ensure_ascii=False)
+        if dims["change"]["op"] == "retire" and "reason=superseded" in dims["change"]["after"]:
+            return {"dimensions": {d: "yes" for d in dims["dimensions_to_answer"]}, "reasons": {}}
         bad_markers = ("可选的", "按照 PR", "遵循 PR #8107", "回落到 runner 默认值", "enforce_runner_schema",
                        "无需断言", "run_benchmark.py` 只跑 `is_diffusion", "MMH3-4e", "retire")
         verdict = "no" if any(m in text for m in bad_markers) or dims["change"]["op"] == "retire" else "yes"
@@ -362,6 +481,65 @@ def test_calibration_scoring():
 
     strict = run_calibration(directory, gateway=ScriptedGateway(oracle), judge=JUDGE)
     assert strict.passed, strict.to_dict()
+
+
+@pytest.mark.parametrize("involves_new_rule", [False, True])
+def test_calibration_preserves_reasons_and_attributes_consistency_like_the_gate(tmp_path, involves_new_rule):
+    base = _tree()
+    base.update(apply_operations(base, [Op("add", PAGE, "DEMO-old", _rule("DEMO-old"))],
+                                 release="v1", today="2026-09-28").files)
+    head = {**base, **apply_operations(base, [Op("add", PAGE, "DEMO-new", _rule("DEMO-new"))],
+                                       release="v1", today="2026-09-28").files}
+    cases = tmp_path / "cases"
+    cases.mkdir()
+    (cases / "good.json").write_text(json.dumps({"id": "good", "expected": "pass", "base": base,
+                                                 "head": head, "evidence": []}))
+
+    def answer(role, prompt):
+        payload = json.loads(prompt.split("<untrusted_data>\n", 1)[1].split("\n</untrusted_data>", 1)[0])
+        if "directory" in payload:
+            assert payload["changed_rule_ids"] == ["DEMO-new"]
+            return {"verdict": "conflict", "conflicts": [
+                ["DEMO-new" if involves_new_rule else "DEMO-old", "DEMO-1a", "overlap"]]}
+        return {"dimensions": {d: "yes" for d in payload["dimensions_to_answer"]},
+                "reasons": {"faithful": "supported by pinned source"}}
+
+    report = run_calibration(tmp_path, gateway=ScriptedGateway(answer), judge=JUDGE)
+    detail = report.details[0]
+    assert detail["outcome"] == ("fail" if involves_new_rule else "pass")
+    assert detail["blocks"][0]["reasons"] == {"faithful": "supported by pinned source"}
+    assert bool(detail["consistency"][0]["preexisting"]) == (not involves_new_rule)
+
+
+def test_calibration_cli_records_replayable_calls_as_calibration(tmp_path, monkeypatch, capsys):
+    from infermatrix_copilot.kb_service import cli, models
+    from infermatrix_copilot.trace_store import TraceStore
+
+    class RecordedGateway(ScriptedGateway):
+        def __init__(self, settings, *, recorder):
+            super().__init__(_judge_all("yes"))
+            self.recorder = recorder
+
+        def call_json(self, role, *, system, prompt, validate=None):
+            reply = super().call_json(role, system=system, prompt=prompt, validate=validate)
+            self.recorder({"system": system, "prompt": prompt, "reply": reply.text,
+                           "role": role.name, "model": role.model})
+            return reply
+
+    lifecycle = RepoLifecycle(repo="demo", full_name="org/demo", enabled=True, mode="shadow",
+                              knowledge_dir="repos/demo", adapter_dir=ROOT / "adapters/vllm_omni",
+                              calibration_set="kb-calibration")
+    monkeypatch.setattr(cli, "_registry", lambda: {"demo": lifecycle})
+    monkeypatch.setattr(models, "ModelGateway", RecordedGateway)
+    monkeypatch.delenv("KB_SIGNING_KEY", raising=False)
+    state = tmp_path / "state"
+    assert cli.main(["--state-dir", str(state), "calibrate", "--repo", "demo"]) == 1
+    capsys.readouterr()
+    calls = TraceStore(state / "traces").query(kind="model_call", limit=100)
+    assert calls
+    assert all(c["context"]["playbook"] == "kb-calibrate" and c["context"]["repo"] == "demo"
+               and c["context"]["item"] for c in calls)
+    assert all(c["inputs"].get("prompt") and c["outputs"].get("reply") for c in calls)
 
 
 def test_kb_intake_playbook_is_registered_and_candidate():

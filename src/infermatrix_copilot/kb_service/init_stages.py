@@ -59,6 +59,8 @@ MAX_RULES_PER_CALL = 12
 MAX_SEED_PAGES = 8
 MAX_EXCERPT_BYTES = 8 * 1024
 MAX_PROMPT_DOC_BYTES = 120_000
+BRANCH_SUFFIX_ENV = "KB_INIT_BRANCH_SUFFIX"
+_BRANCH_SUFFIX = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?")
 _SLUG = re.compile(r"[a-z0-9][a-z0-9-]{0,40}")
 _ID_PREFIX = re.compile(r"^([A-Z][A-Z0-9]{0,7})-")
 _TOP_HEADING = re.compile(r"(?m)^#{1,6}\s")
@@ -133,19 +135,68 @@ def validate_change(base: Mapping[str, str], head: Mapping[str, str], *, observe
 
 # -- stage entry -------------------------------------------------------------------
 
+def _init_branch_suffix(rt: InitRuntime) -> str:
+    """Validate a new batch's optional publication name before any model call."""
+    suffix = rt.environ.get(BRANCH_SUFFIX_ENV, "")
+    if not isinstance(suffix, str) or (suffix and not _BRANCH_SUFFIX.fullmatch(suffix)):
+        raise InitError(f"{BRANCH_SUFFIX_ENV} must be an optional lowercase slug of 1–40 characters "
+                        "using letters, digits and hyphens, with no leading or trailing hyphen")
+    return suffix
+
+
 def run_stage(rt: InitRuntime, lifecycle, stage: str, *, dry_run: bool, pin: str | None = None,
               pr_count: int | None = None, budget_usd: float | None = None,
               from_existing: bool = False, subscription_generator: bool = False,
-              retry_unfinished: bool = False) -> InitRecord:
+              retry_unfinished: bool = False, unlimited_subscription: bool = False,
+              feature_ids: tuple[str, ...] = (), acceptance_mode: str = "strict",
+              depth_index_path: Path | None = None, stop_file: Path | None = None,
+              foundation_mode: str = "strict", foundation_record_path: Path | None = None) -> InitRecord:
     """Run one ``kb init`` stage for ``lifecycle``'s repository and return its
     record (also saved under ``<state_dir>/init/<repo>/<stage>.json``)."""
     if stage not in STAGES + INDEPENDENT_STAGES:
         raise InitError(f"unknown stage {stage!r}; one of {STAGES + INDEPENDENT_STAGES}")
-    if from_existing and stage not in ("knowledge", "knowledge-deepen"):
-        raise InitError("--from-existing is for explanatory knowledge stages only")
-    if retry_unfinished and stage != "knowledge-deepen":
-        raise InitError("--retry-unfinished is for knowledge-deepen only")
+    _init_branch_suffix(rt)  # publication configuration is refused before any model call
+    if from_existing and stage not in ("feature-discovery", "modules", "knowledge", "knowledge-deepen"):
+        raise InitError("--from-existing is for feature-discovery, modules or explanatory knowledge stages only")
+    if retry_unfinished and stage not in ("feature-discovery", "knowledge-deepen"):
+        raise InitError("--retry-unfinished is for feature-discovery or knowledge-deepen only")
+    if acceptance_mode not in ("strict", "lightweight") or (
+        stage != "knowledge-deepen" and (acceptance_mode != "strict" or depth_index_path or stop_file)):
+        raise InitError("acceptance_mode must be strict or lightweight and depth options require knowledge-deepen")
+    if foundation_mode not in ("strict", "partial") or (
+            foundation_mode == "strict" and foundation_record_path is not None):
+        raise InitError("foundation_mode must be strict or partial; a foundation record requires partial mode")
+    if foundation_mode == "partial" and (
+            stage not in ("knowledge", "knowledge-deepen") or (not unlimited_subscription and not getattr(rt, "portable_spec", None))
+            or (bool(foundation_record_path) != (stage == "knowledge-deepen") and not getattr(rt, "portable_spec", None))):
+        raise InitError("partial foundation requires unlimited knowledge, or knowledge-deepen with its published foundation record")
+    if feature_ids and (stage != "knowledge-deepen" or not isinstance(feature_ids, tuple)
+                        or any(not isinstance(f, str) or not f for f in feature_ids)):
+        raise InitError("feature_ids must be a depth-only tuple of policy feature identifiers")
+    if type(unlimited_subscription) is not bool:
+        raise InitError("unlimited_subscription must be a boolean")
+    if unlimited_subscription and (stage not in ("feature-discovery", "modules", "knowledge", "knowledge-deepen") or budget_usd is not None):
+        raise InitError("--unlimited-subscription is for feature-discovery, modules, knowledge or knowledge-deepen only and conflicts with --budget-usd")
+    if stage == "feature-discovery":
+        from dataclasses import replace
+        from .models import ModelRole
+
+        try:
+            rt = replace(rt,
+                         generator=ModelRole.parse("generator", rt.environ.get("KB_DISCOVERY_GENERATOR", "zcode:GLM-5.3")),
+                         judge=ModelRole.parse("judge", rt.environ.get("KB_DISCOVERY_JUDGE", "codex:gpt-6.1-sol:medium")),
+                         discovery_concurrency=int(rt.environ.get("KB_DISCOVERY_CONCURRENCY", "13")))
+        except (TypeError, ValueError) as exc:
+            raise InitError(f"invalid feature discovery model/concurrency configuration: {exc}") from exc
+        if rt.discovery_concurrency < 1:
+            raise InitError("KB_DISCOVERY_CONCURRENCY must be a positive integer")
+        # Discovery never inherits the service's same-family judge waiver.
+        if rt.generator.model.casefold().split("-")[0] == rt.judge.model.casefold().split("-")[0]:
+            raise InitError("feature discovery extraction and review must use independent model families")
+    if stage == "feature-discovery" and rt.generator.provider == "zcode":
+        subscription_generator = True
     rt.subscription_generator = subscription_generator
+    rt.unlimited_subscription = unlimited_subscription
     stage_class = _stage_class(stage)
     if lifecycle.init is None:
         raise InitError(f"{lifecycle.repo}: the adapter has no knowledge_lifecycle.init block")
@@ -161,9 +212,9 @@ def run_stage(rt: InitRuntime, lifecycle, stage: str, *, dry_run: bool, pin: str
         import math
         from dataclasses import replace
 
-        if stage not in ("pr-history", "knowledge-deepen") or isinstance(budget_usd, bool) \
+        if stage not in ("feature-discovery", "pr-history", "knowledge-deepen") or isinstance(budget_usd, bool) \
                 or not math.isfinite(budget_usd) or budget_usd <= 0:
-            raise InitError("--budget-usd is a finite positive ceiling for pr-history or knowledge-deepen only")
+            raise InitError("--budget-usd is a finite positive ceiling for feature-discovery, pr-history or knowledge-deepen only")
         lifecycle = replace(lifecycle, init=replace(lifecycle.init, budget_usd=budget_usd))
     notes = []
     if lifecycle.upstream_visibility == "private" and not dry_run:
@@ -177,7 +228,32 @@ def run_stage(rt: InitRuntime, lifecycle, stage: str, *, dry_run: bool, pin: str
     if subscription_generator:
         notes.append(f"generator {rt.generator.label()}: subscription billing explicitly selected; "
                      "generator USD is unreported and subscription fees are outside the stage USD accounting")
-    options = {"retry_unfinished": retry_unfinished} if stage == "knowledge-deepen" else {}
+    if unlimited_subscription:
+        if any(role.fallback is not None for role in (rt.generator, rt.judge)):
+            raise InitError("--unlimited-subscription requires pinned generator and judge without fallback")
+        if rt.generator.provider != "zcode" or rt.generator.model.casefold() != "glm-5.3" \
+                or rt.judge.provider != "codex" \
+                or rt.generator.model.casefold().split("-")[0] == rt.judge.model.casefold().split("-")[0]:
+            raise InitError("--unlimited-subscription requires Zcode GLM-5.3 extraction and an independent Codex judge")
+        for role in (rt.generator, rt.judge):
+            try:
+                available = rt.gateway.subscription_billing(role)
+            except ModelUnavailable as exc:
+                raise InitError(f"{role.name}: authenticated subscription backend is unavailable: {exc}") from exc
+            if not available:
+                raise InitError(f"{role.name}: --unlimited-subscription requires an authenticated subscription backend")
+        notes.append("unlimited subscription generation and independent judgment explicitly selected; "
+                     "no stage USD ceiling applies; fixed USD accounting is observability only, "
+                     "and unreported invoiced costs remain unknown")
+    options = {"retry_unfinished": retry_unfinished, "feature_ids": feature_ids,
+               "acceptance_mode": acceptance_mode, "depth_index_path": depth_index_path,
+               "stop_file": stop_file} if stage == "knowledge-deepen" else {}
+    if stage == "feature-discovery":
+        options = {"retry_unfinished": retry_unfinished}
+    if foundation_mode == "partial":
+        options["foundation_mode"] = foundation_mode
+        if stage == "knowledge-deepen":
+            options["foundation_record_path"] = foundation_record_path
     return stage_class(rt, lifecycle, dry_run=dry_run, pin=pin, notes=notes, author=author,
                        from_existing=from_existing, **options).run()
 
@@ -192,6 +268,10 @@ def adapter_missing(path: str) -> str:
 def _stage_class(stage: str) -> type:
     if stage == "skeleton":
         return _Skeleton
+    if stage == "feature-discovery":
+        from .init_feature_discovery import _FeatureDiscovery
+
+        return _FeatureDiscovery
     if stage == "modules":
         from .init_modules import _Modules
 
@@ -406,6 +486,7 @@ class _Stage:
     def run(self) -> InitRecord:
         rt, lc, stage = self.rt, self.lifecycle, self.STAGE
         init = lc.init
+        self._branch_suffix = _init_branch_suffix(rt)
         self.repo_dir = lc.knowledge_dir
         base_sha = self._base_for_run(rt.knowledge.fetch())
         self._base_sha = base_sha
@@ -419,9 +500,18 @@ class _Stage:
         upstream = rt.upstream(lc.repo, lc.full_name)
         upstream.sync()
         pin = upstream.resolve(self.pin or chain.pin or "HEAD")
+        if getattr(rt, "portable_spec", None) and pin != rt.portable_spec.source_pin:
+            raise InitError("portable source pin differs from the accepted batch; create a new batch")
+        self._discovery_gate(chain, pin)
+        self.overlay = dict(chain.repo_files)
+        input_options = dict(self._input_options())
+        if self._branch_suffix:
+            # Leave legacy checkpoint identities unchanged when the option is
+            # unset, but bind an explicit batch name before extracting anything.
+            input_options["publication_branch_suffix"] = self._branch_suffix
         digest = inputs_digest(stage=stage, repo=lc.repo, pin=pin, kb=base_sha, init=self._init_identity(),
                                generator=rt.generator.label(), judge=rt.judge.label(), dry_run=self._mode_identity(),
-                               chain=chain.key, **self._input_options())
+                               chain=chain.key, **input_options)
         record_path = InitRecord.path(rt.state_dir, lc.repo, stage)
         previous = InitRecord.load(rt.state_dir, lc.repo, stage)
         if previous is not None and previous.pr.get("prepared") and previous.status in ("publishing", "blocked"):
@@ -433,6 +523,11 @@ class _Stage:
                 self.record = previous
                 return self._blocked(chain.problems)
             problems = self._resume_input_problems(previous, digest)
+            if load_prepared(previous.pr["prepared"]).get("branch") != self._publication_branch():
+                problems.append("prepared publication belongs to a different branch suffix; "
+                                f"restore {BRANCH_SUFFIX_ENV} to its original value to resume")
+            if self._frozen_discovery and previous.discovery.get("catalog_binding") != self._discovery_binding():
+                problems.append("prepared publication belongs to a different discovery catalog; preserve it and start a new batch")
             if problems:
                 self.record = previous
                 return self._blocked(problems)
@@ -448,9 +543,11 @@ class _Stage:
         self.record = InitRecord(stage=stage, repo=lc.repo, pin=pin, kb_base_sha=base_sha,
                                  inputs_digest=digest, started_at=float(int(rt.clock())),
                                  dry_run=self.dry_run, notes=list(self.notes))
+        if self._frozen_discovery:
+            self.record.discovery["catalog_binding"] = self._discovery_binding()
         if chain.pin and pin != chain.pin:
             self.record.notes.append(f"pinned at {pin[:12]}, not at the earlier stages' {chain.pin[:12]}")
-        self.budget = Budget(init.budget_usd)
+        self.budget = Budget(None if rt.unlimited_subscription else init.budget_usd)
         self.base = {**main, **chain.knowledge}
         problems = chain.problems + self._restore_progress(previous) + self._precheck()
         if adapter_missing_problem:
@@ -485,12 +582,26 @@ class _Stage:
         chain = _Chain()
         parts: list[str] = []
         publisher = None
+        existing_skeleton = self.from_existing and self.STAGE in ("modules", "knowledge", "knowledge-deepen") \
+            and InitRecord.load(self.rt.state_dir, self.lifecycle.repo, "skeleton") is None
+        if existing_skeleton:
+            # An explicit rerun may start from a merged owner map. Only the
+            # absent skeleton record is replaced by this verification; any
+            # actual modules record keeps its own completion and merge gates.
+            chain = self._existing_skeleton_chain()
+            parts.append(chain.key)
         for stage in STAGES[:STAGES.index(self._chain_boundary())]:
             record = InitRecord.load(self.rt.state_dir, self.lifecycle.repo, stage)
+            if stage == "skeleton" and existing_skeleton:
+                continue
+            if stage == "feature-discovery":
+                # Centralized after pin resolution so --from-existing subclasses
+                # cannot bypass this gate, and the explicit pin must match.
+                continue
             if stage == "knowledge":
-                from .knowledge_coverage import load_policy, policy_path
+                from .knowledge_coverage import load_policy
 
-                policy_text = self.rt.knowledge.show(self._base_sha, policy_path(self.lifecycle.repo))
+                policy_text = self.rt.knowledge.show(self._base_sha, self._coverage_policy_path())
                 if policy_text:
                     try:
                         policy = load_policy(policy_text, self.repo_dir)
@@ -536,9 +647,20 @@ class _Stage:
                 chain.knowledge.clear()   # main holds it, and every stage before it
                 chain.repo_files.clear()
                 parts.append(f"{stage}:merged:{number}")
+            elif record.status == "accepted" and getattr(self.rt, "portable_spec", None):
+                from .portable_init import check_local_acceptance
+                try:
+                    head = check_local_acceptance(self.rt, record)
+                except InitError as exc:
+                    chain.problems.append(str(exc))
+                    continue
+                parts.append(f"{stage}:local-accepted:{head}")
             elif record.status == "empty":
                 parts.append(f"{stage}:empty:{record.inputs_digest}")
             elif record.status == "dry_run":
+                if getattr(self.rt, "portable_spec", None):
+                    chain.problems.append(f"accept the {stage} preview before starting {self.STAGE}")
+                    continue
                 if not self.dry_run:
                     chain.problems.append(f"the {stage} stage was only a dry run; publish it and merge its PR "
                                           f"before publishing {self.STAGE}")
@@ -580,8 +702,12 @@ class _Stage:
         # record digests across this additive configuration change.
         init = self.lifecycle.init
         identity = repr(init).replace(f", pr_history_count={init.pr_history_count}", "")
+        if not init.feature_discovery_required:
+            identity = identity.replace(", feature_discovery_required=False", "")
         if self.rt.subscription_generator:
             identity += ":subscription-generator"
+        if self.rt.unlimited_subscription:
+            identity += ":unlimited-subscription"
         return identity
 
     def _mode_identity(self) -> bool:
@@ -633,6 +759,176 @@ class _Stage:
         adapter = self.lifecycle.adapter_dir
         name = Path(adapter).name if adapter else self.lifecycle.repo.replace("-", "_")
         return f"adapters/{name}/manifest.yaml"
+
+    def _coverage_policy_path(self) -> str:
+        """Use the actual adapter directory, which may differ from the repo alias."""
+        return self._manifest_path().rsplit("/", 1)[0] + "/knowledge-coverage.yaml"
+
+    def _discovery_catalog(self) -> dict:
+        """The catalog audited by this run's prerequisite gate; empty for legacy runs."""
+        return getattr(self, "_frozen_discovery", {})
+
+    def _discovery_binding(self) -> dict:
+        report = self._discovery_catalog()
+        if not report:
+            return {}
+        return {"pin": report["pin"], "catalog_sha256": report["catalog_sha256"],
+                "report_sha256": self._frozen_discovery_report_sha256}
+
+    def _existing_skeleton_chain(self) -> _Chain:
+        """Explicit enrichment can use a merged skeleton without inventing records."""
+        if InitRecord.load(self.rt.state_dir, self.lifecycle.repo, "skeleton") is not None:
+            return _Stage._chain(self)
+        base = self.rt.knowledge.knowledge_files(self._base_sha)
+        try:
+            manifest = yaml.safe_load(self.rt.knowledge.show(self._base_sha, self._manifest_path()) or "") or {}
+            if not isinstance(manifest, dict):
+                raise ValueError("adapter manifest must be a mapping")
+            route_source, owners = owner_table(base.get(f"{self.repo_dir}/{ROUTES_NAME}"), manifest)
+        except (ValueError, TypeError, yaml.YAMLError) as exc:
+            return _Chain(problems=[f"--from-existing invalid skeleton routes: {exc}"])
+        problems = []
+        if not base.get(f"{self.repo_dir}/{INDEX_NAME}") or route_source == "none" or not owners:
+            problems.append("--from-existing needs a merged repository index and owner routes")
+        for owner in owners:
+            if not owner.path.startswith(self.repo_dir + "/") or owner.path not in base:
+                problems.append(f"--from-existing owner page missing or outside repository: {owner.path}")
+        return _Chain(key=f"existing-discovery:{self._base_sha}", problems=problems)
+
+    def _discovery_gate(self, chain: _Chain, pin: str) -> None:
+        """Bind downstream stages to the merged (or preview) discovery artifact.
+
+        Kept outside _chain so enrichment of existing knowledge cannot omit it.
+        A failed item may remain unknown; an unfinished discovery batch cannot.
+        """
+        self._frozen_discovery = {}
+        if self.STAGE in ("skeleton", "feature-discovery"):
+            return
+        record = InitRecord.load(self.rt.state_dir, self.lifecycle.repo, "feature-discovery")
+        if record is None and not self.lifecycle.init.feature_discovery_required:
+            return
+        path = f"eval/feature-discovery/{self.lifecycle.repo}-{pin[:12]}.json"
+        policy_path = self._coverage_policy_path()
+        if record is not None:
+            chain.key += f";feature-discovery:{record.status}:{record.inputs_digest}"
+            if record.pin != pin:
+                chain.problems.append("feature-discovery pin differs; use a new discovery batch for this upstream SHA")
+                return
+            if not record.discovery.get("done"):
+                chain.problems.append("feature-discovery incomplete: finish the discovery batch first")
+                return
+            if record.status == "published":
+                try:
+                    state = InitPublisher(self.rt.knowledge.path, _knowledge_repository(), run=self.rt.gh_run).pr_state(
+                        int(record.pr.get("number")))
+                except (InitError, TypeError, ValueError) as exc:
+                    chain.problems.append(f"cannot read feature-discovery PR state: {exc}")
+                    return
+                if state != "MERGED":
+                    chain.problems.append("merge the feature-discovery PR before continuing")
+                    return
+            elif record.status == "accepted" and getattr(self.rt, "portable_spec", None):
+                from .portable_init import check_local_acceptance
+                try:
+                    check_local_acceptance(self.rt, record)
+                except InitError as exc:
+                    chain.problems.append(str(exc))
+                    return
+            elif record.status == "dry_run" and self.dry_run:
+                if getattr(self.rt, "portable_spec", None):
+                    chain.problems.append("accept the feature-discovery catalog before continuing")
+                    return
+                try:
+                    files = _dry_run_files(record)
+                except InitError as exc:
+                    chain.problems.append(str(exc))
+                    return
+                if set(files) - {policy_path, path}:
+                    chain.problems.append("feature-discovery preview changed paths outside its catalog/report scope")
+                    return
+                chain.repo_files.update(files)
+            elif record.status != "empty":
+                chain.problems.append(f"feature-discovery is {record.status}; complete and merge it before continuing")
+                return
+            if record.discovery.get("report_path") != path:
+                chain.problems.append("feature-discovery checkpoint names a different frozen report")
+                return
+        report_text = chain.repo_files.get(path)
+        if report_text is None:
+            report_text = self.rt.knowledge.show(self._base_sha, path)
+        policy_text = chain.repo_files.get(policy_path)
+        if policy_text is None:
+            policy_text = self.rt.knowledge.show(self._base_sha, policy_path)
+        if report_text is None or policy_text is None:
+            chain.problems.append("feature-discovery requires a merged catalog and compact report for this pin")
+            return
+        try:
+            report = json.loads(report_text)
+            if not isinstance(report, dict) or type(report.get("schema_version")) is not int or report.get("schema_version") != 1 \
+                    or report.get("repo") != self.lifecycle.repo or report.get("pin") != pin \
+                    or report.get("complete") is not True or report.get("done") is not True:
+                raise ValueError("report identity or completion status is invalid")
+            from .knowledge_coverage import load_policy
+
+            policy = load_policy(policy_text, self.repo_dir)
+            ids = [feature.id for feature in policy.features]
+            if report.get("feature_ids") != ids:
+                raise ValueError("frozen feature IDs differ from the current catalog")
+            summaries = report.get("features")
+            expected_summaries = [{"id": feature.id, "owner": feature.owner, "title": feature.title}
+                                  for feature in policy.features]
+            if not isinstance(summaries, list) or any(not isinstance(row, dict) for row in summaries) \
+                    or [{key: row.get(key) for key in ("id", "owner", "title")} for row in summaries] != expected_summaries:
+                raise ValueError("frozen feature summaries differ from the current catalog")
+            requests = report.get("owner_requests")
+            if not isinstance(requests, list):
+                raise ValueError("frozen owner requests must be a list")
+            seen_owners = set()
+            for request in requests:
+                if not isinstance(request, dict):
+                    raise ValueError("frozen owner request must be a mapping")
+                owner = request.get("owner")
+                if not isinstance(owner, str) or owner in seen_owners:
+                    raise ValueError("frozen owner requests need unique catalog owners")
+                owned = [feature for feature in policy.features if feature.owner == owner]
+                if not owned or request.get("feature_ids") != [feature.id for feature in owned] \
+                        or request.get("source_paths") != sorted({path for feature in owned
+                                                                 for path in (feature.entry_points or feature.source_globs)}) \
+                        or request.get("page") != f"{self.repo_dir}/components/{owner}/{INDEX_NAME}" \
+                        or not isinstance(request.get("title"), str) or not request["title"].strip():
+                    raise ValueError("frozen owner request differs from the current catalog")
+                seen_owners.add(owner)
+            routes_path = f"{self.repo_dir}/{ROUTES_NAME}"
+            routes_text = chain.knowledge.get(routes_path)
+            if routes_text is None:
+                routes_text = chain.repo_files.get(KNOWLEDGE_PREFIX + routes_path)
+            if routes_text is None:
+                routes_text = self.rt.knowledge.show(self._base_sha, KNOWLEDGE_PREFIX + routes_path)
+            manifest_text = chain.repo_files.get(self._manifest_path())
+            if manifest_text is None:
+                manifest_text = self.rt.knowledge.show(self._base_sha, self._manifest_path())
+            manifest = yaml.safe_load(manifest_text or "") or {}
+            if not isinstance(manifest, dict):
+                raise ValueError("adapter manifest must be a mapping")
+            _, existing_owners = owner_table(routes_text, manifest)
+            missing_owners = {feature.owner for feature in policy.features} - {owner.owner for owner in existing_owners}
+            if missing_owners - seen_owners:
+                raise ValueError("frozen catalog has new owners without creation requests: "
+                                 + ", ".join(sorted(missing_owners - seen_owners)))
+            catalog_hash = hashlib.sha256(policy_text.encode("utf-8")).hexdigest()
+            report_hash = hashlib.sha256(report_text.encode("utf-8")).hexdigest()
+            if report.get("catalog_sha256") != catalog_hash:
+                raise ValueError("frozen catalog hash differs from the current adapter policy")
+            if record is not None and (record.discovery.get("catalog_sha256") != catalog_hash
+                                       or record.discovery.get("report_sha256") != report_hash):
+                raise ValueError("checkpoint catalog/report hashes differ from the artifact")
+        except (ValueError, TypeError, yaml.YAMLError) as exc:
+            chain.problems.append(f"feature-discovery frozen catalog: {exc}")
+            return
+        chain.pin = pin
+        chain.key += f";feature-discovery:frozen:{pin}:{catalog_hash}:{report_hash}"
+        self._frozen_discovery = report
+        self._frozen_discovery_report_sha256 = report_hash
 
     def _manifest_text(self) -> str | None:
         """The adapter manifest as this stage's base has it (an earlier dry
@@ -1070,22 +1366,31 @@ class _Stage:
         return neutral_headings("\n".join(kept).strip())
 
     # -- output ----------------------------------------------------------------------
+    def _publication_branch(self) -> str:
+        suffix = getattr(self, "_branch_suffix", "")
+        return f"kb/init-{self.lifecycle.repo}-{self.STAGE}" + (f"-{suffix}" if suffix else "")
+
     def _publish(self, changed: dict[str, str]) -> InitRecord:
         rt, lc, record = self.rt, self.lifecycle, self.record
         stage = self.STAGE
         title = f"kb init({lc.repo}): {stage}"
         record.spent_usd = round(self.budget.spent_usd, 6)  # the body reports it
         body = render_pr_body(record, lc)
-        publisher = InitPublisher(rt.knowledge.path, _knowledge_repository(), run=rt.gh_run)
+        publisher = self._publisher()
+        if stage == "feature-discovery" and set(changed) - set(publisher.allowed_paths):
+            return self._blocked(["feature-discovery may publish only its adapter catalog and compact report"])
         if self.dry_run:
             dest = InitRecord.path(rt.state_dir, lc.repo, stage).with_name(f"{stage}-dryrun")
             InitPublisher.dry_run(dest, changed, title=title, body=body)
             record.pr = {"dry_run_dir": str(dest)}
+            if getattr(rt, "portable_spec", None):
+                record.pr["checked_files_sha256"] = {p: hashlib.sha256(t.encode()).hexdigest()
+                    for p, t in sorted(changed.items())}
             record.status = "dry_run"
         else:
             prepared = save_prepared(
                 InitRecord.path(rt.state_dir, lc.repo, stage).with_name(f"{stage}-publish.json"),
-                base_sha=record.kb_base_sha, branch=f"kb/init-{lc.repo}-{stage}", files=changed,
+                base_sha=record.kb_base_sha, branch=self._publication_branch(), files=changed,
                 title=title, body=body, author=self.author, when=record.started_at)
             record.status = "publishing"
             record.pr = {"prepared": str(prepared)}
@@ -1115,8 +1420,16 @@ class _Stage:
     def _resume(self, previous: InitRecord) -> InitRecord:
         self.record = previous
         previous.notes.append("resumed a prepared publication; no model was called again")
-        publisher = InitPublisher(self.rt.knowledge.path, _knowledge_repository(), run=self.rt.gh_run)
+        publisher = self._publisher()
         return self._finish(previous, publisher)
+
+    def _publisher(self) -> InitPublisher:
+        allowed = ()
+        if self.STAGE == "feature-discovery":
+            allowed = (self._coverage_policy_path(),
+                       f"eval/feature-discovery/{self.lifecycle.repo}-{self.record.pin[:12]}.json")
+        return InitPublisher(self.rt.knowledge.path, _knowledge_repository(),
+                             run=self.rt.gh_run, allowed_paths=allowed)
 
 
 @dataclass
@@ -1703,6 +2016,9 @@ def _coverage_lines(coverage: dict) -> list[str]:
 
 def render_pr_body(record: InitRecord, lifecycle) -> str:
     """The PR body: the init record in reviewable form (design §9)."""
+    if record.stage == "knowledge" and record.coverage.get("foundation_publication", {}).get("foundation_mode") == "partial":
+        from .foundation_publication import render_partial_body
+        return render_partial_body(record, lifecycle)
     lines = [
         f"`kb init` stage **{record.stage}** for `{lifecycle.repo}` (`{lifecycle.full_name}`).",
         "",

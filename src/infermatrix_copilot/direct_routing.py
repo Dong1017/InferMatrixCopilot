@@ -78,7 +78,7 @@ def _adapter_repo_name(adapter: RepoAdapter) -> str:
 def load_routes(repo: str, view: KnowledgeView | None = None) -> dict | None:
     """Return a repository's validated `_routes.yaml`, or None when it has none."""
     view = _view(view)
-    return _load_routes(view, _normalize_repo(repo))
+    return _load_routes(view, _normalize_repo(repo, view))
 
 
 _REPO_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
@@ -116,7 +116,7 @@ def _validate_routes(data: object, relative: str, view: KnowledgeView) -> dict:
             raise ValueError(f"{relative}: owners[{index}] needs a unique owner")
         if not isinstance(signals, list) or not isinstance(prefixes, list):
             raise ValueError(f"{relative}: owners[{index}] signals/scope_prefixes must be lists")
-        view.path(path)  # fail closed on a route to a missing page
+        view._integrity_path(path)  # validate unused navigation; selected reads enforce containment
         seen.add(owner)
         normalized.append({
             "owner": owner,
@@ -198,10 +198,14 @@ _FINDING_DISPOSITIONS = {
 _EVIDENCE_HEAD_SHA = re.compile(r"[0-9a-f]{7,40}")
 
 
-def _normalize_repo(repo: str) -> str:
+def _normalize_repo(repo: str, view: KnowledgeView | None = None) -> str:
     selected = str(repo or "").strip()
     if not selected:
         raise ValueError("repo is required")
+    from .kb_service.repo_spec import resolve_snapshot_repo
+    binding = resolve_snapshot_repo(_view(view), selected)
+    if binding is not None:
+        return binding.knowledge_slice.removeprefix("repos/")
     alias = _repo_aliases().get(selected.casefold())
     if alias:
         return alias
@@ -221,7 +225,7 @@ def _adapter_changed_file_routes(
     view: KnowledgeView | None = None,
 ) -> tuple[list[dict[str, object]], list[str]]:
     view = _view(view)
-    selected_repo = _normalize_repo(repo)
+    selected_repo = _normalize_repo(repo, view)
     adapter = _adapter_for_repo(selected_repo)
     if adapter is None:
         return [], [str(path).replace("\\", "/") for path in changed_files]
@@ -308,7 +312,8 @@ def _direct_quick_map_text(text: str, max_chars: int = 3500) -> tuple[str, str]:
     A partial map presented as whole is the same lie as a missing one, just harder
     to notice.
     """
-    lines = text.splitlines()
+    from .knowledge_service.lifecycle import visible_text
+    lines = visible_text(text).splitlines()
     start = next(
         (
             index for index, line in enumerate(lines)
@@ -425,7 +430,7 @@ def _direct_knowledge_routes(
     option: the owners were already computed and then discarded.
     """
     view = _view(view)
-    selected_repo = _normalize_repo(repo)
+    selected_repo = _normalize_repo(repo, view)
     changed_files = changed_files or []
     if not isinstance(changed_files, list) or any(
         not isinstance(path, str) for path in changed_files
@@ -438,6 +443,13 @@ def _direct_knowledge_routes(
     # served this repo's owner knowledge for a repo we do not serve.
     routes_table = _load_routes(view, selected_repo)
     if routes_table is None or not routes_table["owners"]:
+        from .kb_service.repo_spec import resolve_snapshot_repo
+        registered = resolve_snapshot_repo(view, repo)
+        if registered is not None and registered.registry_hash:
+            return {"status": "description_unrouted", "selected_by": "snapshot_registry",
+                    "changed_files_role": "unmatched_visible", "routes": [], "scope_validation": [],
+                    "unmatched_changed_files": list(changed_files),
+                    "unmatched_policy": "This registered repository has no owner route for these paths; feature context remains available."}
         # Adapter presence decides which non-default-repo case this is. Without the
         # gate, a repo we do not serve at all fell into the adapter path, whose
         # helper returns every changed file as "unmatched" when there is no
@@ -631,7 +643,7 @@ def direct_review_plan(
     ]
     mandatory_review_guides = _direct_mandatory_review_guides(view)
     related_started = time.perf_counter()
-    normalized = _normalize_repo(repo)
+    normalized = _normalize_repo(repo, view)
     subdir = f"repos/{normalized}" if _REPO_NAME.fullmatch(normalized) and routing.get("status") != "unsupported_exact_router" else None
     related = KnowledgeDocs(view.root, subdir, verify=view.path).related(
         changed_files, query="\n".join((title, body, diff)))
@@ -646,7 +658,7 @@ def direct_review_plan(
     )
     budget_ms = int((time.perf_counter() - budget_started) * 1000)
     untested = _direct_untested_public_api(repo, diff)
-    return {
+    plan = {
         "mode": "direct",
         "knowledge_entry": (
             knowledge_routes[0]["path"]
@@ -726,6 +738,26 @@ def direct_review_plan(
             }
         },
     }
+    from .knowledge_service.containment import configuration, _issue_usage, digest
+    if configuration()["enabled"]:
+        from secrets import token_hex
+        # Raw MCP callers receive paths rather than SDK document references.
+        # Bind their selected resources to private provider issuance as well.
+        paths = {plan["knowledge_entry"], *mandatory_review_guides,
+                 *(route["path"] for route in knowledge_routes),
+                 *(document["path"] for document in related["documents"])}
+        context = {"knowledge_snapshot": view.public_snapshot,
+                   "knowledge_tree_sha256": view.tree_sha256,
+                   "plan_sha256": digest(plan),
+                   "session_id": token_hex(32),
+                   "documents": [{"document_id": view.relative(view.root / path)}
+                                 for path in sorted(paths)]}
+        plan["knowledge_usage"] = _issue_usage(context, view=view, session_id=context["session_id"])
+        plan["completion_gate"]["knowledge_usage"] = (
+            "Pass this plan's knowledge_usage unchanged to doc_read, doc_search, and validate_direct_review; "
+            "the provider rechecks its issued resources against current containment."
+        )
+    return plan
 
 
 def _direct_untested_public_api(repo: str, diff: str) -> dict:
@@ -751,6 +783,7 @@ def _direct_completion_result(
     evidence_head_sha: str = "",
     existing_feedback_status: str = "not_applicable",
     finding_dispositions: list[dict[str, str]] | None = None,
+    knowledge_usage: dict | None = None,
 ) -> dict:
     """Mechanically gate Direct completion on subtraction classification.
 
@@ -769,6 +802,10 @@ def _direct_completion_result(
     existing_feedback_status = str(existing_feedback_status).strip().casefold()
     finding_dispositions = finding_dispositions or []
     missing: list[str] = []
+    from .knowledge_service.containment import knowledge_availability_check
+    availability = knowledge_availability_check(knowledge_usage)
+    if not availability["allowed"]:
+        missing.append("knowledge_usage requires current, admissible provider-issued provenance")
 
     if final_comment_count != 1:
         missing.append("final_comment_count must be exactly 1")
@@ -877,7 +914,7 @@ def _direct_completion_result(
         )
 
     complete = not missing
-    return {
+    result = {
         "status": "complete" if complete else "partial_review",
         "publish_ready": complete,
         "final_comment_count": final_comment_count,
@@ -919,6 +956,11 @@ def _direct_completion_result(
             else "Classify the subtraction signal; only a triggered diff needs one bounded subtraction pass using the existing evidence packet."
         ),
     }
+    if availability["enabled"]:
+        result["knowledge_availability"] = availability
+        if not availability["allowed"]:
+            result["next_action"] = "Retrieve admissible knowledge and reassess the review before completion."
+    return result
 
 
 # ── public names ──────────────────────────────────────────────────────────────

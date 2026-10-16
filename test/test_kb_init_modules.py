@@ -11,7 +11,7 @@ from pathlib import Path
 
 import yaml
 
-from infermatrix_copilot.kb_service.init_modules import SYSTEM_CARD, _leading_doc, declaration, routes_append_only
+from infermatrix_copilot.kb_service.init_modules import SYSTEM_CARD, SYSTEM_CARD_IMPL, _leading_doc, declaration, routes_append_only
 from infermatrix_copilot.kb_service.init_stages import run_stage
 from infermatrix_copilot.kb_service.config import RepoLifecycle
 from infermatrix_copilot.kb_service.init_support import InitRecord
@@ -44,7 +44,7 @@ class CardGateway(FakeGateway):
         self.group = group
 
     def call_json(self, role, *, system, prompt, validate=None, max_budget_usd=None):
-        if system != SYSTEM_CARD:
+        if system not in (SYSTEM_CARD, SYSTEM_CARD_IMPL):
             reply = super().call_json(role, system=system, prompt=prompt, validate=validate,
                                       max_budget_usd=max_budget_usd)
             if system.startswith("You set up the review knowledge base"):
@@ -217,16 +217,16 @@ def test_an_adapter_missing_at_the_base_blocks_the_modules_stage(world):
     assert not [c for c in gateway.calls if c["system"] == SYSTEM_CARD]
 
 
-def test_no_language_means_no_scan_and_an_empty_stage(world):
+def test_no_language_still_scans_per_file_and_routes_modules(world):
     _commit(world["upstream"], TOOLS, "tools")        # the adapter still declares no language
     _skeleton(world)
     gateway = CardGateway()
     record = run_stage(_runtime(world, gateway), _modules_lifecycle(), "modules", dry_run=True)
-    assert record.status == "empty"
-    assert any("no repo.language" in item for item in record.checklist)
-    assert not [c for c in gateway.calls if c["system"] == SYSTEM_CARD]
-    # a later dry run still chains through an empty stage
-    assert InitRecord.load(_runtime(world).state_dir, "toy", "modules").status == "empty"
+    assert record.status == "dry_run", record.problems
+    assert not any("no repo.language" in item for item in record.checklist)
+    assert [c for c in gateway.calls if c["system"] == SYSTEM_CARD]
+    assert record.coverage["modules"]["after"] == 1
+    assert InitRecord.load(_runtime(world).state_dir, "toy", "modules").status == "dry_run"
 
 
 def test_routes_append_only_catches_rewrites():

@@ -1,7 +1,7 @@
 ---
 title: "agent-server-runtime"
 created: 2026-10-01
-updated: 2026-10-01
+updated: 2026-10-09
 type: index
 tags: [jiuwenswarm]
 sources: []
@@ -55,3 +55,10 @@ sources: []
 - [绑定会话的心跳续跑任务：实现深读](feature-depth-heartbeat.md)
 - [SkillDev 创建、评测与打包边界：实现深读](feature-depth-skill-development.md)
 - [主动推荐、频率限制与主 Agent 交付：实现深读](feature-depth-proactive-recommendation.md)
+
+- [Skill 自演进：实现深读](feature-depth-skill-evolution.md)
+- [Workspace Git Diff 聚合（get_git_diff）与实时监控](feature-workspace-git-diff.md)
+
+- [Workspace Git Diff Aggregation (get_git_diff)：实现深读](feature-depth-workspace-git-diff.md)
+
+- [agent-server-runtime 审查规则](rules.md) — AgentServer 流审计限定请求本地计数，不能改变响应块。

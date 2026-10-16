@@ -184,7 +184,7 @@ async def _review_diff(ctx: StepContext) -> StepResult:
                           "optional, `untested_api` only for a missing unit "
                           "test on a listed untested-function candidate}"},
         extra_tools={**_gh_read_tools(_repo_path(ctx)),
-                     **review_repo_tools(_repo_path(ctx))},
+                     **review_repo_tools(_repo_path(ctx), str(ctx.state.get('pr_base_sha') or ''))},
     )
     plan = None
     if not ctx.settings.review_ensemble:   # legacy kill-switch: single pass
@@ -295,6 +295,10 @@ async def _review_diff(ctx: StepContext) -> StepResult:
                                     f"{result.summary}",
                             outputs=result.outputs,
                             changed_files=result.changed_files)
+    draft_selection = [
+        (c.get("file"), c.get("line"), c.get("comment"), c.get("severity"))
+        for c in output.get("review_comments") or []
+    ]
     if plan is not None and result.ok:
         output = await refine_review(
             ctx, output, common=common, diff=str(diff), spec=spec,
@@ -320,10 +324,6 @@ async def _review_diff(ctx: StepContext) -> StepResult:
     published, withheld = finalize_review_dispositions(output)
     # at most three untested-function comments; the rest are named, not lost
     published, ut_dropped = cap_gap_comments(published, ut_report)
-    if ut_dropped:
-        output["summary"] = (str(output.get("summary") or "").rstrip()
-                             + "\n\nAlso without a unit test: "
-                             + ", ".join(f"`{n}`" for n in ut_dropped) + ".").lstrip()
     output["review_comments"] = published
     output["_withheld_findings"] = withheld
     comments = sorted(output.get("review_comments") or [],
@@ -333,6 +333,19 @@ async def _review_diff(ctx: StepContext) -> StepResult:
     for c in comments:
         c.pop("corroborated_by", None)
     output["review_comments"] = comments[:8]
+    final_selection = [
+        (c.get("file"), c.get("line"), c.get("comment"), c.get("severity"))
+        for c in output["review_comments"]
+    ]
+    if sorted(draft_selection, key=repr) != sorted(final_selection, key=repr):
+        # The reducer's prose describes its draft selection. After promotion,
+        # verification or a budget cut it may contradict the published set.
+        # Let the renderer derive a truthful summary from the final comments.
+        output["summary"] = ""
+    if ut_dropped:
+        output["summary"] = (str(output.get("summary") or "").rstrip()
+                             + "\n\nAlso without a unit test: "
+                             + ", ".join(f"`{n}`" for n in ut_dropped) + ".").lstrip()
     # Recorded AFTER the cut: a candidate the review chose to publish but the
     # budget dropped is `over_budget`, never `excluded`. A consumer checking
     # that no withheld finding was published must not trip over a healthy
@@ -387,7 +400,7 @@ async def _review_diff(ctx: StepContext) -> StepResult:
                       "pr_diff": str(diff)},
             output_extension={"finding_rechecks":
                 "list of {finding_id, head_sha, outcome: fixed|still_affected|unverified, evidence}"},
-            extra_tools=review_repo_tools(_repo_path(ctx)),
+            extra_tools=review_repo_tools(_repo_path(ctx), str(ctx.state.get('pr_base_sha') or '')),
         )
         rechecks, recheck_missing = checked_rechecks(
             carried, recheck_output.get("finding_rechecks") if recheck_result.ok else [],

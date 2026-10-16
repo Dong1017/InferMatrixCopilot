@@ -16,8 +16,9 @@
     kb export --out FILE [--role judge|generator]                   dataset (calibration-safe)
     kb init REPO --stage STAGE [--dry-run] [--pin SHA]
                                       bootstrap a repository's knowledge base, one
-                                      human-merged stage at a time (skeleton, modules,
-                                      knowledge, deepen, pr-history, harvest-calibration);
+                                      human-merged stage at a time (skeleton,
+                                      feature-discovery, modules, knowledge, deepen,
+                                      pr-history, harvest-calibration);
                                       never touches kb.db
     kb init REPO --suggest-seeds      rank existing knowledge pages worth seeding from (no model call)
     kb widen REPO [--dry-run]         enrich existing feature and file knowledge
@@ -37,6 +38,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -89,16 +91,17 @@ def _outbox(state_dir: Path, ledger):
     return Outbox(state_dir, _signing_key(), ledger, clock=time.time)
 
 
-def _unknown_status(ledger) -> dict:
+def _unknown_status(ledger, reviewed: set[str] | None = None) -> dict:
     """Unknown knowledge commits not disposed of, with any accept request."""
     from .accept import ACCEPT
     from .audit import DISPOSED, UNKNOWN
 
     disposed = {n[len(DISPOSED):] for n in ledger.cursors_with_prefix("*", DISPOSED)}
+    reviewed = reviewed or set()
     out = {}
     for name, raw in ledger.cursors_with_prefix("*", UNKNOWN).items():
         sha = name[len(UNKNOWN):]
-        if sha in disposed:
+        if sha in disposed or sha in reviewed:
             continue
         record = json.loads(raw)
         request = ledger.get_cursor("*", ACCEPT + sha)
@@ -113,9 +116,21 @@ def _refresh(state_dir: Path, ledger, registry) -> None:
 
 def _init_command(args, state_dir: Path) -> int:
     from ..config import Settings
+    from .repo_spec import RepoRegistry
+    if RepoRegistry(state_dir).resolve(args.repo) is not None:
+        from .portable_commands import run_portable_init
+        from .init_support import InitError
+        try:
+            return run_portable_init(args, state_dir)
+        except (InitError, ValueError, OSError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
 
     if args.suggest_seeds == bool(args.stage):
         print("kb init: pass exactly one of --stage or --suggest-seeds", file=sys.stderr)
+        return 2
+    if args.unlimited_subscription and (args.stage not in ("feature-discovery", "modules", "knowledge", "knowledge-deepen") or args.budget_usd is not None):
+        print("--unlimited-subscription is for feature-discovery, modules, knowledge or knowledge-deepen only and conflicts with --budget-usd", file=sys.stderr)
         return 2
     if args.suggest_seeds:
         from .init_stages import suggest_seeds
@@ -136,16 +151,35 @@ def _init_command(args, state_dir: Path) -> int:
     from .runner import run_playbook
 
     params = {"stage": args.stage, "dry_run": "true" if args.dry_run else "false", "pin": args.pin or ""}
+    foundation_mode = getattr(args, "foundation_mode", "strict")
+    foundation_record = getattr(args, "foundation_record", None)
+    if foundation_mode != "strict" or foundation_record is not None:
+        if foundation_mode != "partial" or args.stage not in ("knowledge", "knowledge-deepen") or not args.unlimited_subscription:
+            print("--foundation-mode partial requires unlimited knowledge or knowledge-deepen", file=sys.stderr)
+            return 2
+        if bool(foundation_record) != (args.stage == "knowledge-deepen"):
+            print("--foundation-record is required only for partial knowledge-deepen", file=sys.stderr)
+            return 2
+        params["foundation_mode"] = foundation_mode
+        if foundation_record is not None:
+            params["foundation_record"] = str(foundation_record)
+    if getattr(args, "acceptance_mode", "strict") != "strict":
+        if args.stage != "knowledge-deepen":
+            print("--acceptance-mode is for knowledge-deepen only", file=sys.stderr)
+            return 2
+        params["acceptance_mode"] = args.acceptance_mode
     if args.from_existing:
-        if args.stage not in ("knowledge", "knowledge-deepen"):
-            print("--from-existing is for --stage knowledge or knowledge-deepen only", file=sys.stderr)
+        if args.stage not in ("feature-discovery", "modules", "knowledge", "knowledge-deepen"):
+            print("--from-existing is for feature-discovery, modules, knowledge or knowledge-deepen only", file=sys.stderr)
             return 2
         params["from_existing"] = "true"
     if args.subscription_generator:
         params["subscription_generator"] = "true"
+    if args.unlimited_subscription:
+        params["unlimited_subscription"] = "true"
     if args.retry_unfinished:
-        if args.stage != "knowledge-deepen":
-            print("--retry-unfinished is for knowledge-deepen only", file=sys.stderr)
+        if args.stage not in ("feature-discovery", "knowledge-deepen"):
+            print("--retry-unfinished is for feature-discovery or knowledge-deepen only", file=sys.stderr)
             return 2
         params["retry_unfinished"] = "true"
     if args.pr_count is not None:
@@ -156,8 +190,8 @@ def _init_command(args, state_dir: Path) -> int:
     if args.budget_usd is not None:
         import math
 
-        if args.stage not in ("pr-history", "knowledge-deepen") or not math.isfinite(args.budget_usd) or args.budget_usd <= 0:
-            print("--budget-usd is a finite positive ceiling for pr-history or knowledge-deepen", file=sys.stderr)
+        if args.stage not in ("feature-discovery", "pr-history", "knowledge-deepen") or not math.isfinite(args.budget_usd) or args.budget_usd <= 0:
+            print("--budget-usd is a finite positive ceiling for feature-discovery, pr-history or knowledge-deepen", file=sys.stderr)
             return 2
         params["budget_usd"] = str(args.budget_usd)
     outcome, run_dir = run_playbook(Settings(), "kb-init", args.repo, state_dir=state_dir, params=params)
@@ -182,6 +216,16 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("control")
     accept = sub.add_parser("accept-unknown")
     accept.add_argument("sha")
+    reconcile = sub.add_parser("reconcile-reviewed", help="verify and admit an exact owner-merged knowledge history")
+    action = reconcile.add_mutually_exclusive_group(required=True)
+    action.add_argument("--plan", type=Path, help="write a signed plan; does not admit any commit")
+    action.add_argument("--apply", type=Path, help="revalidate and apply a previously inspected signed plan")
+    reconcile.add_argument("--target", help="exact current main SHA, required when preparing a plan")
+    reconcile.add_argument("--allow-merger", action="append", default=[])
+    reconcile.add_argument("--require-check", action="append", default=[])
+    reconcile.add_argument("--reason", default="")
+    reconcile.add_argument("--event-coverage", type=Path,
+                           help="settle selected source events against already admitted, active owner-merged rules")
     run = sub.add_parser("run")
     run.add_argument("--playbook", required=True)
     run.add_argument("--repo", required=True)
@@ -189,7 +233,27 @@ def main(argv: list[str] | None = None) -> int:
     calibrate.add_argument("--repo", required=True)
     serve = sub.add_parser("serve")
     serve.add_argument("--once", action="store_true")
-    sub.add_parser("activate")
+    maintain = sub.add_parser("maintain", help="plan or queue durable nightly maintenance")
+    actions = maintain.add_subparsers(dest="maintenance_action", required=True)
+    for name in ("plan", "run", "status"):
+        action = actions.add_parser(name)
+        target = action.add_mutually_exclusive_group(required=True)
+        target.add_argument("--repo")
+        target.add_argument("--all", action="store_true")
+        if name == "run":
+            action.add_argument("--request-id", required=True, help="stable idempotent scheduler request identity")
+            extra = action.add_mutually_exclusive_group()
+            extra.add_argument("--calibrate", action="store_true")
+            extra.add_argument("--drill", action="store_true", help="queue an isolated SDK revocation drill")
+    correction = sub.add_parser("correction", help="resolve a maintenance finding through the scheduler")
+    resolve = correction.add_subparsers(dest="correction_action", required=True).add_parser("resolve")
+    resolve.add_argument("--id", required=True, help="immutable maintenance finding ID")
+    resolve.add_argument("--decision", required=True, choices=("confirm", "dismiss"))
+    resolve.add_argument("--evidence", required=True, help="JSON evidence object, or @path to a JSON file")
+    resolve.add_argument("--request-id", help="optional stable identity; default is a digest of the signed owner input")
+    activation = sub.add_parser("activate")
+    activation.add_argument("--snapshot", type=Path, help="verify and activate an explicitly selected portable snapshot")
+    activation.add_argument("--allow-partial", action="store_true", help="explicitly serve an accepted foundation; initialization remains incomplete")
     rollback = sub.add_parser("rollback")
     rollback.add_argument("--to", required=True)
     traces = sub.add_parser("traces")
@@ -210,27 +274,40 @@ def main(argv: list[str] | None = None) -> int:
 
     init.add_argument("--stage", choices=STAGES + INDEPENDENT_STAGES)
     init.add_argument("--pr-count", type=int, help="PR-history window (default: adapter pr_history_count or 1000)")
-    init.add_argument("--budget-usd", type=float, help="incremental history/depth cumulative ceiling; may be raised to resume")
+    init.add_argument("--budget-usd", type=float, help="incremental discovery/history/depth cumulative ceiling; may be raised to resume")
     init.add_argument("--dry-run", action="store_true",
                       help="write the tree and PR body under the state directory instead of opening a PR")
     init.add_argument("--pin", help="upstream commit to pin (default: the default branch head)")
     init.add_argument("--suggest-seeds", action="store_true")
     init.add_argument("--from-existing", action="store_true",
-                      help="enrich a merged KB without local skeleton/modules records (knowledge stages)")
+                      help="enrich a merged KB without local skeleton records (discovery, modules and knowledge stages)")
     init.add_argument("--subscription-generator", action="store_true",
                       help="explicit subscription generator; unreported fees outside stage USD accounting")
-    init.add_argument("--retry-unfinished", action="store_true", help="retry missing depth facets, preserving prior spend")
+    init.add_argument("--unlimited-subscription", action="store_true",
+                      help="uncapped discovery/modules/knowledge/depth with authenticated subscription generator and judge; no fallback")
+    init.add_argument("--retry-unfinished", action="store_true", help="retry unfinished discovery/depth work, preserving prior spend")
+    init.add_argument("--acceptance-mode", choices=("strict", "lightweight"), default="strict",
+                      help="depth recognition standard; lightweight uses pinned citations and one independent feature review")
+    init.add_argument("--foundation-mode", choices=("strict", "partial"), default="strict",
+                      help="explicitly publish retained partial foundation or bind depth to that publication; targets stay unchanged")
+    init.add_argument("--foundation-record", type=Path,
+                      help="original published partial foundation record, required for partial knowledge-deepen")
     for name, stage in (("widen", "knowledge"), ("deepen", "knowledge-deepen")):
         cmd = sub.add_parser(name, help="feature breadth" if name == "widen" else "feature implementation depth")
         cmd.add_argument("repo")
         cmd.add_argument("--dry-run", action="store_true")
         cmd.add_argument("--pin")
         cmd.add_argument("--subscription-generator", action="store_true")
+        cmd.add_argument("--unlimited-subscription", action="store_true")
+        cmd.add_argument("--foundation-mode", choices=("strict", "partial"), default="strict")
+        cmd.add_argument("--foundation-record", type=Path)
         if name == "deepen":
             cmd.add_argument("--budget-usd", type=float)
             cmd.add_argument("--retry-unfinished", action="store_true")
+            cmd.add_argument("--acceptance-mode", choices=("strict", "lightweight"), default="strict")
         cmd.set_defaults(stage=stage, from_existing=True, suggest_seeds=False, pr_count=None,
-                         **({"budget_usd": None, "retry_unfinished": False} if name == "widen" else {}))
+                         **({"budget_usd": None, "retry_unfinished": False}
+                            if name == "widen" else {}))
     publish = sub.add_parser("publish")
     where = publish.add_mutually_exclusive_group(required=True)
     where.add_argument("--remote", help="host:/absolute/path of the service state directory (over ssh)")
@@ -239,7 +316,47 @@ def main(argv: list[str] | None = None) -> int:
     publish.add_argument("--interval", type=float, default=60.0)
     publish.add_argument("--publisher-state",
                          help="default: $KB_PUBLISHER_STATE or ~/.infermatrix-copilot/kb-publisher")
+    from .portable_commands import add_commands
+    add_commands(sub)
     args = parser.parse_args(argv)
+    supplied = sys.argv[1:] if argv is None else argv
+    args.acceptance_mode_explicit = any(value == "--acceptance-mode" or value.startswith("--acceptance-mode=") for value in supplied)
+
+    if args.command in {"maintain", "correction"}:
+        from .maintenance_commands import command
+
+        try:
+            return command(args, _state_dir(args.state_dir))
+        except (ValueError, OSError, KeyError, RuntimeError, subprocess.SubprocessError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+
+    if args.command in {"onboard", "repo", "mirror", "update"}:
+        from .portable_commands import command
+        from .init_support import InitError
+        from .sources import SourceError
+        from .knowledge_store import KnowledgeStoreError
+        try:
+            return command(args, _state_dir(args.state_dir))
+        except (InitError, SourceError, KnowledgeStoreError, ValueError, OSError, KeyError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+    if args.command == "activate" and args.snapshot is not None:
+        from .activate import activation_lock, verify_snapshot, switch_active, ActivationError
+        from .portable_publication import check_publication
+        from .knowledge_store import KnowledgeStoreError
+        try:
+            snapshot = args.snapshot.resolve(strict=True)
+            state_dir = _state_dir(args.state_dir)
+            with activation_lock(state_dir):
+                view = verify_snapshot(snapshot)
+                publication = check_publication(view, allow_partial=args.allow_partial)
+                switch_active(state_dir, snapshot)
+            print(json.dumps({"active_snapshot": view.public_snapshot, "verified": True, **publication}))
+            return 0
+        except (ActivationError, KnowledgeStoreError, OSError, ValueError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
 
     if args.command == "keygen":
         from ..knowledge_service.signing import generate_private_key, public_key_text
@@ -255,6 +372,42 @@ def main(argv: list[str] | None = None) -> int:
     if args.command in ("init", "widen", "deepen"):
         # before any ledger is opened: kb init never touches the service's kb.db
         return _init_command(args, _state_dir(args.state_dir))
+    if args.command == "reconcile-reviewed":
+        from ..config import Settings
+        from ..knowledge_service.signing import canonical_json
+        from .runtime import KbRuntime
+        from .reconcile import make_plan, apply_plan
+
+        rt = KbRuntime.from_env(Settings(), state_dir=_state_dir(args.state_dir))
+        try:
+            key = _signing_key()
+            if args.plan:
+                options = {"target": args.target or "", "allow_mergers": args.allow_merger,
+                           "required_checks": args.require_check, "reason": args.reason}
+                if args.event_coverage:
+                    from .event_settlement import make_plan as make_event_plan
+
+                    envelope = make_event_plan(rt, key, coverage=json.loads(args.event_coverage.read_text()), **options)
+                else:
+                    envelope = make_plan(rt, key, **options)
+                with args.plan.open("xb") as handle:
+                    handle.write(canonical_json(envelope))
+                print(f"verified reconciliation plan: {args.plan}; no commit admitted")
+            else:
+                envelope = json.loads(args.apply.read_text())
+                if envelope.get("purpose") == "kb-reviewed-event-plan":
+                    from .event_settlement import apply_plan as apply_event_plan
+
+                    receipt = apply_event_plan(rt, envelope, key)
+                else:
+                    receipt = apply_plan(rt, envelope, key)
+                print(f"supervised reconciliation receipt: {receipt}; pause and publication modes unchanged")
+            return 0
+        except (ValueError, OSError, KeyError, RuntimeError, subprocess.SubprocessError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        finally:
+            rt.ledger.close()
 
     state_dir = _state_dir(args.state_dir)
     ledger = _ledger(state_dir)
@@ -263,6 +416,12 @@ def main(argv: list[str] | None = None) -> int:
         if _sync_repos(ledger, registry) and os.environ.get("KB_SIGNING_KEY"):
             _refresh(state_dir, ledger, registry)
         if args.command == "status":
+            from .reconcile import read_receipts
+            from .sources import KnowledgeRepo
+
+            public = _signing_key().public_key() if (state_dir / "reconciliations").exists() else None
+            reviewed = read_receipts(KnowledgeRepo(Path(os.environ.get("KB_KNOWLEDGE_CLONE") or
+                                                      state_dir / "knowledge-repo")), state_dir, public)
             report = {
                 "state_dir": str(state_dir),
                 "active_snapshot": ledger.active_snapshot(),
@@ -273,7 +432,8 @@ def main(argv: list[str] | None = None) -> int:
                      "human_queue": len(ledger.human_queue(row["repo"])) if row["repo"] != "*" else None}
                     for row in ledger.all_repo_states()
                 ],
-                "unknown_commits": _unknown_status(ledger),
+                "unknown_commits": _unknown_status(ledger, reviewed),
+                "supervised_commits": sorted(reviewed),
             }
             json.dump(report, sys.stdout, indent=2, sort_keys=True)
             print()
@@ -343,10 +503,13 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
             _generator, judge = roles_from_env()
             from .calibration import case_set_digest
-            from .runtime import record_calibration
+            from ..trace_store import TraceStore, trace_context
+            from .runtime import record_calibration, trace_recorder
 
             case_dir = lifecycle.adapter_dir / lifecycle.calibration_set
-            report = run_calibration(case_dir, gateway=ModelGateway(Settings()), judge=judge)
+            gateway = ModelGateway(Settings(), recorder=trace_recorder(TraceStore(state_dir / "traces")))
+            with trace_context(repo=args.repo):
+                report = run_calibration(case_dir, gateway=gateway, judge=judge)
             # publication under auto_merge requires this record to match the
             # current judge and case set exactly
             record_calibration(ledger, args.repo, judge=judge.label(),
