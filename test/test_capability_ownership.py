@@ -322,3 +322,10 @@ def test_generic_agent_runner_does_not_select_review_context_policy():
         assert not any("review" in module.split(".") for module in modules)
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             assert node.value not in {"pr_diff", "doc_related", "review_knowledge_context"}
+
+
+def test_rfc_public_client_is_the_shared_application_client():
+    from infermatrix_copilot.rfc_service.client import RFCClient, RFCClientError
+    from infermatrix_copilot.sdk.v1 import RFCClient as PublicClient, RFCClientError as PublicError
+    assert PublicClient is RFCClient
+    assert PublicError is RFCClientError

@@ -1,10 +1,10 @@
 ---
 title: "OmniVoice 规则"
 created: 2026-09-05
-updated: 2026-09-22
+updated: 2026-10-12
 type: rule
 tags: [vllm-omni, models, model-executor, attention-runtime, ffn-runtime]
-sources: ["PR #6317", vllm_omni/model_executor/models/omnivoice/omnivoice_generator.py, vllm_omni/model_executor/models/omnivoice/fused_qkv_rope.py, tests/model_executor/models/omnivoice/test_cuda_graph_generator.py, tests/model_executor/models/omnivoice/test_fused_projection_load.py, tests/model_executor/models/omnivoice/test_fused_qkv_rope.py, tests/model_executor/models/omnivoice/test_mask_dtype.py, tests/model_executor/models/omnivoice/test_triton_kernels.py, "PR #6408"]
+sources: ["PR #6317", vllm_omni/model_executor/models/omnivoice/omnivoice_generator.py, vllm_omni/model_executor/models/omnivoice/fused_qkv_rope.py, tests/model_executor/models/omnivoice/test_cuda_graph_generator.py, tests/model_executor/models/omnivoice/test_fused_projection_load.py, tests/model_executor/models/omnivoice/test_fused_qkv_rope.py, tests/model_executor/models/omnivoice/test_mask_dtype.py, tests/model_executor/models/omnivoice/test_triton_kernels.py, "PR #6408", "PR #6105"]
 confidence: high
 ---
 
@@ -37,3 +37,12 @@ confidence: high
 - 强制：声明 `supports_request_batch` 与 `supports_step_execution` 时，Generator 使用 token-major packed 布局 `[cond0, uncond0, cond1, uncond1, …]`，以 `cu_seqs` 表达 `2B` 条独立序列的累积边界，序列内双向、序列间互不可见；position id 按 `cu_seqs` 每段从 0 重置。CUDA Graph 键为 `(request_batch_size, token_bucket)`，静态输入按 token bucket 与 `2B+2` `cu_seqs` 捕获。每请求保留独立 RNG，避免 Gumbel 流交叉。完成请求用**精确长度** codec token **逐条** decode；不得为迁就 Decoder 批处理而把已 exact-length 的 token 再 pad 到 longest。
 - 禁止：把 cond/uncond 或跨请求 pad 成 `[batch, codebook, max_seq]` 当作默认热路径；共享 batch 级 RNG；在未证明 pad-Decoder 更快前恢复 padded Decoder batching。不得把注意力/layout 变更后的输出宣称为与旧 padded 路径 bit-exact。
 - 验收：覆盖 packed `cu_seqs` 边界、per-request seed 隔离、graph key/bucket、step lifecycle，以及 exact-length 单请求 decode；WER/parity 报告须标明 layout 变更。deploy 批参数（如 `max_num_seqs` / `request_batch_max_wait_ms`）只证明该配置，不构成通用吞吐保证。^[PR #6408]
+
+## VLLM-OMNI-PR6105-INSTRUCT-VALIDATION — OmniVoice instructions 必须按封闭词表在 TTS adapter 校验
+
+- 触发：修改 OmniVoice speech 的 `instructions` 输入、`tts_adapters/omnivoice.py` 的校验接线、`model_executor/models/omnivoice/prompt_utils.py` 的 `validate_instruction`/`prepare_instruct`，或 `instruct_constants.py` 的有效词表。
+- 强制：instructions 是逗号分隔的封闭词表，有效项以模型目录的 `instruct_constants.py` 为唯一来源。分隔符不是输入校验的硬性要求：解析同时接受半角与全角逗号，“英文 comma + space、中文全角逗号”只是报错提示中的建议写法。校验在 request-facing 的 TTS adapter 完成，非法请求在进入 engine 前返回结构化 400。三类非法各自可识别：不支持/不存在的项返回 "Unsupported instruct items found"，且只有该错误附带两种语言的有效项列表与分隔符提示；同类别冲突项（如 teenager 与 middle-aged）返回 "Conflicting instruct items within the same category"；中文方言与英文口音混用返回 "Cannot mix Chinese dialect and English accent"；后两类报错不包含有效项列表或分隔符提示。校验通过后只把 `prepare_instruct` 的产物传给下游；offline 示例在写入 `mm_processor_kwargs["instruct"]` 前执行同一 validate→prepare 流程。
+- 禁止：把未校验的原始 instructions 直接送入 engine 或 `mm_processor_kwargs`；在 serving/adapter 内复制第二份有效词表；静默丢弃非法项或让 free-form 文本进入模型；以分隔符写法不符为由拒绝本可解析的请求；diffusion speech server 因 voice 未知而缺少 adapter（未知 voice 时 `_adapter` 应为 OmniVoiceAdapter 而非 None）。
+- 验收：`tests/model_executor/models/omnivoice/test_prompt_utils.py` 覆盖合法英文/中文与三类非法；`tests/e2e/online_serving/test_omnivoice_expansion.py::TestOmniVoiceInstructions` 断言合法英文/中文请求产出音频、三类非法各自返回 400 且匹配对应错误消息；`tests/entrypoints/openai_api/test_serving_speech.py` 保持未知 voice 下 `_adapter` 为 OmniVoiceAdapter 的断言。^[PR #6105]
+
+<!-- kb:rule status=active since=v0.30.0 -->

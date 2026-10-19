@@ -128,6 +128,45 @@ _PATH_KEYS = ("file_path", "path", "notebook_path")
 _ARG_BUDGET = 100_000
 
 
+class ZCodeFailure(RuntimeError):
+    """Known provider failure with a fixed public message and recovery code.
+
+    Provider messages, request headers, prompts and raw stream events never
+    become fields on this exception. Unknown CLI failures retain the existing
+    diagnostic path instead of being guessed from arbitrary text.
+    """
+    MESSAGES = {
+        "model_quota_exceeded": "The Zcode model usage quota is exhausted. Wait for the provider quota to reset or ask the service administrator to check the coding plan.",
+        "model_rate_limited": "The Zcode model is rate limited. Try again after a short wait.",
+        "model_authentication_required": "The configured Zcode model requires reauthorization or model access. Contact the service administrator.",
+        "model_unavailable": "The Zcode model is temporarily unavailable. Try again later.",
+    }
+
+    def __init__(self, code: str, *, retryable: bool):
+        super().__init__(self.MESSAGES[code])
+        self.code = code
+        self.retryable = retryable
+
+
+def _known_model_failure(events: list[dict]) -> ZCodeFailure | None:
+    for event in reversed(events):
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        code = payload.get("errorCode")
+        provider_code = str(payload.get("providerErrorCode", ""))
+        status = payload.get("statusCode")
+        if provider_code == "1310" or (code == "model_rate_limited" and payload.get("retryable") is False):
+            return ZCodeFailure("model_quota_exceeded", retryable=False)
+        if code == "model_rate_limited":
+            return ZCodeFailure("model_rate_limited", retryable=True)
+        if code in {"model_authentication_failed", "model_auth_failed", "model_unauthorized", "model_access_denied"} or (isinstance(code, str) and code.startswith("model_") and status in (401, 403)):
+            return ZCodeFailure("model_authentication_required", retryable=False)
+        if code in {"model_unavailable", "model_connection_error", "model_timeout", "model_server_error"} or (isinstance(code, str) and code.startswith("model_") and isinstance(status, int) and status >= 500):
+            return ZCodeFailure("model_unavailable", retryable=True)
+    return None
+
+
 class ZCodeTransport(HarnessTransport):
     """zcode CLI (headless prompt mode) as a Strict backend."""
 
@@ -368,8 +407,12 @@ class ZCodeTransport(HarnessTransport):
             argument.validate_events(events)
         if not timed_out and (returncode != 0 or not any(
                 e.get("type") == "result" for e in events)):
-            # A failed run (expired login, bad flag, crashed runtime) must not
-            # read as an empty review: raise with zcode's own words.
+            # Known model failure events have stable, content-free recovery
+            # messages. Never expose their request headers or provider text.
+            known = _known_model_failure(events)
+            if known is not None:
+                raise known
+            # Unknown CLI failures retain the established diagnostic behavior.
             detail = " ".join(stderr.strip().splitlines()[-3:])[:400]
             raise RuntimeError(
                 f"zcode exited {returncode} without a result event"
@@ -410,6 +453,9 @@ class ZCodeTransport(HarnessTransport):
                              output="spool", on_line=line)
         timed_out = bool(result.reason)
         if not timed_out and (result.returncode != 0 or not any(e.get("type") == "result" for e in events)):
+            known = _known_model_failure(events)
+            if known is not None:
+                raise known
             detail = " ".join(stderr[-3:])[:400]
             raise RuntimeError(f"zcode exited {result.returncode} without a result event"
                                + (f": {detail}" if detail else ""))

@@ -51,3 +51,5 @@ sources: [vllm_omni/core/sched/omni_ar_scheduler.py, vllm_omni/core/sched/omni_g
 
 - [native sender-only admission 与 opt-in first-chunk express](rules-first-chunk-express.md)。
 - [Async-chunk prewarm 规则](rules-async-chunk-prewarm.md)
+- [Scheduler：duplex 流式 context overflow 规则](rules-duplex-overflow.md)
+- [vllm-omni · Scheduler · Prefix-cache write-boundary rules](rules-prefix-cache-write.md)

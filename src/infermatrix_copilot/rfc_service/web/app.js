@@ -1,0 +1,1826 @@
+/* Same-origin RFC client. Markdown uses a bundled parser with raw HTML disabled. */
+import {graphModels, graphSource, roadmapSVGStyles} from "/roadmap-graph.mjs";
+import {displayMarkdown} from "/roadmap-markdown-display.mjs";
+import {projectRFC, outcomeModel} from "/roadmap-components.mjs";
+import {currentLanguage, localizeText, setTranslations, applyLocale, initializeLocale, changeLanguage} from "/roadmap-locale.mjs";
+import {createChat, draftDigest} from "/roadmap-chat.mjs";
+import {actionDialog, askConfirm, renderDiff} from "/roadmap-ui.mjs";
+import {linkedCriteria, filterWork, workspaceDefaults, createWorkspaceCheckpoint} from "/roadmap-workspace.mjs";
+import {createDraftKeeper} from "/roadmap-drafts.mjs";
+const markdown = window.markdownit({html: false, linkify: true});
+markdown.renderer.rules.image = (tokens, index) => markdown.utils.escapeHtml(tokens[index].content);
+
+function markdownBody(text, sourceUrl = "") {
+  const node = document.createElement("article");
+  node.className = "markdown-body";
+  // Only parser-generated HTML is inserted; source HTML is escaped by markdown-it.
+  node.innerHTML = markdown.render(displayMarkdown(text || "暂无正文。"));
+  const used = new Set();
+  for (const heading of node.querySelectorAll("h1,h2,h3,h4,h5,h6")) {
+    const slug = heading.textContent.toLowerCase().replace(/[^\p{L}\p{N}_\s-]/gu, "").replace(/\s/g, "-") || "section";
+    let id = slug, suffix = 0;
+    while (used.has(id)) id = `${slug}-${++suffix}`;
+    used.add(id);
+    heading.id = id;
+  }
+  for (const link of node.querySelectorAll("a")) {
+    const href = link.getAttribute("href") || "";
+    if (href.startsWith("#")) continue;
+    try {
+      const url = new URL(href, sourceUrl || location.href);
+      if (!["https:", "http:"].includes(url.protocol)) throw new Error("Unsupported link");
+      link.href = url.href;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+    } catch { link.replaceWith(document.createTextNode(link.textContent)); }
+  }
+  return node;
+}
+const $ = (id) => document.getElementById(id);
+const content = $("content");
+let principal = null;
+let repositories = [];
+let routeSequence = 0;
+let renderedRoute = "";
+let routeController = null;
+let workspaceV2 = true;
+const dashboardFilters = {query: "", repo_id: "", offset: 0};
+let viewDirty = false;
+let selectedTokenUser = "";
+let noticeTimer;
+let refreshCurrent = null;
+const suggestionPages = new Map();
+const SUGGESTIONS_PER_PAGE = 50;
+let graphSerial = 0;
+let mermaidPromise;
+let featureDialog = null;
+let activeGraphs = null;
+let graphSelectionRFC = "";
+const selectedGraphIDs = new Set();
+let activeRFC = null;
+let activeContent = null;
+let activeEditor = null;
+const editorDrafts = new Map();
+let busyOperations = 0;
+let chat;
+let activeWorkspace = null;
+const workspaceStates = new Map();
+const workspaceCheckpoints = createWorkspaceCheckpoint();
+const drafts = createDraftKeeper({scope: () => {
+  const current = activeRFC && location.hash.startsWith(`#rfc/${encodeURIComponent(activeRFC.id)}`) ? activeRFC : null;
+  return {user_id: principal?.user_id, repo_id: current?.repo_id || "", rfc_id: current?.id || ""};
+}});
+function restoreDrafts(root) {
+  const page = (location.hash.slice(1) || "dashboard").split("?")[0];
+  for (const form of root.querySelectorAll("form")) {
+    if (form.dataset.draftKey || form.matches("[data-no-draft],.chat-composer") || form.closest("#secret-dialog,#login-form") || form.querySelector('input[type="password"]')) continue;
+    const names = [...form.querySelectorAll("[name]")].map(control => control.name);
+    if (names.some(name => /token|secret|credential/i.test(name))) { form.dataset.noDraft = ""; continue; }
+    form.dataset.draftKey = `${page}:${names.join(",")}`;
+  }
+  drafts.restore(root);
+}
+document.addEventListener("draft-form-opened", event => { if (principal) restoreDrafts(event.target); });
+function workspaceState(id) {
+  if (!workspaceStates.has(id)) {
+    const state = workspaceDefaults();
+    if (matchMedia("(max-width:700px)").matches) state.mode = "list";
+    // activeRFC is assigned only from a successful authorized service read.
+    const scope = principal && activeRFC?.id === id ? {user_id: principal.user_id, repo_id: activeRFC.repo_id, rfc_id: id} : null;
+    if (scope) Object.assign(state, workspaceCheckpoints.restore(scope) || {});
+    let retained;
+    const checkpoint = () => { if (scope && principal?.user_id === scope.user_id && workspaceStates.get(id) === retained) workspaceCheckpoints.save(scope, state); };
+    retained = new Proxy(state, {set(target, key, value) { if (Object.is(target[key], value)) return true; target[key] = value; checkpoint(); return true; }});
+    workspaceStates.set(id, retained);
+  }
+  return workspaceStates.get(id);
+}
+window.addEventListener("pagehide", () => rememberGraphViewport());
+
+function returnChatMount() { chat?.mount(activeWorkspace?.agentMount?.isConnected ? activeWorkspace.agentMount : $("chat-mount")); }
+
+function closeFeatureDialog() {
+  if (featureDialog) { featureDialog.close(); featureDialog.remove(); featureDialog = null; }
+}
+function closeRFCEditor(discard = false) {
+  if (!activeEditor) return;
+  if (discard) drafts.forget(activeEditor.dialog);
+  returnChatMount();
+  if (activeEditor.dialog.open) activeEditor.dialog.close();
+  if (discard) { editorDrafts.delete(activeEditor.id); activeEditor.dialog.remove(); activeEditor = null; }
+}
+function rememberGraphViewport() {
+  if (!activeGraphs?.wrapper.isConnected) return;
+  activeGraphs.viewport = [...activeGraphs.wrapper.querySelectorAll(".roadmap-canvas")].map(canvas => ({left: canvas.scrollLeft, top: canvas.scrollTop, scale: Number(canvas.dataset.graphScale || 1)}));
+  workspaceState(activeGraphs.rfc.id).viewport = activeGraphs.viewport;
+}
+function restoreGraphViewport() {
+  const graphs = activeGraphs;
+  if (!graphs?.viewport) return;
+  const restore = () => {
+    if (graphs !== activeGraphs || !graphs.wrapper.isConnected) return;
+    graphs.wrapper.querySelectorAll(".roadmap-canvas").forEach((canvas, index) => {
+      const position = graphs.viewport[index];
+      if (position) {
+        canvas.dataset.graphScale = String(position.scale);
+        const drawing = canvas.querySelector("svg");
+        if (drawing?.dataset.baseWidth) drawing.setAttribute("width", String(Number(drawing.dataset.baseWidth) * position.scale));
+        canvas.scrollLeft = position.left; canvas.scrollTop = position.top;
+      }
+    });
+  };
+  restore(); requestAnimationFrame(restore);
+}
+
+function openGraphTarget(graphs) {
+  if (!graphs?.wrapper.isConnected || featureDialog) return;
+  const target = new URLSearchParams(location.hash.split("?")[1] || "").get("feature");
+  if (!target) return;
+  for (const model of graphs.models) {
+    const node = graphTargetNode(model, target);
+    if (node) { graphDetails(graphs.rfc, node, model); return; }
+  }
+}
+
+function graphTargetNode(model, target) {
+  for (const node of model.nodes) {
+    if (node.id === target && node.feature) return node;
+    const member = node.members?.find(feature => feature.id === target);
+    if (member) return {id: member.id, title: member.title, feature: member};
+  }
+  return null;
+}
+
+function workRemovalDialog(rfc, feature) {
+  if (!canPublish(rfc)) return;
+  const restoring = Boolean(feature.dropped);
+  return actionDialog({title: restoring ? "恢复工作项" : "移除工作项", description: restoring ? "工作项将重新显示在路线图中。" : "工作项将从路线图中移除；原文、证据和历史保留，可随时恢复。",
+    fields: [{name: "reason", label: restoring ? "恢复原因" : "移除原因（会保留历史）", type: "textarea", required: true}],
+    submitLabel: restoring ? "确认恢复" : "确认移除", onSubmit: async values => {
+      await applyRFCResult(await action("rfcs.work", {rfc_id: rfc.id, op: restoring ? "restore" : "drop", feature_id: feature.id, reason: values.reason.trim(), expected_revision: rfc.revision}));
+    }});
+}
+
+function graphDetails(rfc, node, model) {
+  closeFeatureDialog();
+  let workspace = activeWorkspace?.rfc.id === rfc.id ? activeWorkspace : null;
+  if (!workspace) {
+    const dialog = element("dialog", {class: "graph-details", "aria-label": "工作详情"});
+    const inspector = element("div");
+    dialog.append(element("div", {class: "actions"}, button("关闭", closeFeatureDialog)), inspector);
+    workspace = {rfc, state: workspaceState(rfc.id), inspector, updateSide() {}, activateTab(key) { closeFeatureDialog(); content.querySelector(`#rfc-${key}`)?.scrollIntoView({behavior: "smooth"}); }};
+    featureDialog = dialog; document.body.append(dialog); dialog.showModal();
+    dialog.addEventListener("close", () => { dialog.remove(); if (featureDialog === dialog) featureDialog = null; });
+  }
+  workspace.state.selected = node.id;
+  workspace.state.side = "details";
+  workspace.state.collapsed = false;
+  const detail = element("div", {class: "inspector-content", "data-graph-node-id": node.id});
+  detail.append(element("div", {class: "inspector-title"}, element("span", {class: "eyebrow"}, node.group ? "合并节点" : node.feature ? "跟踪工作项" : "来源上下文"),
+    element("h2", {}, node.title), element("div", {class: "actions"}, button("与 Agent 讨论", () => discussRFC(rfc, node.group ? null : graphSelection(rfc, node, model)), "quiet"))));
+  if (node.group) {
+    const counts = node.counts || node.feature.counts;
+    detail.append(element("p", {class: "group-summary"}, `${counts.implemented} / ${counts.total} 实现已落地 · ${counts.accepted} / ${counts.total} 已验收`),
+      element("p", {class: "small muted"}, "这是合并显示的节点；成员任务、依赖、证据和历史分别保留。"));
+    if (canWrite(rfc)) detail.append(element("div", {class: "actions group-actions"}, button("重命名合并节点", () => actionDialog({title: "重命名合并节点", fields: [{name: "title", label: "合并节点名称", value: node.group.title, required: true}], submitLabel: "保存名称", onSubmit: async values => {
+      await applyRFCResult(await action("rfcs.graph", {rfc_id: rfc.id, op: "rename", group_id: node.group.id, title: values.title.trim(), expected_revision: rfc.revision}));
+    }})), button("拆分节点", () => actionDialog({title: "拆分节点", description: "恢复独立显示成员任务，保留依赖、证据和历史。", submitLabel: "确认拆分", onSubmit: async () => {
+      await applyRFCResult(await action("rfcs.graph", {rfc_id: rfc.id, op: "unmerge", group_id: node.group.id, expected_revision: rfc.revision}));
+    }}))));
+    detail.append(workPanel({...rfc, features: node.members}, false));
+    const criteria = linkedCriteria(rfc.criteria, node.members.map(feature => feature.id));
+    if (criteria.length) detail.append(criteriaPanel({...rfc, criteria}));
+  } else if (node.feature) {
+    detail.append(workPanel({...rfc, features: [node.feature]}, false));
+    const criteria = linkedCriteria(rfc.criteria, [node.id]);
+    if (criteria.length) detail.append(criteriaPanel({...rfc, criteria}));
+    else detail.append(element("p", {class: "small muted"}, "此工作项暂无关联验收条件。RFC 级验收请查看验收与证据。"), button("查看验收与证据", () => workspace.activateTab("acceptance"), "quiet"));
+  } else {
+    detail.append(element("p", {class: "muted"}, "这是源文档中的目标或上下文节点，不是独立跟踪的工作项。选择关联工作可查看实现、负责人和验收。"));
+    const neighbors = new Set(model.edges.filter(edge => edge.from === node.id || edge.to === node.id).flatMap(edge => [edge.from, edge.to]));
+    const related = model.nodes.filter(candidate => candidate.feature && neighbors.has(candidate.id));
+    for (const candidate of related) detail.append(button(`${candidate.id} · ${candidate.feature.title}`, () => graphDetails(rfc, candidate, model)));
+    if (!related.length) detail.append(button("查看全部工作", () => { workspace.activateTab("work"); workspace.state.mode = "list"; workspace.drawWork(); }));
+  }
+  workspace.inspector.replaceChildren(detail);
+  workspace.updateSide();
+  applyLocale(detail);
+}
+
+function mergeGraphNodes(rfc, initialIDs = []) {
+  if (!canWrite(rfc)) return;
+  closeFeatureDialog();
+  const grouped = new Set((rfc.node_groups || []).flatMap(group => group.feature_ids));
+  const candidates = (rfc.features || []).filter(feature => !feature.dropped && !grouped.has(feature.id));
+  const initial = new Set(initialIDs);
+  if (candidates.length < 2) { notice("至少需要两个未合并的工作节点。"); return; }
+  const dialog = element("dialog", {class: "graph-details graph-merge", "aria-label": "合并路线图节点"});
+  featureDialog = dialog;
+  dialog.append(element("div", {class: "panel-title"}, element("h2", {}, "合并路线图节点"), button("关闭", closeFeatureDialog)),
+    element("p", {class: "small muted"}, "选择工作节点，将它们合并显示。任务和依赖保持独立，可随时拆分。"));
+  const form = element("form", {class: "graph-merge-form"});
+  const title = input("title", "例如：核心引擎集成", "", "text", true);
+  const search = input("search", "按编号、标题或工作轨道筛选");
+  const options = element("div", {class: "graph-merge-options"});
+  const count = element("p", {class: "small muted", role: "status"}, "已选择 0 项");
+  const submit = element("button", {type: "submit", class: "primary", disabled: true}, "合并选中节点");
+  const selected = () => [...options.querySelectorAll("input:checked")].map(control => control.value);
+  for (const feature of candidates) {
+    const control = element("input", {type: "checkbox", name: "feature_id", value: feature.id});
+    control.checked = initial.has(feature.id);
+    control.addEventListener("change", () => {
+      const ids = selected(); count.textContent = localizeText(`已选择 ${ids.length} 项`); submit.disabled = ids.length < 2 || ids.length > 200;
+    });
+    const option = element("label", {class: "graph-merge-option"}, control,
+      element("span", {"data-no-translate": ""}, feature.id), element("span", {}, feature.title), element("small", {class: "muted"}, feature.track || "工作"));
+    option.dataset.search = `${feature.id} ${feature.title} ${feature.track || ""}`.toLocaleLowerCase();
+    options.append(option);
+  }
+  count.textContent = localizeText(`已选择 ${selected().length} 项`);
+  submit.disabled = selected().length < 2 || selected().length > 200;
+  search.addEventListener("input", () => {
+    const query = search.value.trim().toLocaleLowerCase();
+    for (const option of options.children) option.hidden = query && !option.dataset.search.includes(query);
+  });
+  form.append(field("合并节点名称", title), field("筛选工作节点", search), options, count, element("div", {class: "actions"}, submit));
+  form.addEventListener("submit", event => {
+    event.preventDefault();
+    const feature_ids = selected();
+    if (feature_ids.length < 2 || feature_ids.length > 200) return;
+    busy(submit, async () => {
+      const result = await action("rfcs.graph", {rfc_id: rfc.id, op: "merge", title: title.value.trim(), feature_ids, expected_revision: rfc.revision});
+      selectedGraphIDs.clear();
+      closeFeatureDialog();
+      await applyRFCResult(result);
+    });
+  });
+  dialog.append(form);
+  dialog.addEventListener("close", () => { dialog.remove(); if (featureDialog === dialog) featureDialog = null; });
+  document.body.append(dialog); dialog.showModal(); title.focus();
+}
+const labels = {
+  draft: "草稿", proposed: "待评审", discussion: "讨论中", accepted: "已接受", rejected: "已拒绝",
+  superseded: "已取代", planned: "待开始", ready: "就绪", active: "进行中", in_progress: "进行中",
+  partial: "部分实现", partially_implemented: "部分实现", blocked: "受阻", review: "评审中",
+  in_review: "评审中", merged: "已合并", implemented: "实现已落地", validating: "待验证", complete: "已完成",
+  completed: "已完成", done: "已完成", dropped: "已移除", cancelled: "已取消", unknown: "未知",
+  unverified: "未验证", pending: "待处理", passing: "通过", passed: "通过", failing: "未通过", failed: "失败",
+  waived: "已豁免", stale: "需刷新", fresh: "已更新", current: "已更新", outcome_unknown: "结果待核对",
+  running: "执行中", applied: "已应用", succeeded: "成功", uncertain: "结果待核对", enrolled: "已纳管",
+  valid_token: "有效", revoked: "已撤销", expired: "已过期",
+  reader: "可查看", contributor: "可贡献", maintainer: "可维护", local: "本地 Markdown",
+  github: "GitHub", atomgit: "AtomGit", none: "无", not_started: "尚未开始", not_enrolled: "未纳管",
+};
+
+function element(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(attrs)) {
+    if (key === "class") node.className = value;
+    else if (key === "text") node.textContent = value;
+    else if (key.startsWith("on") && typeof value === "function") node.addEventListener(key.slice(2), value);
+    else if (value !== undefined && value !== null) node.setAttribute(key, String(value));
+  }
+  for (const child of children.flat()) {
+    if (child === undefined || child === null) continue;
+    node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+  }
+  return node;
+}
+function statusValue(value) {
+  if (value && typeof value === "object") return value.state || value.status || value.verdict || "unknown";
+  return value || "unknown";
+}
+function translated(value) { const state = statusValue(value); return labels[state] || String(state); }
+function badge(value) {
+  const state = statusValue(value);
+  const color = ["valid_token", "passing", "passed", "accepted", "applied", "succeeded", "fresh", "current", "merged", "implemented"].includes(state) ? "green"
+    : ["failed", "failing", "rejected", "error"].includes(state) ? "red"
+    : ["blocked", "partial", "validating", "stale", "outcome_unknown", "unverified"].includes(state) ? "amber"
+    : ["active", "in_progress", "running", "discussion", "review"].includes(state) ? "blue" : "";
+  return element("span", {class: `badge ${color}`}, translated(state));
+}
+function readable(value) {
+  if (value === undefined || value === null || value === "") return "—";
+  return typeof value === "object" ? JSON.stringify(value, null, 2) : String(value);
+}
+function dateText(value) {
+  if (!value) return "尚未同步";
+  const date = new Date(typeof value === "number" ? value * 1000 : value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString(currentLanguage() === "en" ? "en-US" : "zh-CN", {hour12: false});
+}
+function notice(message, error = false) {
+  clearTimeout(noticeTimer);
+  $("notice").textContent = message;
+  $("notice").className = `notice${error ? " error" : ""}`;
+  $("notice").hidden = false;
+  noticeTimer = setTimeout(() => { $("notice").hidden = true; }, error ? 9000 : 5000);
+}
+function signedOut() {
+  const languages = document.querySelector(".language-switch"); if (languages) document.body.prepend(languages);
+  drafts.clear(); workspaceCheckpoints.clear();
+  for (const dialog of document.querySelectorAll("dialog.action-dialog")) dialog.close();
+  selectedGraphIDs.clear(); graphSelectionRFC = "";
+  closeFeatureDialog();
+  closeRFCEditor(true);
+  for (const editor of editorDrafts.values()) editor.dialog.remove();
+  editorDrafts.clear();
+  chat?.reset();
+  activeGraphs = null;
+  activeRFC = null;
+  activeContent = null;
+  setTranslations(null);
+  activeEditor = null;
+  principal = null; renderedRoute = ""; routeController?.abort();
+  repositories = [];
+  selectedTokenUser = "";
+  routeSequence += 1;
+  refreshCurrent = null;
+  suggestionPages.clear();
+  activeWorkspace = null; workspaceStates.clear();
+  content.replaceChildren();
+  $("identity-name").textContent = "";
+  $("issued-secret").value = "";
+  if ($("secret-dialog").open) $("secret-dialog").close();
+  $("app").hidden = true;
+  $("login").hidden = false;
+}
+function forgetRFC(id) {
+  chat.forget?.(id);
+  workspaceCheckpoints.forget({user_id: principal?.user_id, rfc_id: id});
+  const editor = editorDrafts.get(id);
+  if (editor === activeEditor) closeRFCEditor(true);
+  else if (editor) { drafts.forget(editor.dialog); editor.dialog.remove(); }
+  editorDrafts.delete(id); workspaceStates.delete(id);
+  if (graphSelectionRFC === id) { selectedGraphIDs.clear(); graphSelectionRFC = ""; }
+  if (activeGraphs?.rfc.id === id) activeGraphs = null;
+  if (activeRFC?.id === id) {
+    activeRFC = null; activeContent = null; activeWorkspace = null;
+    setTranslations(null); chat.setDefaultMount?.(null);
+  }
+  for (const dialog of document.querySelectorAll("dialog.action-dialog")) dialog.close();
+}
+async function api(path, options = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new DOMException("Request timed out", "TimeoutError")), 20000);
+  const upstreamAbort = () => controller.abort(options.signal.reason);
+  if (options.signal?.aborted) upstreamAbort();
+  else options.signal?.addEventListener("abort", upstreamAbort, {once: true});
+  let response;
+  try { response = await fetch(path, {credentials: "same-origin", cache: "no-store", ...options, signal: controller.signal,
+    headers: {"Accept": "application/json", ...(options.body ? {"Content-Type": "application/json"} : {}), ...options.headers}}); }
+  finally { clearTimeout(timer); options.signal?.removeEventListener("abort", upstreamAbort); }
+  let value;
+  try { value = await response.json(); } catch { value = {}; }
+  if (!response.ok) {
+    if (response.status === 403) drafts.clearScope();
+    if (response.status === 401 && principal) { signedOut(); notice("会话已失效，请重新登录。", true); }
+    const error = new Error(value.error?.message || `请求失败（${response.status}）`);
+    error.code = value.error?.code;
+    error.request_id = value.error?.request_id || response.headers.get("X-Request-ID");
+    throw error;
+  }
+  return value;
+}
+const compactActions = new Set(["rfcs.changes.apply", "rfcs.draft", "rfcs.import", "rfcs.update", "rfcs.work", "rfcs.graph", "rfcs.decision", "rfcs.acl", "chat.proposals.apply"]);
+const action = async (name, payload = {}) => {
+  const form = document.activeElement?.closest("form");
+  const result = await api(`/api/v1/actions/${encodeURIComponent(name)}`, {method: "POST", body: JSON.stringify({...payload, ...((compactActions.has(name) || name === "rfcs.suggestions") ? {language: currentLanguage()} : {}), ...(compactActions.has(name) ? {view: "detail"} : {})})});
+  if (form && ["rfcs.draft", "rfcs.import", "rfcs.update", "rfcs.work", "rfcs.decision", "rfcs.acl", "users.create", "grants.set", "repositories.create", "service.configure"].includes(name)) drafts.forget(form);
+  return result;
+};
+const getRFC = (id, options = {}) => api(`/api/v1/rfcs/${encodeURIComponent(id)}?view=detail&language=${currentLanguage()}`, options);
+function editorDraft(id) {
+  const editor = editorDrafts.get(id);
+  if (!editor?.dirty) return null;
+  const form = editor.dialog.querySelector("form");
+  return {title: form.elements.title.value, body: form.elements.body.value};
+}
+function featureSelection(rfc, id, title) {
+  const sections = rfcContent(rfc).projection.featureSections[id] || [];
+  return {feature_id: rfc.features?.some(feature => feature.id === id) ? id : undefined, title,
+    ...(sections.length ? {start_line: sections[0].startLine, end_line: sections.at(-1).subtreeEndLine || sections.at(-1).endLine, section_id: sections[0].id} : {})};
+}
+function graphSelection(rfc, node, model) {
+  const selection = featureSelection(rfc, node.id, node.title);
+  if (selection.start_line) return selection;
+  const diagrams = [...String(rfc.body || "").matchAll(/```mermaid\s*\n([\s\S]*?)```/g)].filter(match => /^\s*(?:flowchart|graph)\s+(?:LR|RL|TD|TB|BT)\b/.test(match[1]));
+  const matches = diagrams.filter(diagram => diagramHasNode(diagram, node.id));
+  const match = matches.length === 1 ? matches[0] : null;
+  if (match) {
+    const start = rfc.body.slice(0, match.index).split(/\r?\n/).length;
+    Object.assign(selection, {start_line: start, end_line: start + match[0].split(/\r?\n/).length - 1, graph_node_id: node.id, diagram_index: diagrams.indexOf(match)});
+  }
+  return selection;
+}
+function diagramHasNode(diagram, id) {
+  return graphModels({body: diagram[0], features: []}).some(model => model.nodes.some(node => node.id === id));
+}
+function draftSelection(rfc, selection, draft) {
+  if (!selection) return null;
+  const resolved = {...selection}, body = draft?.body ?? rfc.body ?? "";
+  const lines = body.split(/\r?\n/).length - (body.endsWith("\n") ? 1 : 0);
+  if (resolved.end_line) resolved.end_line = Math.min(resolved.end_line, lines);
+  if (!selection.start_line) return resolved;
+  delete resolved.start_line; delete resolved.end_line; delete resolved.section_id;
+  if (selection.graph_node_id) {
+    const diagrams = [...body.matchAll(/```mermaid\s*\n([\s\S]*?)```/g)].filter(match => /^\s*(?:flowchart|graph)\s+(?:LR|RL|TD|TB|BT)\b/.test(match[1]));
+    const matches = diagrams.filter(diagram => diagramHasNode(diagram, selection.graph_node_id));
+    const match = matches.length === 1 ? matches[0] : null;
+    if (match) {
+      const start = body.slice(0, match.index).split(/\r?\n/).length;
+      Object.assign(resolved, {start_line: start, end_line: Math.min(start + match[0].split(/\r?\n/).length - 1, lines), diagram_index: diagrams.indexOf(match)});
+    }
+    return resolved;
+  }
+  const projection = draft ? projectRFC(body, markdown) : rfcContent(rfc).projection, sections = [];
+  const visit = nodes => { for (const node of nodes) { sections.push(node); visit(node.children || []); } };
+  visit(projection.tree);
+  const matches = sections.filter(section => selection.feature_id ? section.featureId === selection.feature_id : section.title === selection.title);
+  if (matches.length === 1 || (selection.feature_id && matches.length)) Object.assign(resolved, {start_line: matches[0].startLine, end_line: Math.min(matches.at(-1).subtreeEndLine || matches.at(-1).endLine, lines), section_id: matches[0].id});
+  return resolved;
+}
+function discussRFC(rfc, selection = null) {
+  closeFeatureDialog();
+  if (activeWorkspace?.rfc.id === rfc.id) {
+    activeWorkspace.state.side = "agent"; activeWorkspace.state.collapsed = false;
+    chat.mount(activeWorkspace.agentMount); activeWorkspace.updateSide();
+  }
+  chat.select(rfc, selection);
+}
+chat = createChat({action, markdownBody, mount: $("chat-mount"), launcher: $("chat-launcher"), getDraft: editorDraft, resolveSelection: draftSelection,
+  canEdit: rfc => canWrite(rfc) && ((!rfc.enrolled && !Object.keys(rfc.source || {}).length) || canPublish(rfc)) && rfc.sync_status !== "different_writer", onNotice: notice,
+  refreshRFC: getRFC, onSourceUpdate: latest => {
+    if (!principal || activeRFC?.id !== latest.id || !location.hash.startsWith(`#rfc/${encodeURIComponent(latest.id)}`)) return;
+    content.querySelector("#rfc-source-update")?.replaceWith(sourceUpdateStatus(latest));
+    if (activeRFC.body === latest.body && activeRFC.title === latest.title) {
+      activeRFC = latest;
+      if (activeGraphs?.rfc.id === latest.id) activeGraphs.rfc = latest;
+    }
+  },
+  onApply: async (result, reviewed) => {
+    const editor = editorDrafts.get(result.id), draft = editorDraft(result.id);
+    if (editor && (!draft || draftDigest(draft.title, draft.body) === reviewed.draftDigest)) {
+      if (activeEditor === editor) closeRFCEditor(true);
+      else { editorDrafts.delete(editor.id); editor.dialog.remove(); }
+    } else if (draft) notice("新版本已保存；生成期间输入的未提交编辑仍保留在编辑器中。", false);
+    await applyRFCResult(result);
+  }});
+async function applyRFCResult(result) {
+  if (!principal || !result?.id || !result.features || !location.hash.startsWith(`#rfc/${encodeURIComponent(result.id)}`)) return route();
+  viewDirty = false;
+  const scroll = window.scrollY;
+  drafts.capture(document);
+  rememberGraphViewport();
+  content.replaceChildren(detailView(result));
+  restoreDrafts(content);
+  chat.context(result);
+  viewDirty = Boolean(activeEditor?.dirty);
+  window.scrollTo(0, scroll);
+  restoreGraphViewport();
+}
+function formData(form) { return Object.fromEntries(new FormData(form)); }
+async function busy(button, callback) {
+  busyOperations += 1;
+  if (button) button.disabled = true;
+  try { return await callback(); } catch (error) { notice(error.message, true); return null; }
+  finally { busyOperations -= 1; if (button) button.disabled = false; }
+}
+function button(text, callback, className = "") {
+  return element("button", {type: "button", class: className, onclick: (event) => busy(event.currentTarget, callback)}, text);
+}
+function select(name, choices, current = "", required = false) {
+  const node = element("select", {name, ...(required ? {required: true} : {})});
+  for (const choice of choices) {
+    const [value, label] = Array.isArray(choice) ? choice : [choice, labels[choice] || choice];
+    const option = element("option", {value}, label);
+    option.selected = String(value) === String(current);
+    node.append(option);
+  }
+  return node;
+}
+function input(name, placeholder = "", value = "", type = "text", required = false) {
+  return element("input", {name, placeholder, value, type, ...(required ? {required: true} : {})});
+}
+function field(label, control, help = "", full = false) {
+  const id = `field-${field.counter++}`;
+  control.id = id;
+  return element("div", {class: `field${full ? " full" : ""}`}, element("label", {for: id}, label), control,
+    help ? element("p", {class: "help"}, help) : null);
+}
+field.counter = 0;
+function panel(title, children, subtitle = "", actions = null) {
+  return element("section", {class: "panel"}, element("div", {class: "panel-title"}, element("h2", {}, title), actions),
+    subtitle ? element("p", {class: "panel-subtitle"}, subtitle) : null, children);
+}
+function heading(title, subtitle, actions = null) {
+  return element("div", {class: "page-heading"}, element("div", {}, element("h1", {}, title), element("p", {}, subtitle)), actions);
+}
+function empty(title, description) { return element("div", {class: "empty"}, element("h3", {}, title), element("p", {}, description)); }
+function safeLink(url, label = "查看来源 ↗") {
+  try {
+    const value = new URL(url);
+    if (!["http:", "https:"].includes(value.protocol)) return null;
+    return element("a", {href: value.href, target: "_blank", rel: "noopener noreferrer", class: "source-link"}, label);
+  } catch { return null; }
+}
+function repoName(id) { return repositories.find((repo) => repo.id === id)?.name || id || "未指定仓库"; }
+function repoChoices() { return repositories.map((repo) => [repo.id, repo.name || repo.id]); }
+function canWrite(rfc) { return rfc.can_write ?? (principal.admin || ["contributor", "maintainer"].includes(rfc.role)); }
+function canPublish(rfc) { return rfc.can_publish ?? (principal.admin || rfc.role === "maintainer"); }
+function trackingLabel(rfc) {
+  if (rfc.sync_status === "requires_reauthorization") return "追踪已暂停 · 需重新授权";
+  if (rfc.sync_status === "different_writer") return "由其他工作空间维护";
+  return rfc.enrolled ? "已纳管，定期刷新实现事实" : "草稿或尚未纳管";
+}
+
+async function signedIn(identity) {
+  principal = identity;
+  workspaceV2 = identity.workspace_v2 !== false;
+  chat.session(identity);
+  $("login").hidden = true;
+  $("app").hidden = false;
+  $("identity-name").textContent = identity.name || identity.user_id;
+  $("admin-nav").hidden = !identity.admin;
+  const languages = document.querySelector(".language-switch"); if (languages) document.querySelector(".topbar").insertBefore(languages, document.querySelector(".topbar .identity"));
+  repositories = (await api("/api/v1/repositories")).repositories || [];
+  action("service.status").then(status => { workspaceV2 = status.workspace_v2 !== false; }).catch(() => {});
+  await route();
+}
+$("login-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = event.currentTarget.querySelector("button");
+  const token = $("login-token").value;
+  $("login-token").value = "";
+  $("login-error").hidden = true;
+  button.disabled = true;
+  try {
+    const result = await api("/api/v1/session", {method: "POST", body: JSON.stringify({token})});
+    await signedIn(result.principal);
+  } catch (error) { $("login-error").textContent = error.message; $("login-error").hidden = false; }
+  finally { button.disabled = false; }
+});
+$("logout").addEventListener("click", (event) => busy(event.currentTarget, async () => {
+  await api("/api/v1/session", {method: "DELETE"});
+  signedOut();
+}));
+$("close-secret").addEventListener("click", () => { $("issued-secret").value = ""; $("secret-dialog").close(); });
+$("secret-dialog").addEventListener("close", () => {
+  $("issued-secret").value = "";
+  if (principal && ["#account", "#admin"].includes(location.hash)) route();
+});
+$("copy-secret").addEventListener("click", (event) => busy(event.currentTarget, async () => {
+  if (navigator.clipboard) { await navigator.clipboard.writeText($("issued-secret").value); notice("已复制，请妥善保存。"); }
+  else { $("issued-secret").select(); notice("请手动复制已选中的令牌。"); }
+}));
+content.addEventListener("input", () => { viewDirty = true; });
+content.addEventListener("change", () => { viewDirty = true; });
+window.addEventListener("hashchange", () => route());
+
+async function route() {
+  drafts.capture(document);
+  closeFeatureDialog();
+  closeRFCEditor();
+  if (!principal) return;
+  const sequence = ++routeSequence;
+  routeController?.abort(); routeController = new AbortController();
+  const signal = routeController.signal;
+  viewDirty = false;
+  refreshCurrent = null;
+  const hash = (location.hash.slice(1) || "dashboard").split("?")[0];
+  const [page, id] = hash.split("/");
+  if (page !== "rfc" || (graphSelectionRFC && id !== encodeURIComponent(graphSelectionRFC))) {
+    if (graphSelectionRFC) workspaceState(graphSelectionRFC).selection = [...selectedGraphIDs];
+    selectedGraphIDs.clear(); graphSelectionRFC = "";
+  }
+  if (page !== "rfc") { activeWorkspace = null; chat.setDefaultMount?.(null); }
+  chat.context(null);
+  const active = page === "rfc" ? "dashboard" : page === "import" ? "draft" : page;
+  for (const link of document.querySelectorAll("[data-nav]")) link.classList.toggle("active", link.dataset.nav === active);
+  $("breadcrumb").textContent = `${localizeText("工作空间")} / ${localizeText({dashboard: "进展总览", draft: "创建 RFC", import: "纳管已有 RFC", rfc: "RFC 详情", operations: "操作记录", account: "个人令牌", admin: "团队与权限"}[page] || "进展总览")}`;
+  rememberGraphViewport();
+  const keepContent = renderedRoute === hash && content.children.length > 0;
+  if (!keepContent) content.replaceChildren(element("div", {class: "loading"}, "正在读取工作空间…"));
+  else content.classList.add("is-refreshing");
+  try {
+    let view, renderedRFC = null;
+    if (page === "draft") view = draftView();
+    else if (page === "import") view = importView();
+    else if (page === "rfc" && id) { renderedRFC = await getRFC(decodeURIComponent(id), {signal}); if (sequence !== routeSequence || !principal) return; view = detailView(renderedRFC); }
+    else if (page === "operations") view = operationsView(await api("/api/v1/operations"));
+    else if (page === "account") view = await accountView();
+    else if (page === "admin" && principal.admin) view = await adminView();
+    else view = dashboardView(await action("rfcs.list", {...dashboardFilters, limit: 24, view: "summary", language: currentLanguage()}));
+    if (sequence === routeSequence && principal) {
+      content.replaceChildren(view); renderedRoute = hash; content.classList.remove("is-refreshing");
+      restoreDrafts(content);
+      chat.context(renderedRFC);
+      applyLocale(content);
+      if (page === "rfc") { restoreGraphViewport(); openGraphTarget(activeGraphs); }
+    }
+  } catch (error) {
+    if (sequence !== routeSequence || !principal || error.name === "AbortError") return;
+    content.classList.remove("is-refreshing");
+    if (keepContent && !["forbidden", "not_found"].includes(error.code)) {
+      content.querySelector(".read-status")?.remove();
+      content.prepend(element("div", {class: "read-status", role: "status"}, "刷新未完成，仍显示上次读取的内容。", element("span", {"data-no-translate": ""}, error.message), button("重新读取", route)));
+    } else { if (["forbidden", "not_found"].includes(error.code)) { drafts.clearScope(); if (page === "rfc" && id) forgetRFC(decodeURIComponent(id)); } content.replaceChildren(element("div", {class: "error-panel"}, error.message), element("div", {class: "actions"}, button("重新读取", route))); }
+  }
+}
+
+function dashboardView(initial) {
+  setTranslations(null);
+  const wrapper = element("div");
+  wrapper.append(heading("每个 RFC，都有下一步", "查看团队的计划、实现进展和等待验证的结果。", element("div", {class: "actions"}, button("刷新", route), element("a", {href: "#import", class: "badge blue"}, "纳管已有 RFC"), element("a", {href: "#draft", class: "primary badge"}, "＋ 创建 RFC"))));
+  const search = input("search", "搜索 RFC 标题或正文", dashboardFilters.query);
+  const repository = select("repository", [["", "所有可访问仓库"], ...repoChoices()], dashboardFilters.repo_id);
+  const count = element("span", {class: "count", role: "status"});
+  const grid = element("div", {class: "rfc-grid"});
+  const previous = element("button", {type: "button", onclick: () => { dashboardFilters.offset = Math.max(0, dashboardFilters.offset - 24); load(); }}, "上一页");
+  const next = element("button", {type: "button", onclick: () => { dashboardFilters.offset += 24; load(); }}, "下一页");
+  let sequence = 0, timer;
+  function draw(data) {
+    const list = data.rfcs || [], total = data.total ?? list.length;
+    count.textContent = localizeText(`${total} 个 RFC`);
+    previous.disabled = dashboardFilters.offset === 0; next.disabled = dashboardFilters.offset + list.length >= total;
+    previous.hidden = next.hidden = total <= 24;
+    grid.replaceChildren(...list.map(rfc => {
+      setTranslations(rfc.translations, false);
+      const nextAction = Array.isArray(rfc.next_actions) ? rfc.next_actions[0] : rfc.next_actions;
+      return element("article", {class: "rfc-card"}, element("div", {class: "card-meta"}, element("span", {}, repoName(rfc.repo_id)), badge(rfc.state || "draft")),
+        element("h3", {}, element("a", {href: `#rfc/${encodeURIComponent(rfc.id)}`}, rfc.title || "未命名 RFC")),
+        element("div", {class: "status-row"}, "实现", badge(rfc.implementation || "not_started"), "验收", badge(rfc.acceptance || "unverified")),
+        element("p", {class: "small muted"}, nextAction ? typeof nextAction === "object" ? nextAction.title || nextAction.reason || readable(nextAction) : nextAction : rfc.enrolled ? "纳管后按来源持续刷新。" : "预览方案后发布，并启用进展追踪。"),
+        element("div", {class: "card-bottom"}, element("span", {}, rfc.enrolled ? trackingLabel(rfc) : "○ 尚未纳管"), element("span", {}, `${rfc.feature_count ?? rfc.features?.length ?? 0} 个工作项`)));
+    }));
+    if (!list.length) grid.append(empty("没有匹配的 RFC", "调整搜索条件，或创建、导入一个 RFC。"));
+    applyLocale(grid);
+  }
+  async function load() {
+    const current = ++sequence;
+    dashboardFilters.query = search.value; dashboardFilters.repo_id = repository.value;
+    grid.setAttribute("aria-busy", "true"); previous.disabled = next.disabled = true;
+    try {
+      const result = await action("rfcs.list", {...dashboardFilters, limit: 24, view: "summary", language: currentLanguage()});
+      if (current === sequence && wrapper.isConnected && principal) draw(result);
+    } catch (error) { if (current === sequence && wrapper.isConnected) notice(error.message, true); }
+    finally { if (current === sequence) grid.removeAttribute("aria-busy"); }
+  }
+  search.addEventListener("input", () => { clearTimeout(timer); dashboardFilters.offset = 0; timer = setTimeout(load, 250); });
+  repository.addEventListener("change", () => { dashboardFilters.offset = 0; load(); });
+  draw(initial);
+  wrapper.append(element("div", {class: "toolbar"}, search, repository, count), grid, element("div", {class: "actions"}, previous, next));
+  refreshCurrent = load;
+  return wrapper;
+}
+
+function guidedSteps(current) {
+  return element("div", {class: "guided-steps", "aria-label": "RFC 创建步骤"}, ...["选择仓库", "填写目标或来源", "预览方案", "发布或纳管"].map((title, index) => element(index === current ? "strong" : "span", {}, `${index + 1}. ${title}`)));
+}
+function repositoryReadiness(repo) {
+  const holder = element("div", {class: "readiness"});
+  const status = element("span", {role: "status"}, `${repo.provider} · 支持的来源 · 尚未验证连接`);
+  const check = button("验证仓库连接", async () => {
+    status.textContent = localizeText("正在验证仓库连接…");
+    try {
+      const result = await action("repositories.check", {repo_id: repo.id});
+      status.textContent = [result.supported ? "支持的来源" : "来源不支持", result.configured ? "已配置" : "未配置", result.verified ? "连接已验证" : "连接未验证"].map(localizeText).join(" · ");
+      if (result.message) holder.append(element("span", {class: "small", "data-no-translate": ""}, result.message));
+    } catch (error) { status.textContent = error.message; throw error; }
+  });
+  holder.append(status, check); return holder;
+}
+function draftView() {
+  const wrapper = element("div");
+  wrapper.append(heading("先写清问题，再开始推进", "生成草稿、检查方案，然后由你明确发布并纳管。", element("a", {href: "#import"}, "已有 RFC？导入并纳管 →")));
+  const eligible = repositories.filter((repo) => principal.admin || ["contributor", "maintainer"].includes(repo.role));
+  if (!eligible.length) {
+    wrapper.append(empty("还没有可贡献的仓库", principal.admin ? "先在团队与权限中登记仓库，再开始创建 RFC。" : "请管理员为你授予仓库贡献权限。"));
+    return wrapper;
+  }
+  wrapper.append(guidedSteps(1));
+  const form = element("form", {"data-draft-key": "create-rfc"});
+  const targetRepo = select("repo_id", eligible.map(repo => [repo.id, repo.name]), eligible[0].id, true);
+  const readiness = element("div", {}, repositoryReadiness(eligible[0]));
+  targetRepo.addEventListener("change", () => readiness.replaceChildren(repositoryReadiness(eligible.find(repo => repo.id === targetRepo.value))));
+  const body = element("textarea", {name: "body", placeholder: "可选：已有 RFC 正文。原始文本会被保留。", rows: 7});
+  const submit = element("button", {type: "submit", class: "primary"}, "生成 RFC 草稿");
+  form.append(element("div", {class: "form-grid"}, field("目标仓库", targetRepo, "仅显示你有权限贡献的仓库。", true),
+    field("RFC 标题", input("title", "例如：为模型服务增加可追踪的验收流程", "", "text", true), "用一句话描述具体变化。", true),
+    field("问题与期望结果", element("textarea", {name: "goal", rows: 5, placeholder: "谁遇到了什么问题？完成后应该有哪些可观察的变化？"}), "草稿会保留未知问题，供评审时补充。", true),
+    field("自动追踪范围", input("scope", "例如：调度、流式返回、延迟验证"), "自动关联限定在这个范围；模糊关联进入建议列表。", true),
+    field("已有正文", body, "支持 Markdown；原文完整保留。", true)), readiness, element("div", {class: "actions"}, submit));
+  const preview = element("div", {class: "preview-placeholder"}, "你的方案预览会出现在这里。\n先描述问题、目标和范围。");
+  const right = panel("方案预览", preview, "草稿保存在工作空间；发布需要你的明确操作。");
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    busy(submit, async () => {
+      const data = formData(form);
+      if (!data.body.trim()) delete data.body;
+      const result = await action("rfcs.draft", data);
+      preview.replaceChildren();
+      preview.className = "stack";
+      preview.append(element("h3", {}, result.title), markdownBody(result.body),
+        element("div", {class: "status-row"}, badge("draft"), "已保存 · 尚未发布"),
+        element("a", {href: `#rfc/${encodeURIComponent(result.id)}`, class: "primary"}, "审阅并打开工作台 →"));
+      form.dispatchEvent(new CustomEvent("draft-saved", {bubbles: true}));
+      viewDirty = false;
+      notice("RFC 草稿已保存。请检查方案和验收条件。");
+    });
+  });
+  wrapper.append(element("div", {class: "draft-layout"}, panel("描述你的想法", form), right));
+  return wrapper;
+}
+
+function importView() {
+  const wrapper = element("div");
+  wrapper.append(heading("保留原文，接入进展追踪", "先读取并预览已有 RFC，再明确纳管。GitHub、AtomGit 和本地 Markdown 均可接入。"));
+  const eligible = repositories.filter((repo) => principal.admin || repo.role === "maintainer");
+  if (!eligible.length) {
+    wrapper.append(empty("需要仓库维护权限", "请管理员为你授予对应仓库的 maintainer 权限。"));
+    return wrapper;
+  }
+  wrapper.append(guidedSteps(1));
+  const form = element("form", {class: "stack", "data-draft-key": "import-rfc"});
+  const repository = select("repo_id", eligible.map((repo) => [repo.id, repo.name]), eligible[0].id);
+  const kind = select("kind", [["issue", "Issue / RFC"], ["pr", "Pull Request"], ["file", "Markdown 文件"]]);
+  const identifier = input("identifier", "GitHub 编号或 AtomGit 字符串 ID");
+  const path = input("path", "相对仓库根目录的文件路径，例如 doc/RFC.md");
+  const url = input("url", "可选：已有 RFC 的 HTTPS 链接");
+  const readiness = element("div", {}, repositoryReadiness(eligible[0]));
+  const scope = input("scope", "限定自动发现的关键词、功能或标签");
+  const auto = element("input", {type: "checkbox", name: "auto_add"}); auto.checked = true;
+  const submit = element("button", {type: "submit", class: "primary"}, "读取来源并预览");
+  form.append(field("目标仓库", repository), field("来源类型", kind), field("来源编号", identifier), field("来源链接", url), field("本地文件", path), field("追踪范围", scope,
+    "原始正文保持完整，进展和关联保存在独立追踪记录中。"), readiness, element("label", {class: "check-label"}, auto, "在范围内自动关联明确的实现证据"), submit);
+  const preview = element("div", {class: "preview-placeholder"}, "读取已有 RFC 后，在这里核对原始内容。\n预览不会修改来源。");
+  let reviewed = null;
+  let saved = null;
+  function sourceFields() {
+    const repo = eligible.find((value) => value.id === repository.value);
+    const local = repo.provider === "local";
+    if (local) kind.value = "file";
+    else if (kind.value === "file") kind.value = "issue";
+    kind.disabled = local;
+    path.disabled = !local; identifier.disabled = local; url.disabled = local;
+  }
+  repository.addEventListener("change", () => { sourceFields(); readiness.replaceChildren(repositoryReadiness(eligible.find(repo => repo.id === repository.value))); }); sourceFields();
+  form.addEventListener("input", () => { reviewed = null; saved = null; preview.replaceChildren("来源或范围已调整，请重新预览。"); preview.className = "preview-placeholder"; });
+  form.addEventListener("change", () => { reviewed = null; saved = null; preview.replaceChildren("来源或范围已调整，请重新预览。"); preview.className = "preview-placeholder"; });
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    busy(submit, async () => {
+      const repo = eligible.find((value) => value.id === repository.value);
+      const source = {provider: repo.provider, repository: repo.external_name || repo.name, kind: kind.value};
+      if (repo.provider === "local") source.path = path.value.trim();
+      else {
+        source.identifier = identifier.value.trim();
+        if (url.value.trim()) {
+          let parsed;
+          try { parsed = new URL(url.value.trim()); } catch { throw new Error("请输入完整的 HTTPS 来源链接。"); }
+          if (parsed.protocol !== "https:") throw new Error("来源链接需要使用 HTTPS。");
+          source.url = parsed.href; source.host = parsed.hostname;
+          if (!source.identifier) source.identifier = decodeURIComponent(parsed.pathname.split("/").filter(Boolean).at(-1) || "");
+        }
+      }
+      reviewed = await action("sources.preview", {repo_id: repo.id, source});
+      const enroll = button("明确纳管这个 RFC", async () => {
+        if (!reviewed) throw new Error("来源已调整，请重新预览。");
+        if (!await askConfirm("确认纳管当前预览的 RFC，并按指定范围追踪实现进展？")) return;
+        if (!saved) saved = await action("rfcs.draft", {repo_id: repo.id, title: reviewed.title || "导入的 RFC", body: reviewed.body, source: reviewed.source,
+          scope: scope.value, auto_add: auto.checked});
+        await operationNotice(await action("rfcs.enroll", {rfc_id: saved.id, content_digest: saved.content_digest, expected_revision: saved.revision,
+          idempotency_key: crypto.randomUUID()}));
+        location.hash = `rfc/${encodeURIComponent(saved.id)}`;
+      }, "primary");
+      preview.className = "stack";
+      preview.replaceChildren(...[element("h3", {}, reviewed.title || "已有 RFC"), safeLink(reviewed.source?.url), markdownBody(reviewed.body, reviewed.source?.url),
+        element("p", {class: "small muted"}, "纳管前会再次核对来源，期间发生的修改需要重新预览。"), enroll].filter(Boolean));
+    });
+  });
+  wrapper.append(element("div", {class: "draft-layout"}, panel("选择已有来源", form), panel("原文预览", preview)));
+  return wrapper;
+}
+
+async function operationNotice(result) {
+  const operation = result.operation || result;
+  const id = result.operation_id || operation.id;
+  if (!id) { notice("操作已完成。"); return; }
+  notice(`操作已进入队列：${id}。可在操作记录中查看结果。`);
+}
+function graphTooltip(feature) {
+  const manual = feature.implementation_override ? `\n${localizeText("人工记录")}：${feature.implementation_override.reason}` : "";
+  const counts = feature.counts ? `\n${feature.counts.implemented} / ${feature.counts.total} ${localizeText("实现已落地")}` : "";
+  return `${localizeText(feature.title)}\n${localizeText("实现")}：${localizeText(translated(feature.implementation || feature.state))}\n${localizeText("验收")}：${localizeText(translated(feature.acceptance))}\n${localizeText("负责人")}：${feature.owner || localizeText("待认领")}${manual}${counts}`;
+}
+function updateGraphNodes(graphs) {
+  for (const entry of graphs.entries) {
+    const model = graphs.models[entry.index];
+    model.nodes.forEach((node, index) => {
+      const group = entry.groups[index];
+      if (!group || !node.feature) return;
+      const feature = node.feature;
+      const state = feature.complete ? "accepted" : feature.implementation || feature.state || "planned";
+      const signature = JSON.stringify([currentLanguage(), feature.title, state, feature.acceptance, feature.owner, feature.implementation_override, feature.counts]);
+      if (group.getAttribute("data-live-view") === signature) return;
+      group.setAttribute("data-live-view", signature);
+      group.classList.remove("planned", "accepted", "implemented", "partial", "in_progress", "blocked");
+      group.classList.add(["accepted", "implemented", "partial", "in_progress", "blocked"].includes(state) ? state : "planned");
+      for (const span of group.querySelectorAll("text .text-outer-tspan")) {
+        if (span.textContent.includes("实现进度待更新")) span.setAttribute("data-graph-meta", "state");
+        if (span.textContent.includes("负责人：等待工作认领")) span.setAttribute("data-graph-meta", "owner");
+        if (span.getAttribute("data-graph-meta") === "state") span.textContent = node.group
+          ? `${feature.counts.implemented} / ${feature.counts.total} ${localizeText("实现已落地")} · ${localizeText("验收")}：${localizeText(translated(feature.acceptance || "pending"))}`
+          : `${localizeText(state === "accepted" ? "已验收" : translated(state))} · ${localizeText("验收")}：${localizeText(translated(feature.acceptance || "pending"))}`;
+        if (span.getAttribute("data-graph-meta") === "owner") {
+          const owner = feature.owner || "待认领";
+          span.textContent = `${localizeText("负责人")}：${feature.owner || localizeText("待认领")}`;
+          const width = owner.length > 20 ? (group.querySelector("rect")?.getBBox().width || 300) : Infinity;
+          while (owner.length > 20 && span.getComputedTextLength() > width - 26 && span.textContent.length > 8) span.textContent = span.textContent.slice(0, -2) + "…";
+        }
+      }
+      group.querySelector("title").textContent = graphTooltip(feature);
+    });
+  }
+  updateGraphSelection(graphs);
+  if (activeWorkspace?.rfc.id === graphs.rfc.id) activeWorkspace.drawFilters?.();
+}
+function updateGraphSelection(graphs) {
+  if (graphSelectionRFC !== graphs.rfc.id) {
+    selectedGraphIDs.clear(); graphSelectionRFC = graphs.rfc.id;
+    for (const id of workspaceState(graphs.rfc.id).selection || []) selectedGraphIDs.add(id);
+  }
+  const writable = canWrite(graphs.rfc);
+  const eligible = new Set(graphs.models.flatMap(model => model.nodes.filter(node => node.feature && !node.group).map(node => node.id)));
+  for (const id of selectedGraphIDs) if (!writable || !eligible.has(id)) selectedGraphIDs.delete(id);
+  workspaceState(graphs.rfc.id).selection = [...selectedGraphIDs];
+  for (const entry of graphs.entries) for (const group of entry.groups.filter(Boolean)) {
+    const id = group.getAttribute("data-feature-id"), selectable = writable && eligible.has(id);
+    group.classList.toggle("roadmap-selected", selectable && selectedGraphIDs.has(id));
+    if (selectable) group.setAttribute("aria-pressed", String(selectedGraphIDs.has(id)));
+    else group.removeAttribute("aria-pressed");
+  }
+  for (const control of graphs.mergeControls) {
+    control.merge.closest(".workspace-selection")?.classList.toggle("has-selection", selectedGraphIDs.size > 0);
+    control.merge.hidden = !writable;
+    control.merge.textContent = localizeText(selectedGraphIDs.size ? "合并选中节点" : "合并节点");
+    control.merge.disabled = selectedGraphIDs.size === 1;
+    control.count.hidden = !writable || !selectedGraphIDs.size;
+    control.count.textContent = localizeText(`已选择 ${selectedGraphIDs.size} 项`);
+    control.clear.hidden = !writable || !selectedGraphIDs.size;
+  }
+  if (activeWorkspace?.rfc.id === graphs.rfc.id) for (const box of activeWorkspace.work.querySelectorAll("input[data-select-feature]")) box.checked = selectedGraphIDs.has(box.value);
+}
+function toggleGraphSelection(graphs, node) {
+  if (graphs !== activeGraphs || !graphs.wrapper.isConnected) return;
+  if (selectedGraphIDs.has(node.id)) selectedGraphIDs.delete(node.id);
+  else {
+    if (selectedGraphIDs.size >= 200) { notice("每次最多选择 200 个工作节点。"); return; }
+    selectedGraphIDs.add(node.id);
+  }
+  updateGraphSelection(graphs);
+}
+window.addEventListener("keydown", event => {
+  if (event.key === "Escape" && !featureDialog && !activeEditor?.dialog.open && activeGraphs?.wrapper.isConnected && selectedGraphIDs.size) {
+    selectedGraphIDs.clear(); updateGraphSelection(activeGraphs); event.preventDefault();
+  }
+});
+function enableGraphPanning(canvas) {
+  let drag = null;
+  canvas.addEventListener("pointerdown", event => {
+    if (!event.isPrimary || event.button !== 0 || event.target.closest(".roadmap-actionable,a,button")) return;
+    drag = {id: event.pointerId, x: event.clientX, y: event.clientY, left: canvas.scrollLeft, top: canvas.scrollTop};
+    canvas.setPointerCapture(event.pointerId);
+    canvas.classList.add("is-panning");
+    event.preventDefault();
+  });
+  canvas.addEventListener("pointermove", event => {
+    if (!drag || drag.id !== event.pointerId) return;
+    canvas.scrollLeft = drag.left + drag.x - event.clientX;
+    canvas.scrollTop = drag.top + drag.y - event.clientY;
+    event.preventDefault();
+  });
+  const stop = event => {
+    if (!drag || drag.id !== event.pointerId) return;
+    drag = null;
+    canvas.classList.remove("is-panning");
+    if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+  };
+  for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) canvas.addEventListener(type, stop);
+}
+function dependencyGraph(rfc) {
+  const models = graphModels(rfc);
+  for (const [index, model] of models.entries()) {
+    model.key = `${index}:${model.title}`;
+    model.title = localizeText(model.title);
+    for (const node of model.nodes) node.title = node.group ? `${localizeText(node.group.title)} (${node.members.length})` : localizeText(node.title);
+    for (const edge of model.edges) edge.label = localizeText(edge.label || "");
+  }
+  const sources = models.map(model => graphSource(model, translated, true));
+  const signature = JSON.stringify(models.map((model, index) => [model.title, sources[index]]));
+  if (activeGraphs?.rfc.id === rfc.id && activeGraphs.signature === signature && activeGraphs.entries.length === models.length) {
+    activeGraphs.rfc = rfc;
+    activeGraphs.models = models;
+    updateGraphNodes(activeGraphs);
+    return activeGraphs.wrapper;
+  }
+  if (!models.length) { selectedGraphIDs.clear(); return empty("没有依赖关系", "添加工作项后，依赖图会自动生成。"); }
+  const wrapper = element("div", {class: "roadmap-graphs"});
+  const previous = activeGraphs?.rfc.id === rfc.id ? activeGraphs : null;
+  const graphs = {rfc, models, signature, wrapper, entries: [], mergeControls: [], viewport: previous?.viewport || workspaceState(rfc.id).viewport};
+  activeGraphs = graphs;
+  for (const [modelIndex, model] of models.entries()) {
+    const canvas = element("div", {class: "graph roadmap-canvas"}, element("p", {class: "muted"}, "正在绘制路线图…"));
+    canvas.setAttribute("tabindex", "0");
+    canvas.setAttribute("aria-label", `${model.title}：拖动空白区域平移，点击节点查看详情`);
+    enableGraphPanning(canvas);
+    const controls = element("div", {class: "actions"});
+    const merge = button("合并节点", () => mergeGraphNodes(graphs.rfc, [...selectedGraphIDs]));
+    const count = element("span", {class: "graph-selection-count small", role: "status", hidden: true});
+    const clear = element("button", {type: "button", class: "quiet", hidden: true, onclick: () => { selectedGraphIDs.clear(); updateGraphSelection(graphs); }}, "清除选择");
+    graphs.mergeControls.push({merge, count, clear});
+    merge.dataset.selectionControl = ""; count.dataset.selectionControl = ""; clear.dataset.selectionControl = "";
+    controls.append(merge, count, clear);
+    updateGraphSelection(graphs);
+    const legend = element("div", {class: "graph-legend"}, ...["planned", "in_progress", "partial", "implemented", "accepted"].map(state => element("span", {class: `graph-key ${state}`}, state === "accepted" ? "已验收" : translated(state))));
+    const section = element("section", {class: "roadmap-track"}, element("div", {class: "panel-title"}, element("h3", {}, model.title), controls), legend, canvas);
+    wrapper.append(section);
+    if (!mermaidPromise) mermaidPromise = import("/roadmap-mermaid.js").then(({default: mermaid}) => {
+      mermaid.initialize({startOnLoad: false, securityLevel: "strict", theme: "base", htmlLabels: false, suppressErrorRendering: true,
+        flowchart: {htmlLabels: false, useMaxWidth: false, wrappingWidth: 320}, themeVariables: {fontFamily: "system-ui,sans-serif", fontSize: "15px", lineColor: "#94a3b8"}});
+      return mermaid;
+    }).catch(error => { mermaidPromise = null; throw error; });
+    const serial = ++graphSerial;
+    mermaidPromise.then(async mermaid => {
+      if (!canvas.isConnected) return;
+      const {svg} = await mermaid.render(`rfc-graph-${serial}`, sources[modelIndex]);
+      if (!canvas.isConnected) return;
+      const parsed = new DOMParser().parseFromString(svg, "text/html");
+      const drawing = document.importNode(parsed.querySelector("svg"), true);
+      // All styling is in our same-origin stylesheet, preserving the strict CSP.
+      drawing.querySelectorAll("style,script,foreignObject").forEach(node => node.remove());
+      for (const node of [drawing, ...drawing.querySelectorAll("*")]) {
+        node.removeAttribute("style");
+        for (const attribute of [...node.attributes]) if (attribute.name.toLowerCase().startsWith("on")) node.removeAttribute(attribute.name);
+      }
+      drawing.setAttribute("role", "group");
+      drawing.setAttribute("aria-label", `${model.title}：点击工作节点查看详情和操作`);
+      const width = drawing.viewBox.baseVal.width;
+      drawing.dataset.baseWidth = String(width);
+      canvas.dataset.graphScale ||= "1";
+      drawing.setAttribute("width", String(width * Number(canvas.dataset.graphScale)));
+      drawing.removeAttribute("height");
+      canvas.replaceChildren(drawing);
+      const groups = [];
+      model.nodes.forEach((node, index) => {
+        const group = [...drawing.querySelectorAll("g.node")].find(candidate => candidate.id.startsWith(`flowchart-N${index}-`));
+        if (!group) return;
+        groups[index] = group;
+        group.setAttribute("role", "button");
+        group.setAttribute("tabindex", "0");
+        group.setAttribute("data-feature-id", node.feature && !node.group ? node.id : "");
+        group.setAttribute("data-group-id", node.group?.id || "");
+        group.setAttribute("aria-label", `${node.title}：${localizeText("查看")}${localizeText(node.feature ? "工作详情、关联 PR 和可用操作" : "关联工作")}`);
+        group.classList.add("roadmap-actionable");
+        const open = event => {
+          event.preventDefault();
+          if (event.repeat) return;
+          const current = graphs.models[modelIndex], target = current.nodes[index];
+          if ((event.ctrlKey || event.metaKey) && canWrite(graphs.rfc) && target.feature && !target.group) {
+            event.stopPropagation(); toggleGraphSelection(graphs, target); return;
+          }
+          graphDetails(graphs.rfc, target, current);
+        };
+        group.addEventListener("click", open);
+        group.addEventListener("keydown", event => { if (event.key === "Enter" || event.key === " ") open(event); });
+        const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+        title.textContent = node.feature ? graphTooltip(node.feature) : node.title;
+        group.prepend(title);
+      });
+      graphs.entries.push({index: modelIndex, groups});
+      updateGraphNodes(graphs);
+      restoreGraphViewport();
+      const zoom = delta => { const scale = Math.max(.4, Math.min(2.5, Number(canvas.dataset.graphScale || 1) + delta)); canvas.dataset.graphScale = String(scale); drawing.setAttribute("width", String(width * scale)); };
+      const minus = button("−", () => zoom(-.2)); minus.setAttribute("aria-label", `${model.title} 缩小`);
+      const plus = button("＋", () => zoom(.2)); plus.setAttribute("aria-label", `${model.title} 放大`);
+      controls.append(minus, plus, button("适应画布", () => { const scale = Math.max(.25, Math.min(1.5, (canvas.clientWidth - 40) / width)); canvas.dataset.graphScale = String(scale); drawing.setAttribute("width", String(width * scale)); canvas.scrollLeft = canvas.scrollTop = 0; }), button("重置", () => { canvas.dataset.graphScale = "1"; drawing.setAttribute("width", String(width)); canvas.scrollLeft = canvas.scrollTop = 0; }), button("下载 SVG", () => {
+        const exported = drawing.cloneNode(true);
+        const style = document.createElementNS("http://www.w3.org/2000/svg", "style");
+        style.textContent = roadmapSVGStyles;
+        exported.prepend(style);
+        // The downloaded artifact links to authorized tasks instead of inert callbacks.
+        for (const group of exported.querySelectorAll("[data-feature-id]")) {
+          const id = group.getAttribute("data-feature-id") || group.getAttribute("data-group-id");
+          group.removeAttribute("tabindex");
+          group.removeAttribute("aria-pressed");
+          group.classList.remove("roadmap-selected");
+          if (!id) continue;
+          const anchor = document.createElementNS("http://www.w3.org/2000/svg", "a");
+          anchor.setAttribute("href", `${location.origin}/roadmap#rfc/${encodeURIComponent(graphs.rfc.id)}?feature=${encodeURIComponent(id)}`);
+          anchor.setAttribute("target", "_blank");
+          group.replaceWith(anchor); anchor.append(group);
+        }
+        const url = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(exported)], {type: "image/svg+xml"}));
+        const anchor = element("a", {href: url, download: `${rfc.namespace || rfc.id}-${serial}.svg`});
+        anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }));
+    }).catch(error => {
+      if (!canvas.isConnected) return;
+      canvas.replaceChildren(element("p", {class: "error-panel"}, `图表暂时无法绘制：${error.message}。下方工作列表仍可操作。`));
+    });
+  }
+  return wrapper;
+}
+
+function rfcContent(rfc) {
+  const key = JSON.stringify([rfc.id, rfc.body, rfc.source?.url]);
+  if (activeContent?.key !== key) {
+    const projection = projectRFC(rfc.body || "", markdown);
+    const sections = new Map();
+    const visit = nodes => { for (const node of nodes) { sections.set(node.id, node); visit(node.children || []); } };
+    visit(projection.tree);
+    activeContent = {key, projection, sections, nodes: new Map()};
+  }
+  return activeContent;
+}
+
+function sourceSection(rfc, section, lazy = false, namespace = "page") {
+  const cache = rfcContent(rfc);
+  const key = `${namespace}:${section.id}:${lazy}`;
+  if (cache.nodes.has(key)) return cache.nodes.get(key);
+  const note = section.claim === "historical" ? "历史记录 · 来源陈述" : section.claim === "source" ? "来源陈述 · 验证结论见验收记录" : "";
+  const holder = element(lazy ? "details" : "section", {class: "source-section", "data-source-section": section.id, "data-source-start": section.startLine, "data-source-end": section.endLine});
+  const parent = cache.sections.get(section.parentId);
+  holder.append(element(lazy ? "summary" : "h3", {}, section.title || "说明", note ? element("span", {class: "badge amber"}, note) : null));
+  holder.append(button("讨论这一节", () => discussRFC(activeRFC?.id === rfc.id ? activeRFC : rfc, {section_id: section.id, title: section.title, start_line: section.startLine, end_line: section.endLine, ...(section.featureId ? {feature_id: section.featureId} : {})}), "quiet source-chat-action"));
+  if (parent && parent.level > 1) holder.append(element("span", {class: "source-context small muted"}, parent.title));
+  const draw = () => {
+    if (holder.querySelector(".rfc-component-body")) return;
+    const body = element("div", {class: "rfc-component-body"}, markdownBody(section.markdown, rfc.source?.url));
+    holder.append(body);
+  };
+  if (lazy) holder.addEventListener("toggle", () => { if (holder.open) draw(); });
+  else draw();
+  cache.nodes.set(key, holder);
+  return holder;
+}
+
+function componentSections(rfc, sections, placeholder, lazy = false, namespace = "page") {
+  const wrapper = element("div", {class: "component-sections"});
+  const nonempty = (sections || []).filter(section => section.markdown?.trim());
+  for (const section of nonempty) wrapper.append(sourceSection(rfc, section, lazy || section.markdown.length > 1800, namespace));
+  if (!nonempty.length) wrapper.append(element("p", {class: "muted small"}, placeholder));
+  return wrapper;
+}
+
+function inspectWork(id) {
+  const workspace = activeWorkspace;
+  if (!workspace) return;
+  for (const model of activeGraphs?.models || []) {
+    const node = graphTargetNode(model, id);
+    if (node) { graphDetails(workspace.rfc, node, model); return; }
+  }
+  const feature = workspace.rfc.features?.find(item => item.id === id);
+  if (feature) graphDetails(workspace.rfc, {id, title: feature.title, feature}, {nodes: [], edges: []});
+}
+function locateRFCItem(kind, id) {
+  if (kind !== "criterion" && id) { activeWorkspace?.activateTab("work"); inspectWork(id); return; }
+  activeWorkspace?.activateTab(kind === "criterion" ? "acceptance" : "work");
+  const target = id ? content.querySelector(`.criterion[data-criterion-id="${CSS.escape(id)}"]`) : content.querySelector("#rfc-acceptance");
+  target?.scrollIntoView({behavior: "smooth", block: "center"});
+  if (target) { target.setAttribute("tabindex", "-1"); target.focus({preventScroll: true}); }
+}
+
+function outcomePanel(rfc, projection) {
+  const outcome = outcomeModel(rfc, projection);
+  const result = element("section", {id: "rfc-outcome", class: "outcome-strip", "aria-label": "成果与下一步"});
+  const metric = (label, current, total, detail) => element("div", {class: "outcome-metric"}, element("span", {}, label), element("strong", {}, `${current} / ${total}`), element("small", {}, detail));
+  result.append(metric("实现已落地", outcome.implementation.implemented, outcome.implementation.total, "验收单独确认"),
+    metric("验收通过", outcome.acceptance.passed, outcome.acceptance.total, `${outcome.acceptance.failed} 项未通过 · ${outcome.acceptance.waived} 项已豁免`));
+  const next = element("div", {class: "outcome-next"}, element("h2", {}, "下一步"));
+  for (const item of outcome.next) next.append(button(item.title, () => locateRFCItem(item.criterionId ? "criterion" : "feature", item.criterionId || item.featureId || item.id), "text-action"));
+  if (!outcome.next.length) next.append(element("span", {class: "small muted"}, rfc.complete ? "当前工作与验收均已完成。" : "补充工作与验收条件。"));
+  result.append(next);
+  const more = element("details", {class: "outcome-more"}, element("summary", {}, "目标与已验证成果"));
+  const goals = (outcome.goals || []).flatMap(section => markdown.parse(displayMarkdown(section.markdown || ""), {}).filter(token => token.type === "inline").map(token => token.children?.map(child => child.content).join("") || token.content)).filter(Boolean);
+  const goalList = element("div", {class: "stack"}, element("h3", {}, "预期目标"));
+  for (const goal of goals.slice(0, 3)) goalList.append(button(localizeText(goal).slice(0, 220), () => activeWorkspace?.activateTab("goals"), "text-action"));
+  if (!goals.length) goalList.append(element("p", {class: "small muted"}, "尚未声明明确目标，请在 RFC 中补充。"));
+  const verified = element("div", {class: "outcome-evidence"}, element("h3", {}, "最近验证成果"));
+  for (const item of outcome.verified) verified.append(element("article", {}, button(item.title, () => locateRFCItem("criterion", item.criterionId), "text-action"), element("p", {class: "small muted"}, `版本 ${item.evidence.revision} · ${item.evidence.environment} · ${dateText(item.verifiedAt)}`)));
+  if (!outcome.verified.length) verified.append(element("p", {class: "small muted"}, "暂无带有效验证证据的已验收成果。"));
+  more.append(element("div", {class: "outcome-grid"}, goalList, verified)); result.append(more);
+  return result;
+}
+
+function openRFCEditor(rfc) {
+  if (!canWrite(rfc) || ((rfc.enrolled || Object.keys(rfc.source || {}).length) && !canPublish(rfc))) return;
+  if (activeEditor?.id !== rfc.id) { closeRFCEditor(); activeEditor = editorDrafts.get(rfc.id) || null; }
+  if (activeEditor && !activeEditor.dirty && (activeEditor.body !== rfc.body || activeEditor.title !== rfc.title)) closeRFCEditor(true);
+  if (!activeEditor) {
+    const dialog = element("dialog", {class: "rfc-editor", "aria-label": "编辑 RFC"});
+    const form = element("form", {class: "stack", "data-draft-key": `editor:${rfc.id}`});
+    const saveError = element("p", {class: "form-error", role: "alert", hidden: true});
+    form.append(field("标题", input("title", "RFC 标题", rfc.title || "", "text", true)), field("RFC 正文", element("textarea", {name: "body", rows: 18}, rfc.body || "")),
+      field("修改原因", input("reason", "说明方案变更及需要重新验证的部分", "", "text", rfc.enrolled)), saveError, element("button", {type: "submit", class: "primary"}, "保存新版本"));
+    const state = {id: rfc.id, body: rfc.body, title: rfc.title, revision: rfc.revision, dirty: false, dialog};
+    activeEditor = state;
+    editorDrafts.set(rfc.id, state);
+    const chatHolder = element("div", {class: "chat-editor-mount"});
+    state.chatHolder = chatHolder;
+    dialog.append(element("div", {class: "panel-title"}, element("h2", {}, "编辑 RFC"), element("div", {class: "actions"}, button("与助手讨论", () => chat.open()), button("关闭编辑器", () => closeRFCEditor()))), element("p", {class: "small muted"}, "编辑保留完整源文档；页面展示由其内容组件生成。关闭窗口会保留未提交输入。"), element("div", {class: "editor-chat-layout"}, form, chatHolder));
+    dialog.addEventListener("close", () => { if (chat.root.closest("dialog") === dialog) returnChatMount(); });
+    const markDirty = () => { state.dirty = true; viewDirty = true; chat.refresh(); };
+    form.addEventListener("input", markDirty); form.addEventListener("change", markDirty);
+    form.addEventListener("submit", event => {
+      event.preventDefault();
+      busy(form.querySelector("button[type=submit]"), async () => {
+        const current = activeRFC?.id === state.id ? activeRFC : rfc;
+        const revision = current.body === state.body && current.title === state.title ? current.revision : state.revision;
+        saveError.hidden = true;
+        const values = formData(form), draft = {title: values.title.trim(), body: values.body};
+        const sourceBacked = Boolean(current.enrolled || Object.keys(current.source || {}).length);
+        try {
+          if (sourceBacked) {
+            const preview = await action("rfcs.changes.preview", {...draft, reason: values.reason, rfc_id: state.id, expected_revision: revision});
+            const key = crypto.randomUUID(), previewDraft = draftDigest(draft.title, draft.body);
+            const extra = element("div", {class: "review-content"}, element("p", {class: "small muted", "data-no-translate": ""}, `${preview.write_target?.provider || "workspace"} · ${preview.write_target?.repository || repoName(current.repo_id)}${preview.write_target?.url ? ` · ${preview.write_target.url}` : ""}`),
+              preview.source_conflict ? element("p", {class: "warning"}, "来源已有变化；请逐项核对当前来源与候选版本，再确认写回。") : null,
+              element("h3", {}, "正文变更"), renderDiff(preview.diff),
+              preview.plan_changes?.length ? element("details", {}, element("summary", {}, "工作计划变更"), element("pre", {class: "spec", "data-no-translate": ""}, JSON.stringify(preview.plan_changes, null, 2))) : null,
+              preview.source_diff ? element("details", {}, element("summary", {}, "与当前来源比较"), renderDiff(preview.source_diff)) : null);
+            await actionDialog({title: "审阅 RFC 变更", description: "确认后保存完整候选版本并排队同步来源。", extra, className: "wide-review", submitLabel: "应用并同步来源", onSubmit: async () => {
+              const latestDraft = formData(form);
+              if (draftDigest(latestDraft.title.trim(), latestDraft.body) !== previewDraft) throw new Error(localizeText("草稿已改变，请重新预览变更。"));
+              const result = await action("rfcs.changes.apply", {rfc_id: state.id, preview_id: preview.preview_id, candidate_digest: preview.candidate_digest, idempotency_key: key, reason: values.reason});
+              state.dirty = false; form.dispatchEvent(new CustomEvent("draft-saved", {bubbles: true})); closeRFCEditor(true); notice("新版本已保存，来源同步已排队。"); await applyRFCResult(result);
+            }});
+          } else {
+            const result = await action("rfcs.update", {...values, ...draft, rfc_id: state.id, expected_revision: revision});
+            state.dirty = false; form.dispatchEvent(new CustomEvent("draft-saved", {bubbles: true})); closeRFCEditor(true); notice("新版本已保存。"); await applyRFCResult(result);
+          }
+        } catch (error) { saveError.textContent = error.message; saveError.hidden = false; throw error; }
+      });
+    });
+    document.body.append(dialog);
+  }
+  chat.context(rfc);
+  chat.mount(activeEditor.chatHolder);
+  activeEditor.dialog.showModal();
+  restoreDrafts(activeEditor.dialog);
+  activeEditor.dialog.querySelector("input")?.focus();
+}
+
+function sourceUpdateStatus(rfc) {
+  const update = rfc.source_update;
+  const holder = element("div", {id: "rfc-source-update", role: "status", class: "source-save-status"});
+  const state = update?.status || (Object.keys(rfc.source || {}).length ? "synced" : "saved");
+  const message = {saved: "已保存到工作空间", pending: "已保存 · 等待同步来源", synced: "已同步来源", conflict: "已保存 · 来源冲突", failed: "已保存 · 来源同步失败", uncertain: "已保存 · 来源结果待核对", review_required: "已有本地编辑 · 等待审阅"}[state] || "来源状态待核对";
+  holder.classList.toggle("needs-attention", ["conflict", "failed", "uncertain", "review_required"].includes(state));
+  holder.append(element("span", {class: "save-status-label"}, message));
+  if (update?.error) holder.append(element("span", {class: "small muted", "data-no-translate": ""}, update.error));
+  if (canPublish(rfc) && ["conflict", "review_required"].includes(state)) holder.append(button("比较并审阅", () => openRFCEditor(activeRFC?.id === rfc.id ? activeRFC : rfc), "quiet"));
+  if (canPublish(rfc) && update?.can_retry && update.operation_id) holder.append(button("核对并重试", () => actionDialog({title: "核对并重试来源更新", description: "先核对远端结果，保留当前候选版本，避免重复写入。", submitLabel: "核对并重试", onSubmit: async () => {
+    await action("operations.retry", {operation_id: update.operation_id}); notice("来源更新已重新排队。");
+    if (activeRFC?.id === rfc.id) await applyRFCResult(await getRFC(rfc.id));
+  }}), "quiet"));
+  return holder;
+}
+
+function detailView(rfc) {
+  const preference = new URLSearchParams(location.hash.split("?")[1] || "").get("workspace") || new URLSearchParams(location.search).get("workspace");
+  return preference !== "classic" && (workspaceV2 || preference === "daily") ? detailViewWorkspace(rfc) : detailViewClassic(rfc);
+}
+function detailViewClassic(rfc) {
+  activeRFC = rfc; activeWorkspace = null; chat.setDefaultMount?.(null);
+  setTranslations(rfc.translations);
+  const wrapper = element("div");
+  const source = rfc.source || {};
+  const fresh = rfc.freshness || {};
+  const projection = rfcContent(rfc).projection;
+  if (activeEditor?.id === rfc.id && (!canWrite(rfc) || ((rfc.enrolled || Object.keys(rfc.source || {}).length) && !canPublish(rfc)))) closeRFCEditor(true);
+  const actions = element("div", {class: "actions"}, button("刷新", route), button("讨论 RFC", () => discussRFC(activeRFC)));
+  const sourceLink = safeLink(source.url);
+  if (sourceLink) actions.append(sourceLink);
+  if (canWrite(rfc) && ((!rfc.enrolled && !Object.keys(rfc.source || {}).length) || canPublish(rfc))) actions.append(button("编辑 RFC", () => openRFCEditor(activeRFC)));
+  if (canPublish(rfc) && rfc.enrolled) actions.append(button("同步来源", async () => { await operationNotice(await action("rfcs.sync", {rfc_id: rfc.id})); await route(); }));
+  actions.append(button("导出", async () => {
+    const data = await api(`/api/v1/rfcs/${encodeURIComponent(rfc.id)}/export`);
+    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], {type: "application/json"}));
+    const link = element("a", {href: url, download: `rfc-${rfc.id}.json`});
+    link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }));
+  wrapper.append(heading(rfc.title || "未命名 RFC", `${repoName(rfc.repo_id)} · ${rfc.id}`, actions));
+  const translation = rfc.translations;
+  if (translation?.enabled && (translation.pending || translation.failed)) wrapper.append(element("p", {class: "translation-status small muted", role: "status"},
+    element("span", {}, "翻译同步中"), `：${translation.ready}/${translation.total} · `,
+    element("span", {}, "未完成内容暂时显示原文。"), translation.failed ? element("span", {}, `${translation.failed} `, element("span", {}, "项稍后重试。")) : null));
+  if (rfc.sync_status === "requires_reauthorization") {
+    const warning = element("div", {class: "warning"}, "自动追踪已暂停：原授权已失效，需要维护者重新授权后才能继续同步。 ");
+    if (canPublish(rfc)) warning.append(button("重新授权追踪", async () => {
+      if (!await askConfirm("确认使用当前个人授权，继续追踪这个 RFC？")) return;
+      await operationNotice(await action("rfcs.enroll", {rfc_id: rfc.id, content_digest: rfc.content_digest, expected_revision: rfc.revision})); await route();
+    }));
+    wrapper.append(warning);
+  } else if (rfc.sync_status === "different_writer") {
+    wrapper.append(element("div", {class: "warning"}, "这个 RFC 由另一个工作空间维护。当前工作空间可以查看记录；请在负责维护的工作空间进行同步。"));
+  }
+  if (fresh.state === "stale" || fresh.error || fresh.stale) wrapper.append(element("div", {class: "warning"}, "来源状态尚未确认，请谨慎使用当前进展。", fresh.error ? ` ${readable(fresh.error)}` : ""));
+  const navigation = element("nav", {class: "rfc-section-nav", "aria-label": "RFC 内容分区"});
+  for (const [id, title] of [["outcome", "成果"], ["goals", "目标与范围"], ["work", "路线图与工作"], ["design", "方案与设计"], ["acceptance", "验收与证据"], ["references", "风险与参考"]]) {
+    navigation.append(button(title, () => content.querySelector(`#rfc-${id}`)?.scrollIntoView({behavior: "smooth", block: "start"}), "quiet"));
+  }
+  wrapper.append(navigation, outcomePanel(rfc, projection));
+  const publish = element("div", {class: "actions"});
+  if (canPublish(rfc) && !source.provider && !rfc.published) publish.append(button("明确发布并纳管", async () => {
+    if (!await askConfirm("确认把当前预览内容发布到所选仓库，并启用进展追踪？")) return;
+    const result = await action("rfcs.publish", {rfc_id: rfc.id, content_digest: rfc.content_digest, expected_revision: rfc.revision, post: true, idempotency_key: crypto.randomUUID()});
+    await operationNotice(result); await route();
+  }, "primary"));
+  if (canPublish(rfc) && source.provider && !rfc.enrolled) publish.append(button("启用进展追踪", async () => {
+    if (!await askConfirm("确认纳管这个 RFC，并在设定范围内自动关联实现证据？")) return;
+    await operationNotice(await action("rfcs.enroll", {rfc_id: rfc.id, content_digest: rfc.content_digest, expected_revision: rfc.revision})); await route();
+  }));
+  const metadata = element("div", {class: "status-row"}, safeLink(source.url), element("span", {}, `版本 ${String(rfc.revision || 1).slice(0, 10)}`), element("span", {}, `最后核验：${dateText(fresh.verification || fresh.last_verified_at || fresh.last_verified || fresh.checked_at)}`));
+  wrapper.append(sourceUpdateStatus(rfc));
+  const goals = panel("目标与范围", element("div", {class: "stack"}, metadata,
+    componentSections(rfc, [...projection.overview, ...projection.goals, ...projection.scope], "尚未声明问题、目标和范围。"), publish));
+  goals.id = "rfc-goals";
+  const work = element("section", {id: "rfc-work", class: "rfc-workspace"}, panel("交互路线图", dependencyGraph(rfc), "拖动空白区域平移；点击节点查看工作与证据。Ctrl/⌘ + 点击可多选工作节点后合并。实现与验收分别显示。"), workPanel(rfc));
+  const design = panel("方案与设计", componentSections(rfc, projection.design, "尚未补充方案与设计。", true));
+  design.id = "rfc-design";
+  const acceptance = element("section", {id: "rfc-acceptance", class: "rfc-workspace"}, element("div", {class: "split"}, criteriaPanel(rfc), element("div", {}, suggestionsPanel(rfc), canPublish(rfc) ? decisionPanel(rfc) : null)));
+  if (projection.acceptance?.length) acceptance.append(panel("验收说明", componentSections(rfc, projection.acceptance, "", true)));
+  const references = panel("风险与参考", element("div", {class: "stack"},
+    componentSections(rfc, [...projection.risks, ...projection.references], "尚未补充风险与参考资料。", true),
+    element("h3", {}, "补充资料与历史记录"), componentSections(rfc, projection.supplement, "暂无补充资料。", true)));
+  references.id = "rfc-references";
+  wrapper.append(goals, work, design, acceptance, references);
+  if (principal.admin) wrapper.append(rfcAccessPanel(rfc));
+  refreshCurrent = async () => {
+    const latest = await getRFC(rfc.id);
+    if (viewDirty || featureDialog || activeEditor?.dialog.open || busyOperations) return;
+    if (location.hash.startsWith(`#rfc/${encodeURIComponent(rfc.id)}`) && JSON.stringify(latest) !== JSON.stringify(activeRFC)) await applyRFCResult(latest);
+  };
+  return wrapper;
+}
+
+function detailViewWorkspace(rfc) {
+  activeRFC = rfc;
+  setTranslations(rfc.translations);
+  const wrapper = element("div");
+  const source = rfc.source || {};
+  const fresh = rfc.freshness || {};
+  const projection = rfcContent(rfc).projection;
+  if (activeEditor?.id === rfc.id && (!canWrite(rfc) || ((rfc.enrolled || Object.keys(rfc.source || {}).length) && !canPublish(rfc)))) closeRFCEditor(true);
+  const actions = element("div", {class: "actions"}, button("刷新", route), button("讨论 RFC", () => discussRFC(activeRFC)));
+  const sourceLink = safeLink(source.url);
+  if (sourceLink) actions.append(sourceLink);
+  if (canWrite(rfc) && ((!rfc.enrolled && !Object.keys(rfc.source || {}).length) || canPublish(rfc))) actions.append(button("编辑 RFC", () => openRFCEditor(activeRFC)));
+  if (canPublish(rfc) && rfc.enrolled) actions.append(button("同步来源", async () => { await operationNotice(await action("rfcs.sync", {rfc_id: rfc.id})); await route(); }));
+  actions.append(button("导出", async () => {
+    const data = await api(`/api/v1/rfcs/${encodeURIComponent(rfc.id)}/export`);
+    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], {type: "application/json"}));
+    const link = element("a", {href: url, download: `rfc-${rfc.id}.json`});
+    link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }));
+  wrapper.append(heading(rfc.title || "未命名 RFC", `${repoName(rfc.repo_id)} · ${localizeText(trackingLabel(rfc))}`, actions));
+  const translation = rfc.translations;
+  if (translation?.enabled && (translation.pending || translation.failed)) wrapper.append(element("p", {class: "translation-status small muted", role: "status"},
+    element("span", {}, "翻译同步中"), `：${translation.ready}/${translation.total} · `,
+    element("span", {}, "未完成内容暂时显示原文。"), translation.failed ? element("span", {}, `${translation.failed} `, element("span", {}, "项稍后重试。")) : null));
+  if (rfc.sync_status === "requires_reauthorization") {
+    const warning = element("div", {class: "warning"}, "自动追踪已暂停：原授权已失效，需要维护者重新授权后才能继续同步。 ");
+    if (canPublish(rfc)) warning.append(button("重新授权追踪", async () => {
+      if (!await askConfirm("确认使用当前个人授权，继续追踪这个 RFC？")) return;
+      await operationNotice(await action("rfcs.enroll", {rfc_id: rfc.id, content_digest: rfc.content_digest, expected_revision: rfc.revision})); await route();
+    }));
+    wrapper.append(warning);
+  } else if (rfc.sync_status === "different_writer") {
+    wrapper.append(element("div", {class: "warning"}, "这个 RFC 由另一个工作空间维护。当前工作空间可以查看记录；请在负责维护的工作空间进行同步。"));
+  }
+  if (fresh.state === "stale" || fresh.error || fresh.stale) wrapper.append(element("div", {class: "warning"}, "来源状态尚未确认，请谨慎使用当前进展。", fresh.error ? ` ${readable(fresh.error)}` : ""));
+  wrapper.className = "daily-rfc";
+  wrapper.append(outcomePanel(rfc, projection));
+  const publish = element("div", {class: "actions"});
+  if (canPublish(rfc) && !source.provider && !rfc.published) publish.append(button("明确发布并纳管", async () => {
+    if (!await askConfirm("确认把当前预览内容发布到所选仓库，并启用进展追踪？")) return;
+    const result = await action("rfcs.publish", {rfc_id: rfc.id, content_digest: rfc.content_digest, expected_revision: rfc.revision, post: true, idempotency_key: crypto.randomUUID()});
+    await operationNotice(result); await route();
+  }, "primary"));
+  if (canPublish(rfc) && source.provider && !rfc.enrolled) publish.append(button("启用进展追踪", async () => {
+    if (!await askConfirm("确认纳管这个 RFC，并在设定范围内自动关联实现证据？")) return;
+    await operationNotice(await action("rfcs.enroll", {rfc_id: rfc.id, content_digest: rfc.content_digest, expected_revision: rfc.revision})); await route();
+  }));
+  const metadata = element("div", {class: "status-row"}, safeLink(source.url), element("span", {}, `版本 ${String(rfc.revision || 1).slice(0, 10)}`), element("span", {}, `最后核验：${dateText(fresh.verification || fresh.last_verified_at || fresh.last_verified || fresh.checked_at)}`));
+  wrapper.append(sourceUpdateStatus(rfc));
+  const goals = panel("目标与范围", element("div", {class: "stack"}, metadata,
+    componentSections(rfc, [...projection.overview, ...projection.goals, ...projection.scope], "尚未声明问题、目标和范围。"), publish));
+  goals.id = "rfc-goals";
+  const work = element("section", {id: "rfc-work", class: "rfc-workbench"});
+  const design = panel("方案与设计", componentSections(rfc, projection.design, "尚未补充方案与设计。", true));
+  design.id = "rfc-design";
+  const acceptance = element("section", {id: "rfc-acceptance"}, criteriaPanel(rfc), suggestionsPanel(rfc), canPublish(rfc) ? decisionPanel(rfc) : null);
+  if (projection.acceptance?.length) acceptance.append(panel("验收说明", componentSections(rfc, projection.acceptance, "", true)));
+  const references = panel("风险与参考", element("div", {class: "stack"},
+    componentSections(rfc, [...projection.risks, ...projection.references], "尚未补充风险与参考资料。", true),
+    element("h3", {}, "补充资料与历史记录"), componentSections(rfc, projection.supplement, "暂无补充资料。", true)));
+  references.id = "rfc-references";
+  const inspector = element("div", {class: "workspace-inspector", id: "workspace-inspector"});
+  const agentMount = element("div", {class: "workspace-agent", id: "workspace-agent"});
+  const state = workspaceState(rfc.id);
+  const side = element("aside", {class: "workspace-side", "aria-label": "工作详情与 Agent"});
+  const detailTab = element("button", {type: "button", role: "tab", onclick: () => { state.side = "details"; state.collapsed = false; workspace.updateSide(); }}, "详情");
+  const agentTab = element("button", {type: "button", role: "tab", onclick: () => { state.side = "agent"; state.collapsed = false; workspace.updateSide(); chat.open(); }}, "Agent");
+  side.append(element("div", {class: "workspace-side-tabs", role: "tablist"}, detailTab, agentTab, element("button", {type: "button", class: "quiet", "aria-label": "收起面板", onclick: () => { state.collapsed = true; workspace.updateSide(); }}, "×")), inspector, agentMount);
+  const navigation = element("nav", {class: "workspace-tabs", role: "tablist", "aria-label": "RFC 内容分区"});
+  const stage = element("div", {class: "workspace-stage"});
+  const layout = element("div", {class: "daily-workspace"}, stage, side);
+  const sections = new Map([["work", work], ["goals", goals], ["design", design], ["acceptance", acceptance], ["references", references]]);
+  if (principal.admin) sections.set("access", rfcAccessPanel(rfc));
+  const workspace = {rfc, state, side, inspector, agentMount, work,
+    activateTab(key) {
+      state.tab = sections.has(key) ? key : "work";
+      for (const [id, section] of sections) section.hidden = id !== state.tab;
+      for (const control of navigation.querySelectorAll("[data-workspace-tab]")) control.setAttribute("aria-selected", String(control.dataset.workspaceTab === state.tab));
+    },
+    updateSide() {
+      layout.classList.toggle("inspector-collapsed", state.collapsed);
+      side.hidden = state.collapsed; inspector.hidden = state.side !== "details"; agentMount.hidden = state.side !== "agent";
+      detailTab.setAttribute("aria-selected", String(state.side === "details")); agentTab.setAttribute("aria-selected", String(state.side === "agent"));
+      if (state.side === "agent" && !state.collapsed) { chat.mount(agentMount); chat.open(); }
+    }};
+  activeWorkspace = workspace;
+  for (const [id, title] of [["work", "路线图与工作"], ["goals", "目标与范围"], ["design", "方案与设计"], ["acceptance", "验收与证据"], ["references", "风险与参考"], ...(principal.admin ? [["access", "访问权限"]] : [])]) {
+    const control = element("button", {type: "button", role: "tab", "data-workspace-tab": id, "aria-controls": sections.get(id).id, onclick: () => workspace.activateTab(id)}, title);
+    navigation.append(control); sections.get(id).setAttribute("role", "tabpanel"); stage.append(sections.get(id));
+  }
+  navigation.append(element("button", {type: "button", class: "quiet workspace-open-details", onclick: () => { state.collapsed = !state.collapsed; workspace.updateSide(); }}, "详情 / Agent"));
+  wrapper.append(navigation, layout);
+  buildWorkWorkspace(workspace);
+  inspector.append(empty("选择工作项", "点击路线图节点或任务列表，查看负责人、依赖、实现和关联验收。"));
+  workspace.activateTab(state.tab); workspace.updateSide();
+  chat.setDefaultMount?.(agentMount); chat.mount(agentMount);
+  if (state.selected) {
+    const savedSide = state.side, savedCollapsed = state.collapsed;
+    const node = activeGraphs?.models.flatMap(model => model.nodes).find(item => item.id === state.selected);
+    const model = activeGraphs?.models.find(item => item.nodes.includes(node));
+    const feature = rfc.features?.find(item => item.id === state.selected);
+    if (node) graphDetails(rfc, node, model);
+    else if (feature) graphDetails(rfc, {id: feature.id, title: feature.title, feature}, {nodes: [], edges: []});
+    state.side = savedSide; state.collapsed = savedCollapsed; workspace.updateSide();
+  }
+  refreshCurrent = async () => {
+    const latest = await getRFC(rfc.id);
+    if (viewDirty || featureDialog || activeEditor?.dialog.open || busyOperations) return;
+    if (location.hash.startsWith(`#rfc/${encodeURIComponent(rfc.id)}`) && JSON.stringify(latest) !== JSON.stringify(activeRFC)) await applyRFCResult(latest);
+  };
+  return wrapper;
+}
+
+function buildWorkWorkspace(workspace) {
+  const {rfc, state, work} = workspace;
+  const graph = dependencyGraph(rfc), graphModelsNow = activeGraphs?.rfc.id === rfc.id ? activeGraphs.models : [];
+  if (!state.graph || !graphModelsNow.some(model => model.key === state.graph) && state.graph !== "__all") state.graph = graphModelsNow[0]?.key || "__all";
+  const query = input("task-search", "搜索编号、标题或负责人", state.query);
+  query.setAttribute("aria-label", "搜索工作项");
+  const track = select("task-track", [["", "所有工作轨道"], ...[...new Set((rfc.features || []).map(feature => feature.track).filter(Boolean))].map(value => [value, value])], state.track);
+  const status = select("task-status", [["", "所有实现状态"], ...["planned", "in_progress", "partial", "implemented", "blocked"]], state.status);
+  const owner = select("task-owner", [["", "所有负责人"], ["__unassigned", "待认领"], ...[...new Set((rfc.features || []).map(feature => feature.owner).filter(Boolean))].map(value => [value, value])], state.owner);
+  const diagram = select("diagram", [["__all", "全部图表"], ...graphModelsNow.map(model => [model.key, model.title])], state.graph);
+  diagram.setAttribute("aria-label", "选择路线图");
+  const modes = element("div", {class: "segmented", "aria-label": "工作显示方式"});
+  const graphMode = element("button", {type: "button", onclick: () => { state.mode = "graph"; state.removed = false; removed.setAttribute("aria-pressed", "false"); workspace.drawWork(); }}, "路线图");
+  const listMode = element("button", {type: "button", onclick: () => { state.mode = "list"; workspace.drawWork(); }}, "任务列表");
+  modes.append(graphMode, listMode);
+  const removed = element("button", {type: "button", class: "quiet", "aria-pressed": String(state.removed), onclick: () => { state.removed = !state.removed; if (state.removed) state.mode = "list"; workspace.drawWork(); }}, "已移除");
+  const count = element("span", {class: "small muted", role: "status"});
+  const merge = button("合并节点", () => mergeGraphNodes(workspace.rfc, [...selectedGraphIDs]));
+  const selectedCount = element("span", {class: "graph-selection-count small", role: "status", hidden: true});
+  const clear = element("button", {type: "button", class: "quiet", hidden: true, onclick: () => { selectedGraphIDs.clear(); if (activeGraphs) updateGraphSelection(activeGraphs); }}, "清除选择");
+  const actions = element("div", {class: "actions workspace-selection"}, merge, selectedCount, clear);
+  if (activeGraphs?.rfc.id === rfc.id) { activeGraphs.mergeControls.push({merge, count: selectedCount, clear}); updateGraphSelection(activeGraphs); }
+  else actions.hidden = true;
+  if (canPublish(rfc)) actions.append(button("添加工作项", () => actionDialog({title: "添加工作项", fields: [
+    {name: "id", label: "编号", required: true}, {name: "title", label: "标题", required: true}, {name: "track", label: "工作轨道", value: state.track}, {name: "owner", label: "负责人"}, {name: "depends_on", label: "依赖编号（逗号分隔）"}, {name: "link", label: "实现链接"}], submitLabel: "添加工作项", onSubmit: async values => {
+      const feature = {id: values.id.trim(), title: values.title.trim(), track: values.track.trim(), owner: values.owner.trim(), depends_on: values.depends_on.split(/[,，]/).map(value => value.trim()).filter(Boolean), links: values.link.trim() ? [values.link.trim()] : [], state: "planned"};
+      await applyRFCResult(await action("rfcs.work", {rfc_id: rfc.id, op: "add", feature, expected_revision: rfc.revision}));
+    }})));
+  const filtersToggle = element("button", {type: "button", class: "quiet workbench-filter-toggle", "aria-expanded": String(Boolean(state.filtersOpen)), onclick: () => {
+    state.filtersOpen = !state.filtersOpen; toolbar.classList.toggle("filters-open", state.filtersOpen); filtersToggle.setAttribute("aria-expanded", String(state.filtersOpen));
+  }}, "筛选");
+  const toolbar = element("div", {class: `workbench-toolbar${state.filtersOpen ? " filters-open" : ""}`}, element("div", {class: "workbench-primary"}, query, modes, removed, filtersToggle, count), element("div", {class: "workbench-filters"}, track, status, owner, diagram), actions);
+  const list = element("div", {class: "workspace-task-list"});
+  const caption = element("p", {class: "small muted graph-help"}, "拖动空白区域平移；点击节点查看详情。Ctrl/⌘ + 点击多选；移动端可在任务列表勾选。蓝色虚线表示选中，绿色表示实现落地。", element("span", {class: "context-key"}, "虚线灰色节点：来源上下文"));
+  work.append(toolbar, graph, list, caption);
+  workspace.drawFilters = () => {
+    const matches = filterWork(rfc.features, state), ids = new Set(matches.map(feature => feature.id));
+    if (activeGraphs?.rfc.id === rfc.id) for (const entry of activeGraphs.entries) {
+      const model = activeGraphs.models[entry.index];
+      for (let index = 0; index < model.nodes.length; index++) {
+        const node = model.nodes[index], group = entry.groups[index];
+        if (!group) continue;
+        const matching = node.members ? node.members.some(feature => ids.has(feature.id)) : !node.feature || ids.has(node.id);
+        group.classList.toggle("roadmap-filtered", !matching);
+        group.classList.toggle("context", !node.feature);
+      }
+    }
+    for (const [index, section] of [...graph.querySelectorAll(".roadmap-track")].entries()) {
+      const model = graphModelsNow[index];
+      section.hidden = state.graph !== "__all" && model.key !== state.graph || Boolean(state.track && !model.nodes.some(node => node.feature?.track === state.track || node.members?.some(feature => feature.track === state.track)));
+    }
+  };
+  workspace.drawWork = () => {
+    state.query = query.value; state.track = track.value; state.status = status.value; state.owner = owner.value; diagram.value = state.graph;
+    const matches = filterWork(rfc.features, state);
+    graph.hidden = state.mode !== "graph" || state.removed; list.hidden = !graph.hidden; caption.hidden = graph.hidden;
+    graphMode.setAttribute("aria-pressed", String(!graph.hidden)); listMode.setAttribute("aria-pressed", String(graph.hidden)); removed.setAttribute("aria-pressed", String(state.removed)); diagram.hidden = graph.hidden;
+    count.textContent = localizeText(`${matches.length} 个工作项`);
+    if (graph.hidden) {
+      list.replaceChildren();
+      const grouped = new Set((rfc.node_groups || []).flatMap(group => group.feature_ids));
+      for (const feature of matches) {
+        const checkbox = element("input", {type: "checkbox", value: feature.id, "data-select-feature": "", "aria-label": `${localizeText("选择")} ${feature.id}`, checked: selectedGraphIDs.has(feature.id) ? "checked" : undefined});
+        checkbox.hidden = !canWrite(rfc) || feature.dropped || grouped.has(feature.id);
+        checkbox.addEventListener("change", () => { if (activeGraphs) toggleGraphSelection(activeGraphs, {id: feature.id}); });
+        list.append(element("article", {class: "task-row", "data-feature-id": feature.id}, checkbox,
+          element("button", {type: "button", class: "task-row-open", onclick: () => inspectWork(feature.id)}, element("span", {class: "mono muted", "data-no-translate": ""}, feature.id), element("strong", {}, feature.title), element("small", {}, feature.owner || "待认领", feature.track ? ` · ${feature.track}` : "")),
+          badge(feature.dropped ? "dropped" : feature.implementation || feature.state || "planned"), canPublish(rfc) && feature.dropped ? button("恢复", () => workRemovalDialog(rfc, feature), "quiet") : null));
+      }
+      if (!matches.length) list.append(empty(state.removed ? "没有已移除的工作项" : "没有匹配的工作项", "调整筛选条件，或添加新的工作。"));
+    }
+    workspace.drawFilters(); applyLocale(toolbar); applyLocale(list);
+  };
+  query.addEventListener("input", workspace.drawWork);
+  for (const control of [status, owner]) control.addEventListener("change", workspace.drawWork);
+  track.addEventListener("change", () => { state.graph = "__all"; workspace.drawWork(); });
+  diagram.addEventListener("change", () => { state.graph = diagram.value; workspace.drawWork(); });
+  workspace.drawWork();
+}
+
+function workPanel(rfc, allowAdd = true) {
+  const list = element("div", {class: "item-list"});
+  const tracks = new Map();
+  for (const feature of rfc.features || []) {
+    const track = feature.track || "工作";
+    if (allowAdd && !tracks.has(track)) {
+      const group = element("section", {class: "work-track", "data-work-track": track}, element("h3", {}, track));
+      tracks.set(track, group); list.append(group);
+    }
+    const links = element("div", {class: "item-detail"});
+    for (const link of feature.links || []) {
+      const url = typeof link === "string" ? link : link.url;
+      const label = typeof link === "string" ? link : `${link.identifier || link.id || "实现来源"} · ${translated(link.state || "unknown")}`;
+      const anchor = safeLink(url, label);
+      links.append(anchor || element("span", {}, readable(link)), element("br"));
+    }
+    const operations = element("div", {class: "item-actions"});
+    const discuss = button("讨论这项工作", () => {
+      closeFeatureDialog(); discussRFC(activeRFC?.id === rfc.id ? activeRFC : rfc, featureSelection(rfc, feature.id, feature.title));
+    }, "quiet");
+    const update = values => actionDialog({title: "记录工作状态", fields: [{name: "reason", label: "工作状态调整的依据", value: "人工更新实现状态", type: "textarea", required: true}], submitLabel: "保存工作状态", onSubmit: async entered => {
+      await applyRFCResult(await action("rfcs.work", {rfc_id: rfc.id, op: "update", feature_id: feature.id, feature: values, reason: entered.reason.trim(), expected_revision: rfc.revision}));
+    }});
+    if (!feature.dropped && !feature.owner) operations.append(button("认领", async () => {
+      await applyRFCResult(await action("rfcs.work", {rfc_id: rfc.id, op: "claim", feature_id: feature.id, reason: "工作台自主认领", expected_revision: rfc.revision}));
+    }));
+    else if (!feature.dropped && canPublish(rfc)) operations.append(button("更改负责人", () => actionDialog({title: "更改负责人", fields: [{name: "owner", label: "负责人名称或用户 ID", value: feature.owner, required: true}, {name: "reason", label: "负责人调整的依据", type: "textarea", required: true}], submitLabel: "保存负责人", onSubmit: async values => {
+      await applyRFCResult(await action("rfcs.work", {rfc_id: rfc.id, op: "update", feature_id: feature.id, feature: {owner: values.owner.trim()}, reason: values.reason.trim(), expected_revision: rfc.revision}));
+    }})));
+    if (!feature.dropped) {
+      if (feature.implementation_override?.state !== "implemented") operations.append(button("标记实现完成", () => actionDialog({title: "标记实现完成", description: "实现记录将显示为绿色；验收结果仍需独立验证。", fields: [{name: "reason", label: "实现完成的依据（验收仍单独记录）", type: "textarea", value: "人工确认实现已完成", required: true}], submitLabel: "确认实现完成", onSubmit: async values => {
+        await applyRFCResult(await action("rfcs.work", {rfc_id: rfc.id, op: "mark_done", feature_id: feature.id, reason: values.reason.trim(), expected_revision: rfc.revision}));
+      }}), "mark-done"));
+      if (feature.implementation_override) operations.append(button("清除人工状态", () => actionDialog({title: "清除人工状态", fields: [{name: "reason", label: "清除人工状态的依据", type: "textarea", value: "恢复来源追踪状态", required: true}], submitLabel: "清除人工状态", onSubmit: async values => {
+        await applyRFCResult(await action("rfcs.work", {rfc_id: rfc.id, op: "clear_done", feature_id: feature.id, reason: values.reason.trim(), expected_revision: rfc.revision}));
+      }}), "quiet"));
+      const state = select("work_state", ["planned", "in_progress", "implemented"], feature.state || "planned");
+      state.setAttribute("aria-label", `${feature.title || feature.id} 的工作状态`);
+      operations.append(state, button("记录工作状态", () => update({state: state.value})));
+    }
+    if (canPublish(rfc)) operations.append(button(feature.dropped ? "恢复" : "移除", () => workRemovalDialog(rfc, feature), feature.dropped ? "" : "danger"));
+    const historical = historicalClaims(rfc, feature);
+    const cache = rfcContent(rfc);
+    const descriptions = cache.projection.featureSections[feature.id] || [];
+    const descriptionKey = `feature:${feature.id}:${allowAdd ? "work" : "dialog"}`;
+    let description = cache.nodes.get(descriptionKey) || null;
+    if (!description && descriptions.length) {
+      description = element("details", {class: "work-description"}, element("summary", {}, "RFC 描述"));
+      description.addEventListener("toggle", () => {
+        if (description.open && !description.querySelector(".component-sections")) description.append(componentSections(rfc, descriptions, "", false, descriptionKey));
+      });
+      cache.nodes.set(descriptionKey, description);
+    }
+    const manual = feature.implementation_override ? element("p", {class: "manual-work-state small"}, element("strong", {}, "人工记录"), " · ", element("span", {"data-no-translate": ""}, feature.implementation_override.reason)) : null;
+    (allowAdd ? tracks.get(track) : list).append(element("article", {class: "work-item", "data-feature-id": feature.id}, element("div", {class: "item-heading"}, element("h4", {}, feature.title || feature.id), badge(feature.dropped ? "dropped" : feature.implementation || feature.state || "planned")),
+      element("div", {class: "item-detail"}, `${feature.id} · 负责人：${feature.owner || localizeText("待认领")}`, element("br"), `依赖：${(feature.depends_on || []).join("、") || localizeText("无")}`), historical, links, description, discuss, canWrite(rfc) ? operations : null));
+    if (manual) (allowAdd ? tracks.get(track) : list).lastElementChild.append(manual);
+  }
+  if (!(rfc.features || []).length) list.append(empty("还没有工作项", "把方案拆分成有负责人和依赖的工作。"));
+  const form = element("form", {class: "inline-form", "data-draft-key": "add-work"});
+  form.append(element("h4", {}, "添加工作项"), element("div", {class: "form-grid"},
+    field("编号", input("id", "例如 E1", "", "text", true)), field("标题", input("title", "具体工作", "", "text", true)),
+    field("负责人", input("owner", "用户 ID 或名称")), field("依赖编号", input("depends_on", "逗号分隔，例如 E1,E2")),
+    field("实现链接", input("link", "PR 或实现来源 URL"), "明确的实现链接用于刷新进展。", true)), element("div", {class: "actions"}, element("button", {type: "submit"}, "添加工作项")));
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    busy(form.querySelector("button"), async () => {
+      const data = formData(form);
+      const feature = {id: data.id.trim(), title: data.title.trim(), owner: data.owner.trim(), depends_on: data.depends_on.split(/[,，]/).map((id) => id.trim()).filter(Boolean), state: "planned", links: data.link.trim() ? [data.link.trim()] : []};
+      await applyRFCResult(await action("rfcs.work", {rfc_id: rfc.id, op: "add", feature}));
+    });
+  });
+  return panel("工作项与负责人", element("div", {}, list, canPublish(rfc) && allowAdd ? form : null));
+}
+
+function historicalClaims(rfc, feature) {
+  const claims = [...(feature.historical_claims || []), ...(rfc.historical_claims || []).filter((claim) => (claim.feature || claim.feature_id) === feature.id)];
+  if (!claims.length) return null;
+  const wrapper = element("div", {class: "item-detail historical-claims"}, element("span", {class: "badge amber"}, "历史认领（待确认身份）"));
+  const seen = new Set();
+  for (const claim of claims) {
+    const key = claim.id || `${claim.login || claim.name}:${claim.created_at || ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    wrapper.append(element("div", {}, claim.login || claim.name || "历史记录", claim.note ? ` · ${claim.note}` : ""));
+  }
+  return wrapper;
+}
+
+function evidenceLines(evidence) {
+  const wrapper = element("div", {class: "item-detail"});
+  const records = Array.isArray(evidence) ? evidence : evidence ? [evidence] : [];
+  for (const record of records) {
+    if (typeof record === "string") wrapper.append(safeLink(record, record) || element("span", {}, record));
+    else {
+      const link = safeLink(record.url || record.source?.url, record.title || record.url || "证据来源 ↗");
+      if (link) wrapper.append(link);
+      wrapper.append(element("span", {}, record.note || record.summary || record.reason || readable(record)));
+      if (record.stale) wrapper.append(badge("stale"));
+    }
+  }
+  if (!records.length) wrapper.append("尚未记录验证证据。");
+  return wrapper;
+}
+function criteriaPanel(rfc) {
+  const list = element("div", {class: "item-list"});
+  for (const criterion of rfc.criteria || []) {
+    const form = element("form", {class: "inline-form", "data-draft-key": `criterion:${criterion.id}`});
+    form.append(element("div", {class: "form-grid"}, field("验证结论", select("verdict", ["pending", "passing", "failing", "waived"], criterion.verdict || "pending")),
+      field("证据链接", input("url", "测试、报告或讨论链接")), field("验证版本", input("verification_revision", "例如：实现提交 SHA 或发布版本"), "填写实际接受验证的实现版本。", true), field("验证环境", input("environment", "例如：Linux · GPU 型号 · 模型版本"), "通过时需要记录验证环境。", true),
+      field("验证依据", input("reason", "说明结果或豁免理由"), "验收证据将关联当前 RFC 版本。", true)), element("button", {type: "submit"}, "记录验收结论"));
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      busy(form.querySelector("button"), async () => {
+        const data = formData(form);
+        const payload = {rfc_id: rfc.id, kind: "criterion", criterion_id: criterion.id, verdict: data.verdict, reason: data.reason};
+        if (data.url || data.verification_revision || data.environment) payload.evidence = {url: data.url, note: data.reason, revision: data.verification_revision, environment: data.environment};
+        await applyRFCResult(await action("rfcs.decision", payload));
+      });
+    });
+    const details = element("details", {}, element("summary", {}, "更新验收"), form);
+    list.append(element("article", {class: "criterion", "data-criterion-id": criterion.id}, element("div", {class: "item-heading"}, element("h4", {}, criterion.title || criterion.id), badge(criterion.verdict || "pending")),
+      evidenceLines(criterion.evidence), button("讨论验收条件", () => { closeFeatureDialog(); discussRFC(activeRFC?.id === rfc.id ? activeRFC : rfc, {criterion_id: criterion.id, title: criterion.title}); }, "quiet"), canPublish(rfc) ? details : null));
+  }
+  if (!(rfc.criteria || []).length) list.append(empty("验收条件待补充", "编辑 RFC 时明确可验证的条件与证据。"));
+  return panel("验收条件", list, "PR 合并不会自动通过验收。");
+}
+function suggestionsPanel(rfc) {
+  const list = element("div", {class: "item-list"});
+  let total = rfc.suggestion_counts?.proposed || 0;
+  let page = Math.min(suggestionPages.get(rfc.id) || 0, Math.max(0, Math.ceil(total / SUGGESTIONS_PER_PAGE) - 1));
+  let sequence = 0;
+  const count = element("span", {class: "small muted", "aria-live": "polite"});
+  const previous = element("button", {type: "button", onclick: () => { page -= 1; draw(); }}, "上一页");
+  const next = element("button", {type: "button", onclick: () => { page += 1; draw(); }}, "下一页");
+  const pagination = element("div", {class: "actions suggestion-pagination"}, count, previous, next);
+  function updateControls(loading = false) {
+    const pages = Math.max(1, Math.ceil(total / SUGGESTIONS_PER_PAGE));
+    count.textContent = `${total} 条待确认 · 第 ${page + 1} / ${pages} 页${loading ? " · 读取中…" : ""}`;
+    previous.disabled = loading || page === 0;
+    next.disabled = loading || page >= pages - 1;
+    previous.hidden = next.hidden = total <= SUGGESTIONS_PER_PAGE;
+  }
+  async function draw() {
+    const current = ++sequence;
+    updateControls(true);
+    list.replaceChildren(element("p", {class: "small muted"}, "正在读取这一页建议…"));
+    try {
+      const result = await action("rfcs.suggestions", {rfc_id: rfc.id, offset: page * SUGGESTIONS_PER_PAGE, limit: SUGGESTIONS_PER_PAGE, status: "proposed"});
+      if (current !== sequence || !list.isConnected || !principal) return;
+      total = result.total;
+      setTranslations(result.translations, false);
+      const last = Math.max(0, Math.ceil(total / SUGGESTIONS_PER_PAGE) - 1);
+      if (page > last) { page = last; return draw(); }
+      suggestionPages.set(rfc.id, page);
+      list.replaceChildren();
+      for (const suggestion of result.suggestions || []) {
+        list.append(element("article", {class: "suggestion"}, element("h4", {}, suggestion.title || suggestion.feature?.title || "待确认的关联"),
+          element("p", {class: "small muted"}, suggestion.reason || suggestion.explanation || "请核对这个实现是否属于当前 RFC。"), evidenceLines(suggestion.evidence),
+          canPublish(rfc) ? element("div", {class: "item-actions"}, ...["accepted", "rejected"].map(verdict => button(verdict === "accepted" ? "接受建议" : "拒绝", async () => {
+            await actionDialog({title: verdict === "accepted" ? "接受建议" : "拒绝建议", fields: [{name: "reason", label: verdict === "accepted" ? "接受依据" : "拒绝原因（相同建议不会重复出现）", type: "textarea", required: true}], submitLabel: "确认", onSubmit: async values => {
+              await applyRFCResult(await action("rfcs.decision", {rfc_id: rfc.id, kind: "suggestion", suggestion_id: suggestion.id, verdict, reason: values.reason.trim()}));
+            }});
+          }, verdict === "rejected" ? "danger" : ""))) : null));
+      }
+      if (!total) list.append(element("p", {class: "small muted"}, "暂无需要确认的建议。明确关联在范围内自动更新，模糊关联留待你判断。"));
+      updateControls();
+    } catch (error) {
+      if (current === sequence && list.isConnected) {
+        list.replaceChildren(element("p", {class: "error-panel"}, error.message), button("重试读取这一页", draw));
+        updateControls();
+      }
+    }
+  }
+  if (total) draw();
+  else { updateControls(); list.append(element("p", {class: "small muted"}, "暂无需要确认的建议。")); }
+  return panel("待确认建议", element("div", {class: "stack"}, pagination, list));
+}
+
+function decisionPanel(rfc) {
+  const form = element("form", {class: "stack"});
+  form.append(field("RFC 决策", select("verdict", ["draft", "discussion", "accepted", "rejected", "superseded"], rfc.state || "draft")), field("决策依据", input("reason", "记录评审结论或后续 RFC")), element("button", {type: "submit"}, "记录 RFC 决策"));
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    busy(form.querySelector("button"), async () => { await applyRFCResult(await action("rfcs.decision", {rfc_id: rfc.id, kind: "rfc", ...formData(form)})); });
+  });
+  return panel("评审决策", form, "接受方案表示方向获批，验收完成单独记录。");
+}
+function rfcAccessPanel(rfc) {
+  const holder = panel("RFC 访问范围", element("p", {class: "small muted"}, "正在读取可授权成员…"), "RFC 权限只能收窄已有仓库权限。", null);
+  holder.id = "rfc-access";
+  async function load() {
+    try {
+      const [usersResult, access] = await Promise.all([action("users.list"), action("grants.list", {repo_id: rfc.repo_id})]);
+      if (!principal) return;
+      const users = usersResult.users || [], repositoryGrants = new Map((access.grants || []).map(grant => [grant.user_id, grant.role]));
+      const existing = new Map((access.rfc_grants || []).filter(grant => grant.rfc_id === rfc.id).map(grant => [grant.user_id, grant.role]));
+      const form = element("form", {class: "stack", "data-draft-key": `access:${rfc.id}`});
+      const restricted = element("input", {type: "checkbox", name: "restricted"}); restricted.checked = Boolean(rfc.restricted);
+      const members = element("div", {class: "access-members"});
+      const roleRank = {reader: 1, contributor: 2, maintainer: 3};
+      for (const user of users) {
+        const id = user.id || user.user_id, base = repositoryGrants.get(id);
+        if (!base || user.admin) continue;
+        const choices = [["", "无 RFC 访问权"], ...["reader", "contributor", "maintainer"].filter(role => roleRank[role] <= roleRank[base]).map(role => [role, {reader: "读者", contributor: "贡献者", maintainer: "维护者"}[role]])];
+        members.append(element("div", {class: "access-member-row"}, element("div", {}, user.name, element("small", {}, `${localizeText("仓库权限")}：${localizeText({reader: "读者", contributor: "贡献者", maintainer: "维护者"}[base])}`)), select(`grant:${id}`, choices, existing.get(id) || "")));
+      }
+      if (!members.children.length) members.append(element("p", {class: "small muted"}, "尚无可限制的仓库成员。请先在团队与权限中授予仓库权限。"));
+      const updateMembers = () => { members.hidden = !restricted.checked; };
+      restricted.addEventListener("change", updateMembers); updateMembers();
+      form.append(element("label", {class: "check-label"}, restricted, "仅向指定用户开放这个 RFC"), members, element("p", {class: "small muted"}, "关闭限制时，已有仓库权限的成员均可访问；管理员始终可以管理。"), element("button", {type: "submit", class: "primary"}, "保存 RFC 权限"));
+      form.addEventListener("submit", event => { event.preventDefault(); busy(form.querySelector("button"), async () => {
+        const grants = {}; for (const control of members.querySelectorAll("select")) if (control.value) grants[control.name.slice(6)] = control.value;
+        await action("rfcs.acl", {rfc_id: rfc.id, restricted: restricted.checked, grants});
+        form.dispatchEvent(new CustomEvent("draft-saved", {bubbles: true})); notice("RFC 权限已更新。"); await route();
+      }); });
+      holder.replaceChildren(element("div", {class: "panel-title"}, element("h2", {}, "RFC 访问范围")), form); applyLocale(holder);
+    } catch (error) { holder.replaceChildren(element("p", {class: "error-panel"}, error.message), button("重新读取权限", load)); }
+  }
+  load(); return holder;
+}
+
+function operationsView(data) {
+  const wrapper = element("div");
+  wrapper.append(heading("每次操作，都有记录", "发布、纳管与同步会记录执行状态；结果不明时先核对来源。", element("div", {class: "actions"}, button("刷新", route))));
+  const operations = data.operations || [];
+  if (!operations.length) { wrapper.append(empty("暂无操作", "发布、纳管或同步 RFC 后，执行结果会显示在这里。")); return wrapper; }
+  const table = element("table", {}, element("thead", {}, element("tr", {}, ...["操作", "RFC", "状态", "时间", "结果"].map((name) => element("th", {}, name)))));
+  const body = element("tbody");
+  for (const operation of operations) {
+    const state = operation.state || operation.status;
+    const recovery = ["failed", "uncertain"].includes(state) && (principal.admin || repositories.find((repo) => repo.id === operation.repo_id)?.role === "maintainer")
+      ? button("核对并重试", async () => {
+        if (!await askConfirm("重试会先核对已有结果，避免重复发布。确认恢复这个操作？")) return;
+        await action("operations.retry", {operation_id: operation.id}); notice("恢复操作已进入队列。"); await route();
+      }) : null;
+    body.append(element("tr", {}, element("td", {}, operation.action || operation.kind || "操作", element("div", {class: "mono muted"}, operation.id)),
+      element("td", {}, operation.rfc_id ? element("a", {href: `#rfc/${encodeURIComponent(operation.rfc_id)}`}, operation.rfc_id) : "—"), element("td", {}, badge(state)),
+      element("td", {}, dateText(operation.updated || operation.updated_at || operation.created || operation.created_at)), element("td", {}, operation.error || readable(operation.result), recovery)));
+  }
+  table.append(body);
+  wrapper.append(panel("执行记录", element("div", {class: "table-wrap"}, table)));
+  refreshCurrent = () => route();
+  return wrapper;
+}
+
+async function accountView() {
+  const result = await api(`/api/v1/tokens?user_id=${encodeURIComponent(principal.user_id)}`);
+  const wrapper = element("div");
+  wrapper.append(element("p", {class: "small muted"}, `当前会话到期：${dateText(principal.session_expires || principal.expires || principal.credential_expires)} · ${localizeText("令牌到期后，请重新登录或联系管理员签发新令牌。")}`));
+  wrapper.append(heading("管理你的个人令牌", "为 Copilot 和命令行签发令牌，或撤销不再使用的访问凭据。", element("div", {class: "actions"}, button("刷新", route))),
+    tokensPanel(result.tokens || [], [[principal.user_id, principal.name || principal.user_id]], true));
+  return wrapper;
+}
+
+async function adminView() {
+  selectedTokenUser ||= principal.user_id;
+  const [usersResult, tokensResult, settings, access, diagnostics] = await Promise.all([api("/api/v1/users"), api(`/api/v1/tokens?user_id=${encodeURIComponent(selectedTokenUser)}`), action("service.settings"), action("grants.list"), action("service.diagnostics")]);
+  const users = usersResult.users || [];
+  const tokens = tokensResult.tokens || [];
+  const wrapper = element("div");
+  wrapper.append(heading("团队在明确的范围内协作", "为具体用户签发令牌，并授予仓库或 RFC 的访问权限。", element("div", {class: "actions"}, button("刷新", route))));
+  const userForm = element("form", {class: "stack", "data-draft-key": "admin-user"});
+  const admin = element("input", {type: "checkbox", name: "admin"});
+  userForm.append(field("姓名", input("name", "用户姓名", "", "text", true)), element("label", {class: "check-label"}, admin, "工作空间管理员"), element("button", {type: "submit"}, "添加用户"));
+  userForm.addEventListener("submit", (event) => { event.preventDefault(); busy(userForm.querySelector("button"), async () => {
+    await action("users.create", {name: userForm.elements.name.value, admin: admin.checked}); notice("用户已创建。"); await route();
+  }); });
+  const userTable = element("table", {}, element("thead", {}, element("tr", {}, ...["用户", "角色", "状态", "操作"].map((name) => element("th", {}, name)))));
+  const userBody = element("tbody");
+  for (const user of users) userBody.append(element("tr", {}, element("td", {}, user.name, element("div", {class: "mono muted"}, user.id || user.user_id)),
+    element("td", {}, user.admin ? "管理员" : "成员"), element("td", {}, user.enabled === false || user.enabled === 0 ? "已停用" : "有效"), element("td", {},
+      button(user.enabled === false || user.enabled === 0 ? "启用" : "停用", async () => {
+        if (!await askConfirm(`确认更改 ${user.name} 的访问状态？`)) return;
+        await action("users.update", {user_id: user.id || user.user_id, enabled: user.enabled === false || user.enabled === 0}); await route();
+      }, "danger"))));
+  userTable.append(userBody);
+  const userChoices = users.map((user) => [user.id || user.user_id, user.name]);
+  const repoForm = element("form", {class: "stack", "data-draft-key": "admin-repository"});
+  repoForm.append(field("仓库名称", input("name", "团队可识别的名称", "", "text", true)), field("来源", select("provider", ["github", "atomgit", ["local", "本地 Git / Markdown"]])),
+    field("外部仓库", input("external_name", "owner/repository 或 AtomGit 项目标识")), field("本地根目录", input("root", "本地来源：服务可访问且已授权的目录")),
+    element("button", {type: "submit"}, "登记仓库"));
+  repoForm.addEventListener("submit", (event) => { event.preventDefault(); busy(repoForm.querySelector("button"), async () => {
+    const payload = formData(repoForm); if (!payload.external_name.trim()) delete payload.external_name; if (!payload.root.trim()) delete payload.root;
+    await action("repositories.create", payload); repositories = (await api("/api/v1/repositories")).repositories || []; notice("仓库已登记。"); await route();
+  }); });
+  const grantForm = element("form", {class: "stack", "data-draft-key": "admin-grant"});
+  grantForm.append(field("用户", select("user_id", userChoices)), field("仓库", select("repo_id", repoChoices())), field("权限", select("role", ["reader", "contributor", "maintainer", ["none", "撤销授权"]])), element("button", {type: "submit"}, "保存仓库授权"));
+  grantForm.addEventListener("submit", (event) => { event.preventDefault(); busy(grantForm.querySelector("button"), async () => {
+    const payload = formData(grantForm); if (payload.role === "none") payload.role = "";
+    await action("grants.set", payload); grantForm.dispatchEvent(new CustomEvent("draft-saved", {bubbles: true})); notice("仓库授权已更新。"); await route();
+  }); });
+  const grantTable = element("table", {}, element("thead", {}, element("tr", {}, ...["成员", "仓库", "权限", "操作"].map(name => element("th", {}, name)))));
+  const grantBody = element("tbody");
+  for (const grant of access.grants || []) grantBody.append(element("tr", {}, element("td", {}, grant.user_name), element("td", {}, grant.repo_name), element("td", {}, {reader: "读者", contributor: "贡献者", maintainer: "维护者"}[grant.role] || grant.role), element("td", {}, button("调整权限", () => {
+    grantForm.elements.user_id.value = grant.user_id; grantForm.elements.repo_id.value = grant.repo_id; grantForm.elements.role.value = grant.role;
+    grantForm.scrollIntoView({behavior: "smooth", block: "center"}); grantForm.elements.role.focus();
+  }))));
+  grantTable.append(grantBody);
+  const registered = element("div", {class: "item-list"}, ...repositories.map(repo => element("article", {class: "work-item"}, element("div", {class: "item-heading"}, element("h4", {}, repo.name), element("span", {class: "badge"}, repo.provider)), element("p", {class: "small muted"}, repo.external_name || "本地工作空间"), repositoryReadiness(repo))));
+  wrapper.append(guidedSteps(0), panel("用户", element("div", {class: "table-wrap"}, userTable)), panel("当前仓库授权", element("div", {class: "table-wrap"}, grantTable), "先登记仓库，再授予成员权限并签发个人令牌。"), panel("已登记仓库", registered));
+  wrapper.append(element("div", {class: "admin-grid"}, panel("添加成员", userForm), panel("仓库访问范围", grantForm), panel("登记仓库", repoForm), tokensPanel(tokens, userChoices)));
+  wrapper.append(serviceSettingsPanel(settings), serviceStatusPanel(diagnostics));
+  return wrapper;
+}
+
+function serviceStatusPanel(status) {
+  const content = element("div", {class: "item-list"});
+  for (const [kind, worker] of Object.entries(status.workers || {})) content.append(element("div", {class: "status-row"}, element("strong", {}, {operations: "来源同步", chat: "Agent", translations: "翻译"}[kind] || kind), badge(worker.available ? "active" : "stale"), element("span", {class: "small muted"}, dateText(worker.updated))));
+  for (const [kind, readiness] of [["Agent 模型", status.chat], ["内容翻译", status.translations]]) if (readiness) content.append(element("div", {class: "status-row"}, element("strong", {}, kind), element("span", {}, readiness.last_model_error?.code === "model_quota_exceeded" ? "GLM 额度已用尽。请等待额度恢复或联系管理员；现有记录和编辑均已保留。" : readiness.last_model_error ? "需要配置或授权" : readiness.verified ? "最近调用成功" : readiness.available ? "可用，尚未验证调用" : readiness.enabled ? "需要配置或授权" : "未启用")));
+  return panel("服务状态", content, `最后检查：${dateText(status.checked)}`);
+}
+function serviceSettingsPanel(settings) {
+  const form = element("form", {class: "stack"});
+  const interval = input("sync_seconds", "3600", settings.sync_seconds ?? 3600, "number", true);
+  interval.min = "60"; interval.max = "86400"; interval.step = "1";
+  const additions = input("default_max_auto_additions", "5", settings.default_max_auto_additions ?? 5, "number", true);
+  additions.min = "0"; additions.max = "100"; additions.step = "1";
+  form.append(element("div", {class: "form-grid"}, field("同步间隔（秒）", interval, "60–86400 秒；后台按这个间隔检查已纳管的 RFC。"),
+    field("新 RFC 默认自动新增上限", additions, "0–100 项；已有 RFC 的范围与上限保持各自设置。")),
+    element("div", {class: "status-row"}, element("span", {}, "成员访问：仅限管理员授权"),
+      element("span", {}, `已配置来源：${(settings.configured_providers || []).map((name) => labels[name] || name).join("、") || "暂无"}`)),
+    element("div", {class: "actions"}, element("button", {type: "submit", class: "primary"}, "保存服务设置")));
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    busy(form.querySelector("button"), async () => {
+      await action("service.configure", {sync_seconds: Number(interval.value), default_max_auto_additions: Number(additions.value)});
+      notice("服务设置已更新。"); await route();
+    });
+  });
+  return panel("服务设置", form);
+}
+
+function tokensPanel(tokens, choices, ownOnly = false) {
+  const list = element("div", {class: "item-list"});
+  for (const token of tokens) list.append(element("div", {class: "work-item"}, element("div", {class: "item-heading"}, element("span", {class: "mono"}, token.id || token.token_id),
+    badge(token.revoked || token.revoked_at ? "revoked" : "valid_token")), element("p", {class: "item-detail"}, `${localizeText("用户")}：${choices.find(choice => choice[0] === token.user_id)?.[1] || token.user_id} · ${localizeText("到期")}：${dateText(token.expires || token.expires_at)}`),
+    !token.revoked && !token.revoked_at ? button("撤销令牌", async () => {
+      if (!await askConfirm("撤销后，该令牌及其关联会话将失效。继续？")) return;
+      await action("tokens.revoke", {token_id: token.id || token.token_id}); await route();
+    }, "danger") : null));
+  const form = element("form", {class: "inline-form stack", "data-no-draft": ""});
+  const user = select("user_id", choices, ownOnly ? principal.user_id : selectedTokenUser);
+  if (ownOnly) user.disabled = true;
+  else user.addEventListener("change", async () => { selectedTokenUser = user.value; await route(); });
+  form.append(field("对应用户", user, ownOnly ? "此页面仅管理你自己的令牌。" : "切换用户可查看、撤销该用户的令牌。"), field("有效天数", input("expires_days", "30", "30", "number", true)), element("button", {type: "submit"}, "签发个人令牌"));
+  form.addEventListener("submit", (event) => { event.preventDefault(); busy(form.querySelector("button"), async () => {
+    const data = formData(form);
+    const result = await action("tokens.create", {user_id: ownOnly ? principal.user_id : data.user_id, expires_days: Number(data.expires_days)});
+    $("issued-secret").value = result.token || result.secret || "";
+    $("secret-dialog").showModal();
+  }); });
+  return panel("个人令牌", element("div", {}, list, form), "原始令牌只在创建时显示；撤销同时结束相关会话。");
+}
+
+setInterval(async () => {
+  if (!principal || document.hidden || viewDirty || featureDialog || busyOperations || $("secret-dialog").open || !refreshCurrent) return;
+  try { await refreshCurrent(); } catch (error) { if (principal) notice(`刷新未完成：${error.message}`, true); }
+}, 30000);
+
+document.querySelectorAll("[data-language]").forEach(control => control.addEventListener("click", async () => {
+  await changeLanguage(control.dataset.language);
+  if (principal) await route();
+}));
+await initializeLocale();
+try { await signedIn(await api("/api/v1/me")); }
+catch { signedOut(); }

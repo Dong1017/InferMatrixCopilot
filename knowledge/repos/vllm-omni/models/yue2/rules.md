@@ -1,10 +1,10 @@
 ---
 title: "YuE2 synthesis 与完成边界规则"
 created: 2026-10-06
-updated: 2026-10-06
+updated: 2026-10-13
 type: rule
 tags: [vllm-omni, models, model-executor]
-sources: ["PR #8407"]
+sources: ["PR #8407", "PR #8851"]
 confidence: high
 ---
 
@@ -32,3 +32,12 @@ confidence: high
 - 强制：保留已完成音频和对应终止 token，直到 scheduler 接受该 end boundary。若完成 step 的输出被丢弃、resumed row 的 accepted count 尚未到 `end_len`，重新交付保留的音频与 end token，复用已完成 synthesis；非丢弃的完整 accepted sequence 才能作为 history reconciliation 边界。
 - 禁止：finished row 无条件跳过而连续输出零 token；在重新交付时再次运行 synthesis；把未确认的部分 recompute 当作完整 accepted history；finish/abort 后遗留 job 或 timing state。
 - 验收：确定性回归让 scheduler 丢弃交付 step，恢复后仍得到同一音频/end token且只完成一次 synthesis；再覆盖真实 eager/graph preemption、取消与后续请求恢复。^[PR #8407]
+
+## VLLM-OMNI-PR8851-YUE2-SAMPLER-COST — 削减全词表一致性循环不得丢失边界覆盖
+
+- 触发：以缩短 CI 时长为由修改 `tests/worker/test_yue2_sampler.py`（或同类在 CPU 上对全词表做逐行 `torch.multinomial` 一致性比对的测试）的循环步数、`min_tokens` 或 preset 默认值覆盖。
+- 强制：步数削减必须由行为跨度论证：先断言生产默认值（ABC `min_tokens` 32、semantic 200），再替换成小于循环步数的 floor，使循环首步仍处于 end-token block、末步已释放；被门控路径须有独立确定性测试（temperature=0、手工构造 logits 令 end token 得分最高）证明 history 不足时被屏蔽、达到 floor 后放行；填满 semantic penalty window 的长-history alone-vs-batch case（60 token）不得随削减被删。
+- 禁止：保留从不触达生产 floor 的重复抽样步；直接覆盖 preset 默认值而不先断言其生产取值；削减后让 min_tokens/end-token block、batched 与单行 `torch.multinomial` 的逐列对比或 per-request generator 同步推进失去覆盖；把 AMD CI 时长收益当作已验证结果陈述。
+- 验收：缩减后每步仍对全部 184704 列对比 batched draw 与 `torch.multinomial` 并检查 generator 同步；`test_end_token_is_blocked_until_min_tokens` 在 abc 与 semantic 两个 phase 都先取 fallback、后取 end；本地运行整个测试文件维持秒级（本 PR 实测 9 passed in 1.20s）。40 步版本在 AMD `Simple · Other Test` 中约占 1175 秒（main #13631 实测）只是削减动机；该 PR 的 AMD 验证项未勾选，AMD 时长改善不得作为已验证结果或验收依据。^[PR #8851]
+
+<!-- kb:rule status=active since=v0.30.0 -->

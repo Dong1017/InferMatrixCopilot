@@ -191,6 +191,30 @@ def test_nonzero_or_missing_result_fails_closed_and_preserves_unterminated_tails
     assert_spools_closed(spools, session)
 
 
+@pytest.mark.parametrize("payload,code,retryable", [
+    ({"errorCode": "model_rate_limited", "retryable": False, "providerErrorCode": "1310", "statusCode": 429}, "model_quota_exceeded", False),
+    ({"errorCode": "model_rate_limited", "retryable": True, "statusCode": 429}, "model_rate_limited", True),
+    ({"errorCode": "model_authentication_failed", "statusCode": 401}, "model_authentication_required", False),
+    ({"errorCode": "model_connection_error", "statusCode": 503}, "model_unavailable", True),
+])
+def test_native_failure_uses_same_safe_recovery_as_toolless_calls(session, spools, payload, code, retryable):
+    payload = {**payload, "providerErrorMessage": "PRIVATE_PROVIDER_MESSAGE", "requestHeaders": {"Authorization": "SECRET_TOKEN"}}
+    event = {"type": "session.updated", "payload": payload}
+    script = "\n".join([
+        "import os",
+        f"os.write(1, {(json.dumps(event) + chr(10)).encode()!r})",
+        "os.write(2, b'SECRET_STDERR')",
+        "os._exit(1)",
+    ])
+    received = []
+    with pytest.raises(zcode.ZCodeFailure) as failure:
+        run_python(script, session, received.append)
+    assert failure.value.code == code and failure.value.retryable is retryable
+    assert "PRIVATE" not in str(failure.value) and "SECRET" not in str(failure.value)
+    assert event in received  # Native evidence remains private to the caller's sink.
+    assert_spools_closed(spools, session)
+
+
 def test_sink_interrupt_reaps_producer_drains_already_spooled_tails_and_closes_spools(session, spools):
     tail = "received stderr tail"
     script = "\n".join([

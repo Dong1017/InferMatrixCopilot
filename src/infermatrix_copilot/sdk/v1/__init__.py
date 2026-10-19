@@ -70,6 +70,8 @@ _LAZY = {
     **{name: ("...knowledge_service.evidence", name) for name in (
         "bugfix_record_identity", "resolve_bugfix_repository", "parse_bugfix_record", "knowledge_diff_excerpt",
         "knowledge_changed_paths", "BUGFIX_RECORD_MARKER", "LEGACY_BUGFIX_RECORD_MARKER", "DIFF_EXCERPT_BYTES")},
+    **{name: (".rfc", name) for name in (
+        "RFC_API_VERSION", "RFCClient", "RFCClientError", "Principal", "SourceRef")},
     "DirectClient": (".direct", "DirectClient"),
     "get_capabilities": (".direct", "get_capabilities"),
     "StrictRuntime": (".strict", "StrictRuntime"),
@@ -104,6 +106,11 @@ def __dir__():
 
 
 __all__ = [
+    "RFC_API_VERSION",
+    "RFCClient",
+    "RFCClientError",
+    "Principal",
+    "SourceRef",
     "DIRECT_API_VERSION",
     "DURABLE_REVIEW_API_VERSION",
     "KNOWLEDGE_API_VERSION",

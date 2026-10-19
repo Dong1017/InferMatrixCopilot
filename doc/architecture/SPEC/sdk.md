@@ -1,6 +1,6 @@
 # sdk/ —— 规范
 
-<!-- verified-against: 2026-10-08 -->
+<!-- verified-against: 2026-10-16 -->
 
 
 `Python SDK v1 · 跨仓库唯一 typed 边界 · refactor-status: ok`
@@ -17,6 +17,16 @@
 
 ## 公开契约
 
+`changes_preview()` / `changes_apply()` 绑定人工编辑的完整候选、版本、摘要及幂等键；
+未传 reason 时保留预览原因。`list_rfcs()` 支持可选服务端筛选与分页；`grants()`、
+`check_repository()`、`service_status()` 继续委托同一授权应用。HTTP 错误保留
+`request_id`，不改变原有 code/status 属性，也不在远端故障后创建本地写入方。
+
+- RFC：`RFCClient` 选择显式本地或托管工作区，统一通过 `dispatch(action, payload)`
+  调用 RFC 服务并校验 API 版本。`work()` 支持人工实现记录和清除，`graph()` 支持
+  可逆节点分组；`chat_*` 提供私有会话、异步任务、分页事件和完整候选差异确认。
+  Bearer 身份来自宿主配置，权限、版本与事实校验由共享应用执行；远端故障不改写
+  另一套本地状态。验证见 `test_rfc_work_controls.py`、`test_rfc_chat_integration.py`。
 - 显式自适应知识协议：`ContextBudget`、`DirectClient.open_knowledge_context` /
   `plan_adaptive` / `read_knowledge_context` / `search_knowledge_context` /
   `related_knowledge_context` / `expand_knowledge_context`。仅 `model_content` 是实际注入
@@ -118,7 +128,8 @@
 
 ## 依赖方向
 
-`contracts.models` 拥有纯 stdlib 模型，`sdk.v1.models` 保留兼容导出；`direct` import-time 只依赖模型与资源解析，
+`contracts.models` 拥有纯 stdlib 模型，`sdk.v1.models` 保留兼容导出；`direct` import-time
+依赖领域模型、资源解析与知识上下文／containment helper，但不创建运行账本或读取宿主配置，
 函数调用时才向下进入 `direct_routing`；`strict` 构造时才向下进入
 headless `app.RunService`。`sdk.v1.knowledge` 是兼容导出，实际实现位于
 `knowledge_service.curation`；后者依赖 SDK 下层的领域模型、共享 provider 和显式 work checkout，

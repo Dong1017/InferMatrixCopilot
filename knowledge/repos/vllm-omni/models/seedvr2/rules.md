@@ -1,10 +1,10 @@
 ---
 title: "SeedVR2 restoration 规则"
 created: 2026-10-06
-updated: 2026-10-06
+updated: 2026-10-12
 type: rule
 tags: [vllm-omni, models, diffusion]
-sources: ["PR #8102"]
+sources: ["PR #8102", "PR #8767"]
 confidence: high
 ---
 
@@ -96,3 +96,12 @@ confidence: high
 
 公开 route 与 artifact readiness 见 [Serving 请求规则](../../components/serving/rules.md)；
 分布式执行与 VAE ownership 见 [Diffusion 规则](../../components/diffusion/rules.md)。
+
+## VLLM-OMNI-PR8767-SEEDVR2-RMSNORM-FP32 — SeedVR2 RMSNorm 的低精度统计必须在 FP32 中累计
+
+- 触发：修改 `vllm_omni/diffusion/models/seedvr2/nadit.py` 中 `RMSNorm` 的 variance 计算、dtype cast 或 affine 乘法。
+- 强制：FP16/BF16 输入必须先提升到 FP32，再计算 `pow(2).mean(-1)` 与归一化除法，结果 cast 回输入 dtype 后才执行原有 affine 乘法（权重跟随输出 dtype）；FP32 输入保持原实现。该修复不要求 checkpoint 转换。
+- 禁止：在输入 dtype 中对 FP16 激活求平方均值——有限值 256 平方即上溢为 inf，整个 token 除以无穷 RMS 后被静默置零；把输出-only NaN/Inf 检查当作数值验收（输出仍有限，检测不到这种 token 级置零损坏）；把单次视觉 A/B 外推为解释所有 SeedVR2 artifact 的通用结论。
+- 验收：CPU 回归以 float64 参考对照，覆盖 outlier（如 256/300/60000）、全零、极小值（如 0.0001）、FP16/BF16/FP32 与 affine 开/关，断言输出 dtype、全部有限且与参考一致。^[PR #8767]
+
+<!-- kb:rule status=active since=v0.30.0 -->
