@@ -45,3 +45,4 @@ owner 仍不明确时才看 [components 职责表](components/_index.md)；模�
 | ComfyUI、示例 app 和客户端适配 | [tooling](tooling/_index.md) |
 | 远端验证 | [remote](remote/_index.md) |
 | 关键模型与负责人 | [owners](owners/_index.md) |
+- [vllm-omni review-lessons rules](rules-review-lessons.md)
