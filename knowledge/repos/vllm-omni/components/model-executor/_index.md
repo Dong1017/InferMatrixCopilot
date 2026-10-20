@@ -65,3 +65,4 @@ sources: []
 - [Model Executor — INC/AutoRound 量化配置规则](rules-inc-autoround.md)
 - [Model Executor — Orchestration Loop Rules](rules-orchestration-loop.md)
 - [MiniCPM duplex vision-only unit rules](rules-minicpm-vision-units.md)
+- [MiniCPM-o duplex turn-end drain 规则](rules-minicpmo-turn-end-drain.md)
