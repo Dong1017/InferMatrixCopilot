@@ -64,3 +64,4 @@ sources: []
 - [Model Executor — Dynamo/cudagraph compile guard rules](rules-compile-guard.md)
 - [Model Executor — INC/AutoRound 量化配置规则](rules-inc-autoround.md)
 - [Model Executor — Orchestration Loop Rules](rules-orchestration-loop.md)
+- [Model Executor — NPU 基础镜像与 Ascend 升级规则](rules-npu-base-image.md)
