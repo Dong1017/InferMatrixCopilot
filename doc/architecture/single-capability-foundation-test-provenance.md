@@ -13,6 +13,6 @@ Final verification: source initial 104 cases retained 5 old-wording assertion fa
 
 Wheel 59a55d929e5e64aaa4a6ad64a4db8dea1b33cc132f62650f93976a8fde15a63c; baseline10775; Bot3bbf unchanged. Two production files +1lines/-9AST nodes; all other wheel payload bytes unchanged. changes.patch applies once to the10775 checkout; isolated private Git-index reconstruction verified. New test assertions replace old metadata expectations and extend unknown refusal to explicit version1. No old request, paid ledger, native sample, judge verdict or budget allocation was edited. No new native/model calls, commit/push/pins/deployment.
 
-[代码、wheel、原始报告及重建证明](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/foundation-test-provenance-20261017/README.md)；[精确验证](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/foundation-test-provenance-20261017/result.json)。
+代码、wheel、原始报告及重建证明 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/foundation-test-provenance-20261017/README.md`)；精确验证 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/foundation-test-provenance-20261017/result.json`)。
 
 剩余P1：生成策略仍需进一步区分可复用源码事实与阶段运行元信息，完整案例的顺序／拒写／记账解释缺口、真实质量比较及深层恢复仍开放。此修复消除一个无依据输入事实，不证明模型不再生成provenance，也不把旧失败算作新通过；不原样重跑旧样本，不重放unknown。其他后端与最终配对／发布验收继续按完整计划分阶段推进。

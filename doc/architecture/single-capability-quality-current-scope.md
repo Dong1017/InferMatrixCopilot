@@ -2,7 +2,7 @@
 
 当前框架交付为Copilot6a8e／Bot2db4；本轮新增模型调用为零，当前artifact的十层整例质量验收仍未完成。历史已通过的限定样本不能改名为当前版本通过。
 
-[当前十层证据核对](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/final-framework-pair-integration-20261017T085721Z/remaining-quality-acceptance.json)绑定交付wheel、原证据文件及哈希，明确每层是否能证明当前版本。框架交付与当前全套确定性验证见[主计划](single-capability-completion-plan.md)；它们均不能替代真实质量。
+当前十层证据核对 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/final-framework-pair-integration-20261017T085721Z/remaining-quality-acceptance.json`)绑定交付wheel、原证据文件及哈希，明确每层是否能证明当前版本。框架交付与当前全套确定性验证见[主计划](single-capability-completion-plan.md)；它们均不能替代真实质量。
 
 以下保留原34aa阶段的实测范围与限制，全部按原artifact解释。其他后端按用户决定后验，原未知结果和499及此前分配不重置，也不自动派发新比较。
 
@@ -23,6 +23,6 @@
 | Discovery | Codex同family被canonical角色策略拒绝。 | 按用户决定后验其他后端，不豁免独立family。 |
 | Module cards | 完整unlimited合同要求ZCode generator＋独立Codex judge。 | 其他后端阶段后验，不以capped／同family替代。 |
 
-[当前机器核对](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/current-paired-34aa-integration-20261017/remaining-acceptance-audit.json)列原证据路径和hash、当前不被证明的项。当前完整整合进度见[34aa原执行](single-capability-current-paired-34aa-integration.md)，真实比较见[准备状态](single-capability-history-sources-comparison-preparation.md)。这些不替代深层恢复、预算／回执、其他vendor及最终release／pins／原环境保留／回滚／rollout验收。原质量历史记录按原版本解释，完整目标开放。
+当前机器核对 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/current-paired-34aa-integration-20261017/remaining-acceptance-audit.json`)列原证据路径和hash、当前不被证明的项。当前完整整合进度见[34aa原执行](single-capability-current-paired-34aa-integration.md)，真实比较见[准备状态](single-capability-history-sources-comparison-preparation.md)。这些不替代深层恢复、预算／回执、其他vendor及最终release／pins／原环境保留／回滚／rollout验收。原质量历史记录按原版本解释，完整目标开放。
 
 当前499原生终态详见[single-capability-history-sources-native-outcome.md](single-capability-history-sources-native-outcome.md)。整例失败不改变框架交付状态。

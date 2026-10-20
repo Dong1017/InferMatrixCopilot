@@ -44,12 +44,12 @@ SDK／CLI／MCP进入同一应用层。Docker执行机制与执行位置分离�
 
 ## 可审阅与运行的代码
 
-- [最终完整双仓补丁、wheels与验证包](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/curation-generation-recovery-20261017T083812Z/framework-final-review.tar.gz)
-- [代码身份及补丁重建证明](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/curation-generation-recovery-20261017T083812Z/code-identity.json)
-- [归属／迁移／删除清单快照](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/curation-generation-recovery-20261017T083812Z/ownership-migration-deletion.json)
-- [主流程与必要验证结果](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/curation-generation-recovery-20261017T083812Z/framework-result.json)
+- 最终完整双仓补丁、wheels与验证包 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/curation-generation-recovery-20261017T083812Z/framework-final-review.tar.gz`)
+- 代码身份及补丁重建证明 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/curation-generation-recovery-20261017T083812Z/code-identity.json`)
+- 归属／迁移／删除清单快照 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/curation-generation-recovery-20261017T083812Z/ownership-migration-deletion.json`)
+- 主流程与必要验证结果 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/curation-generation-recovery-20261017T083812Z/framework-result.json`)
 
-完整binary patches分别相对Copilot `647e6e02`／ReviewBot `1e70e983`应用一次，包含新增和删除；不能叠加到已有变更树。工作树见[Copilot](/data/zhoutaichang/copilot/wt-copilot-single-capability-20261012)／[ReviewBot](/data/zhoutaichang/copilot/wt-reviewbot-single-capability-20261012)。未commit、push、创建PR或部署。
+完整binary patches分别相对Copilot `647e6e02`／ReviewBot `1e70e983`应用一次，包含新增和删除；不能叠加到已有变更树。工作树见Copilot (host-local path: `/data/zhoutaichang/copilot/wt-copilot-single-capability-20261012`)／ReviewBot (host-local path: `/data/zhoutaichang/copilot/wt-reviewbot-single-capability-20261012`)。未commit、push、创建PR或部署。
 
 当前wheels SHA256：Copilot `6a8e3339ba48cce5337b7e2ff9a497ed39bbd0420a534d773bbee4bb293ffc16`；Bot `2db4f086ebc5549ff9ad4c11e6d9402679f7524e0171c8dee775d69fe21d8175`。正常安装后2337／129个产品成员与wheel及源码匹配。安装测试移出源码目录，以`-I`运行且清除PYTHONPATH／PYTHONHOME；依赖复用，不称本次fresh最小安装。
 

@@ -12,6 +12,6 @@ Copilot wheel34aa835be8db6df75b4fc35f8572cde8452efd4dc806340124954acd77280dd7，
 
 生产统计对原始Git与保留的重构前源码独立计算：Copilot相对647e6e02为244文件+12982行／+96495 AST节点，Bot相对1e70e983为37文件-1583行／-3206 AST；相对重构前快照分别为Copilot172文件+9731行／+76337 AST，Bot12文件+36行／+490 AST。包括此前保留改动，不全部归于本轮，净减行不是门槛。主清单现为69能力／33删除条目，唯一owner与兼容策略保留。
 
-[当前双仓代码与验证目录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/current-paired-34aa-integration-20261017)包含完整binary patch、wheel、私有index重建、原命令／JUnit／provenance、metrics及所有已完成控制。完整patch各自相对647e6e02／1e70e983应用一次，不要叠加到已有变更树。[新模型比较准备](single-capability-history-sources-comparison-preparation.md)的新499上限保留旧479全部分配含闲置和unknown，尚未正式准入。
+当前双仓代码与验证目录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/current-paired-34aa-integration-20261017`)包含完整binary patch、wheel、私有index重建、原命令／JUnit／provenance、metrics及所有已完成控制。完整patch各自相对647e6e02／1e70e983应用一次，不要叠加到已有变更树。[新模型比较准备](single-capability-history-sources-comparison-preparation.md)的新499上限保留旧479全部分配含闲置和unknown，尚未正式准入。
 
 完整十层模型质量、独立标签、深层恢复／预算／回执、其他vendor及最终immutable releases／pins／在途保留／回滚／发布仍开放。没有commit、push、发布或部署，完整目标不标记完成。

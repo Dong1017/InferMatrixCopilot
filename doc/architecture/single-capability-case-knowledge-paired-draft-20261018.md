@@ -10,11 +10,11 @@
 
 SDK session composition 和 legacy native host 使用同一个 selector；ledger 仍绑定原完整 plan，不以 selected copy 另建账户。quality_plan 也调用该 selector，将所有逐案例知识目录纳入私有标签／retained evidence 的 containment 检查。没有第二份 provider 调用、校验解析或重试循环。
 
-[评测修复 patch](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-pr4870-paired-draft-20261018/case-knowledge-evaluation.patch)相对前一份冻结草案的四个 Python 文件及其原协议；包内同时保留 before／after 内容与 hash。机制净 +16 行／+221 AST 节点，另有相应行为测试，生产增量 0。代码仍在 eval，不改变产品公开 API 或 wheel。
+评测修复 patch (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-pr4870-paired-draft-20261018/case-knowledge-evaluation.patch`)相对前一份冻结草案的四个 Python 文件及其原协议；包内同时保留 before／after 内容与 hash。机制净 +16 行／+221 AST 节点，另有相应行为测试，生产增量 0。代码仍在 eval，不改变产品公开 API 或 wheel。
 
 ## 新草案的实际输入
 
-[新完整 manifest](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-pr4870-paired-draft-20261018/manifest.json)显式使用独立 PR4870；原 PR1 未决调用不视为已恢复／结算，旧草案未改。新 request／host／diff 与[上一轮独立案例](single-capability-review-case-transition-20261018.md)完全一致。它是已有训练 replay，不是 blind case；synthetic discussion、unavailable CI 与禁止发布声明保留。
+新完整 manifest (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-pr4870-paired-draft-20261018/manifest.json`)显式使用独立 PR4870；原 PR1 未决调用不视为已恢复／结算，旧草案未改。新 request／host／diff 与[上一轮独立案例](single-capability-review-case-transition-20261018.md)完全一致。它是已有训练 replay，不是 blind case；synthetic discussion、unavailable CI 与禁止发布声明保留。
 
 - Direct／Strict 的两侧 host KNOWLEDGE_ROOT 都使用完整冻结 snapshot 根；native knowledge 使用其 knowledge/ 子目录。共 1702 文件，tree SHA256 d338c32ba22af684429186f31ab822a3912aa9d6afefad32160ce599c2abe509。
 - 其他六个 active init case 保留其原 fixture 知识。Discovery／Module-card 仍为明确 deferred，未绕过独立 family 政策。
@@ -40,4 +40,4 @@ SDK session composition 和 legacy native host 使用同一个 selector；ledger
 
 null 拒绝规则后的最终 scoped suites 为 82＋66 项，均 0 fail／error／skip；初版 81＋66 的报告保留历史范围，不累计冒称更多行为覆盖。评测 patch 在独立临时目录经 git apply --check、实际应用后，五份 after 文件逐字节重建一致。最终草案的相同 canonical 静态验证重新通过，预算拒绝保持。
 
-[最终评测增量与配对草案包](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-pr4870-paired-draft-20261018/case-knowledge-final-review.tar.gz)含最终 patch、before／after、JUnit、静态结果、两侧公共 SDK 读取证据及完整 manifest。它按原绝对路径／hash引用 source 和知识，不是独立可重放准入包。initial-artifact 记录和最初 archive 保持原字节；最终 archive 另命名，没有把旧校验冒充最终校验。未 commit、push、GitHub 写入或部署。
+最终评测增量与配对草案包 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-pr4870-paired-draft-20261018/case-knowledge-final-review.tar.gz`)含最终 patch、before／after、JUnit、静态结果、两侧公共 SDK 读取证据及完整 manifest。它按原绝对路径／hash引用 source 和知识，不是独立可重放准入包。initial-artifact 记录和最初 archive 保持原字节；最终 archive 另命名，没有把旧校验冒充最终校验。未 commit、push、GitHub 写入或部署。

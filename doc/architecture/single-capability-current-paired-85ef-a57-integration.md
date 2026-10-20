@@ -12,7 +12,7 @@ fresh、hash-locked、无MCP／产品src注入的最小消费者通过。2336／
 
 History4受控四PR完整提取→aggregate→导出采用201／202／203，拒绝无模型页204，full diff/base/head绑定、完成后resume零新增调用。回复为fixture，quality_accepted仍false。旧499实际比较的candidate blocked／baseline仅203及整例失败不改；当前85ef没有新的真实质量结论。
 
-[当前整合代码与证据包](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/current-paired-85ef-a57-integration-20261017/current-paired-integration-review.tar.gz)包含完整双仓binary patch、新增／删除、精确wheels、原命令／JUnit／provenance、冻结manifest、私有index重建、指标与控制。patch各自相对647e6e02／1e70e983应用一次，不叠加到已有变更树。正常Python3.12安装两个wheel即可使用；hash锁引用已保留的离线缓存，该包不冒充含全部依赖的独立installer。
+当前整合代码与证据包 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/current-paired-85ef-a57-integration-20261017/current-paired-integration-review.tar.gz`)包含完整双仓binary patch、新增／删除、精确wheels、原命令／JUnit／provenance、冻结manifest、私有index重建、指标与控制。patch各自相对647e6e02／1e70e983应用一次，不叠加到已有变更树。正常Python3.12安装两个wheel即可使用；hash锁引用已保留的离线缓存，该包不冒充含全部依赖的独立installer。
 
 生产统计沿用刚验证、产品字节相同的[防重复派发切片](single-capability-legacy-review-restart.md)：相对原Git为CP244文件+12994行／+96507 AST、Bot39文件−1511行／−2924 AST；相对重构前保留源码为CP172文件+9743行／+76349 AST、Bot16文件+108行／+772 AST。包括此前保留工作，净减行不是门槛。当前清单70能力／33删除条目。
 

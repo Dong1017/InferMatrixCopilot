@@ -12,6 +12,6 @@ init_quick_maps现在用唯一_source_row_paths解析器识别formatter生成的
 
 生产增量2文件，净33行／298 AST节点，相对fe4；前一来源连接切片为3文件+42行／+317 AST，累计及原始Git基线仍需在最终整合独立统计，净减行不是门槛。只修改共同格式化／解析和History比较的调用策略，未增加vendor或调度实现。
 
-[当前双仓完整patch和安装包](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/quick-map-body-identity-20261017)含before失败、after通过、正常安装命令、冻结旧请求、实际提案回放、源码／wheel和重建身份。完整patch分别相对647e6e02／1e70e983应用一次，不可叠加到已有修改树。此包替代fe4作为当前代码候选，fe4及a52a原证据不被改写。
+当前双仓完整patch和安装包 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/quick-map-body-identity-20261017`)含before失败、after通过、正常安装命令、冻结旧请求、实际提案回放、源码／wheel和重建身份。完整patch分别相对647e6e02／1e70e983应用一次，不可叠加到已有修改树。此包替代fe4作为当前代码候选，fe4及a52a原证据不被改写。
 
 原479预算与剩余额度／unknown全保留，本轮零新增模型调用，无commit、push、发布或部署。新版本真实aggregate／完整模型比较、十层质量、深层恢复、其他vendor及最终release／pins／在途保留／回滚仍开放。完整目标不标记完成。

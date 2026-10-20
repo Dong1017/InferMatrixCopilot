@@ -40,10 +40,10 @@ Bot jobs／发布回执、Copilot runs、knowledge生命周期与领域预算分
 
 ## 可审阅、可运行代码
 
-- [完整双仓补丁、精确wheels与验证包](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/publication-original-reconciliation-20261017/publication-original-reconciliation-review.tar.gz)，SHA256 `0bd8c7a140cb2846f8df3dcdf9720e05283b4edb742ea84f389528c23cd2f356`。
-- [基线、tree和完整patch哈希](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/publication-original-reconciliation-20261017/code-identity.json)；[生产行数／AST变化](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/publication-original-reconciliation-20261017/code-delta.json)。净减行不是验收门槛，累计与切片统计保留原范围。
-- [本次收口身份与安装成员核对](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/framework-phase-final-closeout-20261017/identity-verification.json)；[本次必要补验](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/framework-phase-final-closeout-20261017/necessary-validation.json)。本次仅文档／交付入口更新，没有生产代码变更。
-- 工作树：[Copilot](/data/zhoutaichang/copilot/wt-copilot-single-capability-20261012)、[ReviewBot](/data/zhoutaichang/copilot/wt-reviewbot-single-capability-20261012)。未commit、push、创建PR或部署。
+- 完整双仓补丁、精确wheels与验证包 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/publication-original-reconciliation-20261017/publication-original-reconciliation-review.tar.gz`)，SHA256 `0bd8c7a140cb2846f8df3dcdf9720e05283b4edb742ea84f389528c23cd2f356`。
+- 基线、tree和完整patch哈希 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/publication-original-reconciliation-20261017/code-identity.json`)；生产行数／AST变化 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/publication-original-reconciliation-20261017/code-delta.json`)。净减行不是验收门槛，累计与切片统计保留原范围。
+- 本次收口身份与安装成员核对 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/framework-phase-final-closeout-20261017/identity-verification.json`)；本次必要补验 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/framework-phase-final-closeout-20261017/necessary-validation.json`)。本次仅文档／交付入口更新，没有生产代码变更。
+- 工作树：Copilot (host-local path: `/data/zhoutaichang/copilot/wt-copilot-single-capability-20261012`)、ReviewBot (host-local path: `/data/zhoutaichang/copilot/wt-reviewbot-single-capability-20261012`)。未commit、push、创建PR或部署。
 
 完整patch分别相对Copilot `647e6e02`／ReviewBot `1e70e983`应用一次，不能叠加到已改动树。包内保留安装／验证脚本和精确依赖证据。当前wheel完整SHA见身份核对记录；与fresh环境中的2337／130产品成员重新逐字节比对通过，现存src成员也匹配。
 
@@ -53,7 +53,7 @@ Bot jobs／发布回执、Copilot runs、knowledge生命周期与领域预算分
 
 - 当前Copilot产品与原完整整合的386份src及6313份测试／eval／playbook／validator输入一致；原6008项结果及4个环境skip／对应补证保留原版本范围，不将原skip改称未发生。
 - 当前Bot完整2925项、安装235项通过。最后的[原发布回执修复](single-capability-publication-original-reconciliation-20261017.md)覆盖“已接受／丢响应 → head漂移 → 拒绝新发布 → 原回执结算”；原effect仍一次，模型调用为零。
-- [当前配对fresh最小安装](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/fresh-current-pair-20261017/result.json)通过：新venv、离线hash锁定、无源码路径注入、无MCP或site-package symlink，public SDK／curation预派发检查和实际operator console-script通过。
+- 当前配对fresh最小安装 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/fresh-current-pair-20261017/result.json`)通过：新venv、离线hash锁定、无源码路径注入、无MCP或site-package symlink，public SDK／curation预派发检查和实际operator console-script通过。
 - 本次最后补验：Copilot执行注册／worker／native组合16项、ReviewBot回执／CLI／provider与发布边界32项通过；代码包hash和已安装产品成员重新核对通过。已有充分证据后不再扩大矩阵。
 
 本地／SSH Docker实际控制保留[精确版本范围](single-capability-current-pair-runtime-controls-20261017.md)，不冒称本次重新运行；当前安装补验也不等同运行MCP服务或真实模型。

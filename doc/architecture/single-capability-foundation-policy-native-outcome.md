@@ -24,6 +24,6 @@
 
 所有22笔served model及实际USD继续unknown，不用requested model或固定领域预算费用填充。独立CLI调用数为22，不代表厂商内部turn或货币账单。保留全部旧399分配及本轮28分配，本轮用22、余6不释放／不复用，保守累计427；旧Discovery／Strict unknown及环境不动。
 
-[原终态审计](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-foundation-policy-20261017/terminal-audit.json)、[宿主内容裁定](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-foundation-policy-20261017/adjudication.json)和model-evidence.json保留实际输入、输出与接受树。终态审阅包及逐文件校验见同目录outcome-artifact.json。
+原终态审计 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-foundation-policy-20261017/terminal-audit.json`)、宿主内容裁定 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-foundation-policy-20261017/adjudication.json`)和model-evidence.json保留实际输入、输出与接受树。终态审阅包及逐文件校验见同目录outcome-artifact.json。
 
 本轮不再围绕该样本重派Foundation或改标签；完整性缺口登记后续质量阶段，不重开框架。接下来为已准备的PR-history单独冻结artifact／profile／留存／上限及正式准入。其他阶段、原unknown原位对账、深层恢复、其他vendor、最终精确配对与immutable release／rollout仍开放；没有commit、push、发布或部署。

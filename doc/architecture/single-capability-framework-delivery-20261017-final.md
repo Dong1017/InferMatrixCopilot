@@ -52,15 +52,15 @@ Docker执行机制与位置分离；ReviewBot业务账本、Copilot runs、knowl
 - 四PR受控History完整提取→aggregate→导出通过：201／202／203采用、无对应模型页的204拒绝、完成后resume零新增调用。这是接线验证，原真实比较失败结果不改。
 - 后续原Copilot完整suite已终态，与ReviewBot及eval完整suite均零失败／错误。[精确整合记录](single-capability-current-paired-34aa-integration.md)另行封存；源码4个环境skip保留，精确同名同源码的当前安装包／真实namespace补验通过。框架交付包保存封存时“全套仍运行”的原始快照，不改写旧包。
 
-机器结果、原命令、JUnit、安装与实际沙箱证据见[交付结果](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/current-paired-34aa-integration-20261017/framework-delivery/framework-result.json)与[验证目录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/current-paired-34aa-integration-20261017)。生产文件已再次核对与测试冻结输入一致，没有为收口增加产品改动或新模型派发。
+机器结果、原命令、JUnit、安装与实际沙箱证据见交付结果 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/current-paired-34aa-integration-20261017/framework-delivery/framework-result.json`)与验证目录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/current-paired-34aa-integration-20261017`)。生产文件已再次核对与测试冻结输入一致，没有为收口增加产品改动或新模型派发。
 
 ## 可审阅代码
 
-[完整双仓交付包](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/current-paired-34aa-integration-20261017/framework-delivery/framework-review.tar.gz)包含相对原始Copilot647e6e02／ReviewBot1e70e983的完整binary patch（含新增／删除）、精确wheels、架构与清单、必要验证及私有index重建证明。每个patch只对对应原始基线应用一次，不要叠加到已有变更树；正常Python3.12环境安装两个wheel，命令与可复现范围见包内README.md和commands文件。
+完整双仓交付包 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/current-paired-34aa-integration-20261017/framework-delivery/framework-review.tar.gz`)包含相对原始Copilot647e6e02／ReviewBot1e70e983的完整binary patch（含新增／删除）、精确wheels、架构与清单、必要验证及私有index重建证明。每个patch只对对应原始基线应用一次，不要叠加到已有变更树；正常Python3.12环境安装两个wheel，命令与可复现范围见包内README.md和commands文件。
 
 生产统计相对原始基线：Copilot244文件净+12982行／+96495 AST，Bot37文件净−1583行／−3206 AST；相对保留的重构前源码：Copilot172文件+9731行／+76337 AST，Bot12文件+36行／+490 AST。包括此前保留工作；净减行不是交付门槛。当前修复另为2生产文件+33行／+298 AST。
 
-当前工作树：[Copilot](/data/zhoutaichang/copilot/wt-copilot-single-capability-20261012)、[ReviewBot](/data/zhoutaichang/copilot/wt-reviewbot-single-capability-20261012)。未commit、push、创建PR、发布或部署。
+当前工作树：Copilot (host-local path: `/data/zhoutaichang/copilot/wt-copilot-single-capability-20261012`)、ReviewBot (host-local path: `/data/zhoutaichang/copilot/wt-reviewbot-single-capability-20261012`)。未commit、push、创建PR、发布或部署。
 
 ## 后续优先级
 

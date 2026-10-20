@@ -12,7 +12,7 @@ SSH location从控制机通过标准remote sandbox协议执行；local location�
 
 ## 已知结果
 
-[原结果与原命令](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/review-peer-worker-isolation-20261017)／[逐项验证](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/review-peer-worker-isolation-20261017/validation.json)：
+原结果与原命令 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/review-peer-worker-isolation-20261017`)／逐项验证 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/review-peer-worker-isolation-20261017/validation.json`)：
 
 - 四项原控制均已知exit0：两组PR×两种location。实际容器核对head、冻结host输入哈希与source evidence patch；canonical verify_snapshot验证全部1702份知识及manifest。
 - 源码和knowledge的实际输入挂载只读；写打开被拒绝。网络接口仅lo；指定账号路径、关键凭据环境变量和Docker socket不可见，profile没有credentials_source或model_proxy_socket。

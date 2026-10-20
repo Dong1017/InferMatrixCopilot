@@ -27,6 +27,6 @@
 
 六笔实际USD和served model仍unknown；规范trace的served_model均为空，不能用requested model填充。CLI计数不代表厂商内部turn或货币账单。保留全部旧427分配及新12，本轮用6、余6不释放／不复用，保守累计439。旧History拒绝样本、Foundation完整性失败、原Strict／Discovery unknown均不动。
 
-[终态审计](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-history-current-20261017/terminal-audit.json)、[原生留存核验](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-history-current-20261017/native-retention-audit.json)、[内容裁定](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-history-current-20261017/adjudication.json)及model-evidence.json保留实际文本和身份。审阅包及校验见同目录outcome-artifact.json。
+终态审计 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-history-current-20261017/terminal-audit.json`)、原生留存核验 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-history-current-20261017/native-retention-audit.json`)、内容裁定 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-history-current-20261017/adjudication.json`)及model-evidence.json保留实际文本和身份。审阅包及校验见同目录outcome-artifact.json。
 
 下一项P1是版本化通用model-scope指导：区分普通实现类与明确有证据的model scope，保持model专属归属限制，不硬编码本玩具类名，不改旧标签，不更换原unknown／batch身份。实际模型效果须在独立新协议下验证，不能原样重派本轮。其他十层、深层恢复、预算／发布回执、vendor及immutable paired release／rollout仍开放；未commit、push或部署。

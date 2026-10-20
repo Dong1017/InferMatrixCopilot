@@ -20,8 +20,8 @@
 
 针对最新两处session准备修复，已从[完整代码交付](single-capability-session-deadline-delivery-20261017.md)的full patch重建冻结源码tree1092d774…，与wheel核对377个对应Python成员；完整Copilot test套件正在运行，不能宣称其已通过。
 
-[原进程与最终结果目录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-full-source-20261017)，pid及命令见process.json。若协调端丢失观察，只检查原进程／日志／结果，不因超时重新执行。完整Bot旧结果仍限其未改动版本范围，本轮不重复运行。
+原进程与最终结果目录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-full-source-20261017`)，pid及命令见process.json。若协调端丢失观察，只检查原进程／日志／结果，不因超时重新执行。完整Bot旧结果仍限其未改动版本范围，本轮不重复运行。
 
 后续继续：观察原完整回归至terminal；冻结当前不可变配对的driver／profile、完整案例容差与新预算准入，再执行实际比较。原paid unknown、History外层ack、其余深层恢复、非Codex后端与最终release／rollout保留。
 
-[私有源码oracle及核验归档](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-quality-input-evidence-20261017/a10-quality-input-evidence.tar.gz)只供宿主审阅，不能给模型worker；其中进程观察是封包时历史快照，最终状态以原process.json及JUnit为准。
+私有源码oracle及核验归档 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-quality-input-evidence-20261017/a10-quality-input-evidence.tar.gz`)只供宿主审阅，不能给模型worker；其中进程观察是封包时历史快照，最终状态以原process.json及JUnit为准。

@@ -18,7 +18,7 @@
 
 ## 已执行验证
 
-[命令、原结果、完整首请求与当前wheels](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/strict-first-request-capture-20261017)。
+命令、原结果、完整首请求与当前wheels (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/strict-first-request-capture-20261017`)。
 
 - 88项相关源码测试通过，无fail／error／skip：producer／reader、原知识快照在环境清除／切换后仍固定、篡改拒绝、rebase／sandbox session及kernel边界、required-repair预检。
 - 真实安装MCP stdio回归：使用真正providers.run_harness_step产生spec，在child的两个knowledge环境key均省略的情况下调用真实MCP doc_read。旧2ddf不能读到所选fixture页；新e98e返回正确固定内容。初版测试用空字符串而非省略的结果另行保留；最终omitted comparison是本结论依据。
@@ -29,7 +29,7 @@
 
 ## 交付与剩余目标
 
-[完整双仓补丁、当前配对wheels与证据包](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/strict-first-request-capture-20261017/strict-bridge-pin-review.tar.gz)，各full patch对原647e6e02／1e70e983应用一次，不叠加旧full patch。代码tree、wheel／patch hash及private-index重建见code-identity.json；真实index未变。
+完整双仓补丁、当前配对wheels与证据包 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/strict-first-request-capture-20261017/strict-bridge-pin-review.tar.gz`)，各full patch对原647e6e02／1e70e983应用一次，不叠加旧full patch。代码tree、wheel／patch hash及private-index重建见code-identity.json；真实index未变。
 
 没有真实provider调用、模型回答、GitHub写入、commit／push或部署。原519／spare、旧unknown和旧执行环境不变。2ddf及1b36原验证保留其确切范围，不能改名为e98e原生验收。
 

@@ -12,7 +12,7 @@
 | pr-history-aggregate | Complete aggregate at frozen head; no per-block substitution, extraction retains unknown identity |
 | maintenance-source-audit | Semantic source claims and independent-family policy; costs/cache stay maintenance-owned |
 
-[机器证据](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/final-quality-policy-evidence-20261018/result.json)列出每个实际执行参数实例、函数、源码行／hash及Git tree。共享机制证据单列：预算耗尽、unknown usage、policy/input绑定、checkpoint先于下一次correction、原生receipt／request绑定及进程丢失。具体断言覆盖范围以冻结测试为准，不以表格标题代替语义检查。
+机器证据 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/final-quality-policy-evidence-20261018/result.json`)列出每个实际执行参数实例、函数、源码行／hash及Git tree。共享机制证据单列：预算耗尽、unknown usage、policy/input绑定、checkpoint先于下一次correction、原生receipt／request绑定及进程丢失。具体断言覆盖范围以冻结测试为准，不以表格标题代替语义检查。
 
 源代码owner同时指向共享quality_review。各stage通过init_support／depth_judge／直接review_call和checkpoint／drain组合接入；接受阈值、schema/rubric、source evidence、stage ordering和领域budget不在通用runner内强行统一。原始归属／调用方／删除清单仍是迁移与删除证据。
 

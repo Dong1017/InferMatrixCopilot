@@ -44,15 +44,15 @@ Direct 的 sandbox 分支已删除 source-only completion 拼装，在应用组�
 
 ## 可审阅、可运行代码
 
-最终双仓完整补丁、精确 wheels、代码身份、必要检查和运行说明见[最终代码包](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/direct-scoped-schema-compat-20261018/framework-close-review.tar.gz)。Copilot full patch 对 `647e6e02`、Bot full patch 对 `1e70e983`分别应用一次；不能叠加历史 full patch。完整代码树已冻结，377个产品 Python 文件与最终 wheel 一致；真实 Git index 未修改。
+最终双仓完整补丁、精确 wheels、代码身份、必要检查和运行说明见最终代码包 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/direct-scoped-schema-compat-20261018/framework-close-review.tar.gz`)。Copilot full patch 对 `647e6e02`、Bot full patch 对 `1e70e983`分别应用一次；不能叠加历史 full patch。完整代码树已冻结，377个产品 Python 文件与最终 wheel 一致；真实 Git index 未修改。
 
-[代码身份](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/direct-scoped-schema-compat-20261018/code-identity.json)；[产品行数／AST](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/direct-scoped-schema-compat-20261018/product-delta.json)。最后 Direct 修复相对 a10 改8个产品成员，净＋60行／＋624 AST。框架迁移的删除记录单列于机器清单，净减行不是验收门槛。
+代码身份 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/direct-scoped-schema-compat-20261018/code-identity.json`)；产品行数／AST (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/direct-scoped-schema-compat-20261018/product-delta.json`)。最后 Direct 修复相对 a10 改8个产品成员，净＋60行／＋624 AST。框架迁移的删除记录单列于机器清单，净减行不是验收门槛。
 
 ## 主流程结果与验证边界
 
 入口 → public SDK → 应用工作流 → provider → 类型化结果 → 发布准备的确定性主流程已贯通；Direct／Strict、local／remote 使用统一合同。模型及 GitHub effect 使用受控测试边界，不等于真实模型质量或实际发布通过。各 init 共用质量执行框架，各自 schema、rubric、独立 family 及验收策略保留。
 
-- 最后必要检查 **101 passed，0 failure／error／skip**，结果见[收口 JUnit](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/direct-scoped-schema-compat-20261018/framework-close-final.xml)，覆盖旧 session 兼容、只读 session、能力归属、执行内核注入边界和迁移后的评测 caller。
+- 最后必要检查 **101 passed，0 failure／error／skip**，结果见收口 JUnit (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/direct-scoped-schema-compat-20261018/framework-close-final.xml`)，覆盖旧 session 兼容、只读 session、能力归属、执行内核注入边界和迁移后的评测 caller。
 - 最终9855安装后定向检查46项通过；2337个Copilot／130个Bot产品成员逐字节匹配。复制测试以隔离模式运行，无产品源码路径注入；依赖复用，不声称 fresh-install。
 - 前一de065候选完整CP套件为6021通过、4跳过、2失败；两处均为旧 session 缺少可选 schema 字段的派发前兼容失败，已修复且原失败用例纳入最终检查。Bot完整2925通过。原日志保留；随后最终9855完整双仓已独立终态通过：CP6023 pass＋4环境skip，Bot2925 pass；[新完整整合](single-capability-final-paired-integration-20261018.md)保留两次版本的原记录。
 - 最终9855对应 Personal-Agent runtime／Docker镜像已独立构建并核对安装成员、CLI、策略；未运行真实模型。旧a10本地／SSH完整输入配置与bridge控制保留其原版本范围，不冒称最终9855端到端原生模型通过。

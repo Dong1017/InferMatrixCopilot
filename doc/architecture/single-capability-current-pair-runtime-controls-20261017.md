@@ -8,7 +8,7 @@
 
 SSH absolute／cancel初次返回SandboxPending，随后在同一原执行对象读取可信worker receipt，两个原结果均已校验恢复，原binding hashes不变，重复execute被拒绝。本地四种process情形初始均已知。不是替代执行，也没有用这些合成进程结算旧真实模型unknown。
 
-[原始结果](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/final-pair-native-controls-20261017T092152Z/result.json)／[原pending与原结果对账](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/final-pair-native-controls-20261017T092152Z/original-pending-observations.json)／[完整证据补充包](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/final-pair-native-controls-20261017T092152Z/current-pair-controls-review.tar.gz)。
+原始结果 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/final-pair-native-controls-20261017T092152Z/result.json`)／原pending与原结果对账 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/final-pair-native-controls-20261017T092152Z/original-pending-observations.json`)／完整证据补充包 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/final-pair-native-controls-20261017T092152Z/current-pair-controls-review.tar.gz`)。
 
 ## 运行器错误保留
 

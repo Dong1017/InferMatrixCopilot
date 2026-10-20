@@ -24,6 +24,6 @@ Bot wheel **a57ef58ac252a8464c2b785426ec933d6bd7fb9c97874106be5c05452b5c01f9**�
 
 本切片5生产文件净+72行／+282 AST节点；相对原Git基线Copilot244文件+12994行／+96507 AST，Bot39文件−1511行／−2924 AST；相对重构前保留源码分别为Copilot172文件+9743行／+76349 AST，Bot16文件+108行／+772 AST。AST对缺失文件按空Module，与累计口径一致。包括此前保留工作，净减行不是门槛。
 
-[完整双仓代码／wheel／验证包](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/legacy-review-restart-20261017/legacy-review-restart-review.tar.gz)包含原失败与通过复现、原始JUnit／命令、正常安装、指标、完整binary patches与私有index重建证明。分别相对647e6e02／1e70e983应用一次，不叠加到已有变更树。真实生产调查另见[只读保留清单](single-capability-production-retention-survey-20261017.md)；没有修改生产账本、部署或触碰凭据。
+完整双仓代码／wheel／验证包 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/legacy-review-restart-20261017/legacy-review-restart-review.tar.gz`)包含原失败与通过复现、原始JUnit／命令、正常安装、指标、完整binary patches与私有index重建证明。分别相对647e6e02／1e70e983应用一次，不叠加到已有变更树。真实生产调查另见[只读保留清单](single-capability-production-retention-survey-20261017.md)；没有修改生产账本、部署或触碰凭据。
 
 此修复闭合新发现的重复派发风险；[框架交付](single-capability-framework-delivery-20261017-final.md)的归属和架构保持，机器清单新增显式业务恢复policy owner为70能力／33删除记录。真实模型质量、深层恢复矩阵、其他后端与最终release／pins／在途保留／回滚／发布按后续阶段继续；完整目标不标记完成。

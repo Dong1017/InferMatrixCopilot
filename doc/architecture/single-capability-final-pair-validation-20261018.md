@@ -8,12 +8,12 @@
 
 | 套件 | 原始PID | 工具handle | 权威记录 |
 | --- | --- | --- | --- |
-| Copilot | 3142657 | 84963 | [process.json](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/direct-scoped-schema-compat-20261018/full-copilot/process.json) |
-| ReviewBot | 3142674 | 68636 | [process.json](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/direct-scoped-schema-compat-20261018/full-reviewbot/process.json) |
+| Copilot | 3142657 | 84963 | process.json (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/direct-scoped-schema-compat-20261018/full-copilot/process.json`) |
+| ReviewBot | 3142674 | 68636 | process.json (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/direct-scoped-schema-compat-20261018/full-reviewbot/process.json`) |
 
 ## 质量草案准备
 
-[新manifest](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/direct-evaluation-candidate-draft-v2-20261018/manifest.json)绑定最终9855环境、Personal-Agent Docker镜像a0006918、当前评测helper和完整PR4870知识。候选Direct显式使用public ReviewRuntime和受信execution_config；原baseline保留原业务，通过声明的canonical scoped bridge transport运行。原Strict baseline的MCP描述由原SDK工作树地址／工具清单导出，未复制生产机制。
+新manifest (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/direct-evaluation-candidate-draft-v2-20261018/manifest.json`)绑定最终9855环境、Personal-Agent Docker镜像a0006918、当前评测helper和完整PR4870知识。候选Direct显式使用public ReviewRuntime和受信execution_config；原baseline保留原业务，通过声明的canonical scoped bridge transport运行。原Strict baseline的MCP描述由原SDK工作树地址／工具清单导出，未复制生产机制。
 
 第一次草案构造未完成，旧基线没有新source_fingerprint模块；原半成品保留。v2只用原SDK已有导出收集基线metadata，构造已完成，4827项绑定。静态质量／phase／留存／4827项hash检查已完成：16个phase文件／38个phase通过，六个init原deadline保留；16个case／arm执行profile和canonical host binding检查通过。完整准入仍按原规则拒绝519＋新增182，没有创建live ledger。摘要见草案static-results.json与static-profile-results.json。额外检查最初误以为旧SDK工作树路径包含完整SHA；改为核对原SDK计算的精确路径后通过，未改业务路径。
 
@@ -23,11 +23,11 @@
 
 ## 最终wheel的真实namespace与资源补验
 
-Personal-Agent独立安装精确9855／24ac wheels，2467个payload成员匹配；真实Linux namespace隔离、producer scope及wheel validators／schema资源5项全部pass、0skip。无产品源码导入路径，依赖复用；原本完整源套件环境skip若发生仍保留，不能抹除。证据：[namespace归档](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/final-namespace-complements-20261018/namespace-review.tar.gz)，SHA256 `de752e1a3e6f1dac5e2a7cf83f9a9180fa1519d319c073bd4d182f68b3267a23`。无真实模型调用、凭据或proxy挂载。
+Personal-Agent独立安装精确9855／24ac wheels，2467个payload成员匹配；真实Linux namespace隔离、producer scope及wheel validators／schema资源5项全部pass、0skip。无产品源码导入路径，依赖复用；原本完整源套件环境skip若发生仍保留，不能抹除。证据：namespace归档 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/final-namespace-complements-20261018/namespace-review.tar.gz`)，SHA256 `de752e1a3e6f1dac5e2a7cf83f9a9180fa1519d319c073bd4d182f68b3267a23`。无真实模型调用、凭据或proxy挂载。
 
 ## 实际Direct入口的无模型控制（仍在运行）
 
-[控制目录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/final-direct-preparation-control-20261018)记录真实PR4870 source／host／knowledge，从public SDK预留进入Direct应用，经canonical结构化session准备SSH Docker策略和受限bridge，绑定预算钩子在模型派发前明确拒绝。首次混用config和legacy overrides在预留前被SDK拒绝，保留failure.json；修正为环境配置后原始PID3224322／handle55115运行中。不能因观察超时重启；此检查不代表typed completed review／真实质量。终态以result.json或resume-failure.json为准。
+控制目录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/final-direct-preparation-control-20261018`)记录真实PR4870 source／host／knowledge，从public SDK预留进入Direct应用，经canonical结构化session准备SSH Docker策略和受限bridge，绑定预算钩子在模型派发前明确拒绝。首次混用config和legacy overrides在预留前被SDK拒绝，保留failure.json；修正为环境配置后原始PID3224322／handle55115运行中。不能因观察超时重启；此检查不代表typed completed review／真实质量。终态以result.json或resume-failure.json为准。
 
 [实际Direct无模型控制已terminal通过](single-capability-final-direct-preparation-control-20261018.md)：最终SSH Docker配置／bridge准备完成，随后预算钩子按设计拒绝，工作流blocked／exit3、sent:false／pending:false，用时193.43s。原handle55115已exit0；无模型execution，不能算完成review或质量通过。
 

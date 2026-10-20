@@ -36,15 +36,15 @@ flowchart TD
 
 ## 当前代码与主流程结果
 
-入口 → SDK → 应用工作流 → provider → 类型化结果 → 发布准备已贯通。当前7095／3bbf正常安装主流程补验及双仓源码边界检查见[交付验证](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/framework-final-handoff-20261017/validation.json)。模型及GitHub使用受控回复，不执行真实发布；正常安装无相邻产品src及源码路径注入，依赖复用。
+入口 → SDK → 应用工作流 → provider → 类型化结果 → 发布准备已贯通。当前7095／3bbf正常安装主流程补验及双仓源码边界检查见交付验证 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/framework-final-handoff-20261017/validation.json`)。模型及GitHub使用受控回复，不执行真实发布；正常安装无相邻产品src及源码路径注入，依赖复用。
 
-当前Foundation修复的[安装验证与精确wheel证明](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/foundation-generation-policy-20261017/result-selector.json)通过：保持历史v3／v4／v5模板字节、旧unknown拒绝重派、checkpoint不改写、Depth范围、原生回执绑定、partial／portable和预算合同。当前安装选择217项零失败／错误／skip。它证明接线和兼容，不证明真实模型质量提高。
+当前Foundation修复的安装验证与精确wheel证明 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/foundation-generation-policy-20261017/result-selector.json`)通过：保持历史v3／v4／v5模板字节、旧unknown拒绝重派、checkpoint不改写、Depth范围、原生回执绑定、partial／portable和预算合同。当前安装选择217项零失败／错误／skip。它证明接线和兼容，不证明真实模型质量提高。
 
 此前[81fb完整配对整合](single-capability-current-paired-81fb-integration.md)包含双仓完整套件、独立安装主流程、fresh最小消费者及实际Docker本地／SSH控制；源码4个环境skip有精确安装补验。该完整整合不重绑定为7095全量或原生验收。原始失败、补验、旧模型样本、标签和账本均保留。
 
 ## 可审阅、可运行交付
 
-[统一交付目录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/framework-final-handoff-20261017)包含双仓从原始HEAD生成的完整patch（含新增／删除）、当前wheel、架构／机器清单、验证命令和结果、代码身份与生产行数／AST统计。补丁各应用一次，不能再叠加历史overlay。目录内README记录运行方式与报告范围。
+统一交付目录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/framework-final-handoff-20261017`)包含双仓从原始HEAD生成的完整patch（含新增／删除）、当前wheel、架构／机器清单、验证命令和结果、代码身份与生产行数／AST统计。补丁各应用一次，不能再叠加历史overlay。目录内README记录运行方式与报告范围。
 
 Copilot wheel SHA256：`70951ef63e138a2149c62dfbaa8f46a0b411f4c6c1522e26e17399c3400526d7`；Bot：`3bbf71df48a24eb05f6d07cb68fe145f8c2cd15b22f17a2f182dba4a7d001860`。当前修复相对81fb为3个生产文件、+49行／+78 AST节点；累计变化另见交付目录统计，净减行不是验收门槛。未commit、push、创建PR或部署。
 

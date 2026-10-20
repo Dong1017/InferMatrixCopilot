@@ -15,7 +15,7 @@
 
 两臂宿主源码检查均通过，均拒绝错误返回值、实例状态变更、模块状态变更三种故障；恢复源码后Git diff为空。检查禁用／清理源字节码缓存，防止变异测试误读旧缓存。候选的早期准备日志与证明保留，正式候选在清理缓存的独立workspace重验。宿主运行测试不能当作未来模型运行过测试。
 
-[冻结准备包](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/history-current-preparation-20261017/history-input-preparation-review.tar.gz)包含fixture、原标签、准备／核对脚本、两臂精确PR证据和源码证明。result.json列出未完成的准入条件；当前live_admitted及native_history_quality_accepted均为false。
+冻结准备包 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/history-current-preparation-20261017/history-input-preparation-review.tar.gz`)包含fixture、原标签、准备／核对脚本、两臂精确PR证据和源码证明。result.json列出未完成的准入条件；当前live_admitted及native_history_quality_accepted均为false。
 
 下一步先等待原Foundation终态及实际内容裁定，然后为History单独冻结保留全部427旧分配的新额度、每臂上限、artifact／profile／roles／schema／deadline／commands；显式retain-private绑定完整请求／结果和最终aggregate base/head。默认omit仍在模型前拒绝。完成角色／原生／标签隔离／受控接线检查与正式准入后才首次启动，不恢复或改写旧History付费状态。
 
@@ -27,6 +27,6 @@
 
 当前版domain payload标志为true／true／true，并持久记录retain-private。原始647为false／false／true，没有后来新增的domain policy字段；不能伪装成原始SDK本来就具备新保障。正式旧版比较仍须走现有canonical evaluation host的显式留存适配与默认拒绝协议，不能直接用本脚本替代。当前检查明确canonical_host_retention_exercised=false，未准入派发。
 
-[受控接线审阅包](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/history-current-preparation-20261017/history-wiring-review.tar.gz)与wiring-result.json保存此范围及原失败日志：最初的mock缺subscription接口、外部Git末尾换行比较、旧版不存在PAYLOADS_ENV／旧版实际omit标志。后续控制使用正确mock接口、发布器既有diff格式及真实新旧策略差异；生产代码未改。原输入准备包保持原样。
+受控接线审阅包 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/history-current-preparation-20261017/history-wiring-review.tar.gz`)与wiring-result.json保存此范围及原失败日志：最初的mock缺subscription接口、外部Git末尾换行比较、旧版不存在PAYLOADS_ENV／旧版实际omit标志。后续控制使用正确mock接口、发布器既有diff格式及真实新旧策略差异；生产代码未改。原输入准备包保持原样。
 
 调用预算仅分析为每臂3个初始调用、无配置fallback，保守上限6／臂、成对12；尚未增加任何额度或修改427旧分配。正式manifest须单独冻结这些上限，并保留旧闲置额度；上限余量不能授权unknown替换派发。

@@ -20,4 +20,4 @@
 
 全部旧459分配保留；新增20使用10、闲置10保留，累计上限479。原unknown不重派、原环境和旧失败不改。其他九层、独立标签、深层恢复、其他vendor及最终release／pins／在途保留／回滚／rollout仍未完成。无commit、push、发布或部署。
 
-[实际内容、终态审计和审阅包](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-history-citation-20261017)保留adjudication.json、model-evidence.json、原始native留存核验、quick-map-reproduction、原coordinator与manifest。原准入包只表示准入时范围，不代替本次失败裁定。
+实际内容、终态审计和审阅包 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-history-citation-20261017`)保留adjudication.json、model-evidence.json、原始native留存核验、quick-map-reproduction、原coordinator与manifest。原准入包只表示准入时范围，不代替本次失败裁定。

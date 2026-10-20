@@ -16,6 +16,6 @@
 
 每臂实际5调用，留存的20新增上限使用10／闲置10；全部旧479含闲置继续保留，累计499。没有释放旧余量、回放原unknown或部署。两侧实际served model和USD均未返回，保持unknown；requested角色不代填。token accounting及含cache关系详见adjudication.json，耗时不作为模型服务速度或因果比较。
 
-[原执行、语义裁定及留存审计](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-history-sources-20261017)保留真实请求／回复、application record、完整Git diff/base/head、所有原调用及校验结果。[结果包](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-history-sources-20261017/history-sources-outcome-review.tar.gz)封存上述报告与对应身份；不触碰原账本或原生archive。
+原执行、语义裁定及留存审计 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-history-sources-20261017`)保留真实请求／回复、application record、完整Git diff/base/head、所有原调用及校验结果。结果包 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-history-sources-20261017/history-sources-outcome-review.tar.gz`)封存上述报告与对应身份；不触碰原账本或原生archive。
 
 后续P1是生成内容完整性及各层质量验收，按阶段推进，不因本例失败重开框架、自动追加调用或放宽owner／aggregate政策。[确定性整合](single-capability-current-paired-34aa-integration.md)与[恢复合同证据](single-capability-recovery-contract-evidence.md)各自保持范围。十层质量、深层恢复、其他后端与最终release／pins／在途保留／回滚／发布仍开放，完整目标未完成。

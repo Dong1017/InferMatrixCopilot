@@ -25,4 +25,4 @@
 
 旧439全部保留；新20使用10、余10保留，累计459。未复用闲置额度、未重派旧unknown，框架及710d确定性整合保持原范围。完整十层、深层恢复、其他vendor和最终发布验收仍开放，无commit／push／发布／部署。
 
-[终态、实际内容与审阅包](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-history-scope-20261017)包含terminal-audit、native-retention-audit、adjudication、model-evidence、timing-and-corrections和原日志；outcome-artifact.json列校验。原准入包保持准入时范围，不能代替此结果。
+终态、实际内容与审阅包 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-history-scope-20261017`)包含terminal-audit、native-retention-audit、adjudication、model-evidence、timing-and-corrections和原日志；outcome-artifact.json列校验。原准入包保持准入时范围，不能代替此结果。

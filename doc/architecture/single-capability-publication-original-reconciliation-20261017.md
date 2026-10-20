@@ -37,11 +37,11 @@ flowchart TD
 
 ## 代码与证据
 
-[完整双仓补丁、配对wheels与证据包](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/publication-original-reconciliation-20261017/publication-original-reconciliation-review.tar.gz)分别相对Copilot647e6e02／ReviewBot1e70e983应用一次，不叠加旧overlay；包含此前保留工作。没有commit、push或部署。
+完整双仓补丁、配对wheels与证据包 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/publication-original-reconciliation-20261017/publication-original-reconciliation-review.tar.gz`)分别相对Copilot647e6e02／ReviewBot1e70e983应用一次，不叠加旧overlay；包含此前保留工作。没有commit、push或部署。
 
 当前Bot wheel SHA256为 `24ac7cfba06139988757ee192179ef77f59346066a9e2917ab6102250e84989a`，Copilot沿用 `1b36ed44ab9fc649ec364aa51c0747f25aeda4e9c07cf024366db721910309a9`。130个Bot产品成员与wheel、安装和冻结源码逐字节匹配；依赖复用，不称fresh安装。
 
-[验证记录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/publication-original-reconciliation-20261017/validation.json)及原JUnit保留全部范围。当前源码定向和安装验证通过：负向／不可用／畸形marker、已知receipt离线复用、缺失／损坏绑定、并发结算、既有review id不可覆盖、URI路径、DB在读取后丢失、jobs状态不变、CLI不bootstrap模型、只读transport的单一owner。安装验证以-I从源码目录外运行，清除PYTHONPATH／PYTHONHOME，pip check通过。
+验证记录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/publication-original-reconciliation-20261017/validation.json`)及原JUnit保留全部范围。当前源码定向和安装验证通过：负向／不可用／畸形marker、已知receipt离线复用、缺失／损坏绑定、并发结算、既有review id不可覆盖、URI路径、DB在读取后丢失、jobs状态不变、CLI不bootstrap模型、只读transport的单一owner。安装验证以-I从源码目录外运行，清除PYTHONPATH／PYTHONHOME，pip check通过。
 
 实际安装CLI通过loopback HTTP服务验证：负读取保持pending；正向原marker结算posted；服务关闭后复用本地receipt；缺失state拒绝且不创建目录。只有三次HTTP GET，无POST和当前head读取，原job仍为stale；配置不存在的provider命令也能正常对账。实际console-script入口也通过。另用同一已安装publisher复现“已接受／丢响应→head漂移→stale”，再调用新对账入口，receipt变posted且总effect仍为一次。模型／GitHub由受控适配器或本机HTTP服务提供，没有真实模型或GitHub写入。
 

@@ -14,9 +14,9 @@ Direct／Strict通过现有ReviewPublisher使用同一机制。Bot注入现有jo
 
 ## 当前代码和验证范围
 
-[证据目录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/publication-uncertain-visibility-20261017)包含修复前失败、过程中发现的deferred收尾问题、测试替身缺少新接口的原失败、完整patch及配对wheel。
+证据目录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/publication-uncertain-visibility-20261017`)包含修复前失败、过程中发现的deferred收尾问题、测试替身缺少新接口的原失败、完整patch及配对wheel。
 
-[完整双仓补丁、配对wheel和当前定向证据包](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/publication-uncertain-visibility-20261017/publication-visibility-review.tar.gz)绑定当前完整Bot套件及安装验证；这是本次恢复修复的交付包，尚不代表完整重构或发布验收。
+完整双仓补丁、配对wheel和当前定向证据包 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/publication-uncertain-visibility-20261017/publication-visibility-review.tar.gz`)绑定当前完整Bot套件及安装验证；这是本次恢复修复的交付包，尚不代表完整重构或发布验收。
 
 生产改动仅Bot五个src文件，净+146行／+1100 AST节点；Copilot产品代码不变。归属／调用方清单中原“GitHub delivery and business receipts”条目补充了唯一持久化owner，能力不另起一套。
 
@@ -30,6 +30,6 @@ Direct／Strict通过现有ReviewPublisher使用同一机制。Bot注入现有jo
 
 这关闭的是新协议intent已经持久化后的重复发布／错误终态路径，不声称能替原版本生成缺失的发布证据。没有intent的原历史任务、真正的远端一致性、跨环境在途保留、完整崩溃／并发矩阵及真实上线仍按原计划验收；不自动改写原任务或重派。本次完整源码与安装验证已关闭；不据此关闭以下真实质量／深层恢复／发布门槛。
 
-补充只读核查：[head漂移后的原回执复现](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/publication-receipt-reconciliation-probe-20261017/observation.json)确认远端原marker可读时，现有stale返回仍留下pending receipt。[冻结的恢复验收场景](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/publication-receipt-reconciliation-probe-20261017/acceptance-cases.json)定义后续宿主对账入口；不会通过重算review或重新发布解决。该缺口单独登记，不改写当前防重修复及原失败。
+补充只读核查：head漂移后的原回执复现 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/publication-receipt-reconciliation-probe-20261017/observation.json`)确认远端原marker可读时，现有stale返回仍留下pending receipt。冻结的恢复验收场景 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/publication-receipt-reconciliation-probe-20261017/acceptance-cases.json`)定义后续宿主对账入口；不会通过重算review或重新发布解决。该缺口单独登记，不改写当前防重修复及原失败。
 
 真实质量、独立标签、其他后端、原519分配及unknown、最终release／pins和rollout门槛继续保留。没有commit、push、模型准入或部署。[完整计划](single-capability-completion-plan.md)保持开放。

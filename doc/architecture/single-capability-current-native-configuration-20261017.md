@@ -26,4 +26,4 @@
 
 十层质量、原unknown／History外层ack、深层恢复、其他vendor、最终pins／shadow／rollout继续保留。没有GitHub写入、commit／push或部署。
 
-[原始结果、脚本与输入](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/bridge-pin-native-config-20261017)；[核验归档](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/bridge-pin-native-config-20261017/current-native-config-review.tar.gz)。local根拥有结果只通过sudo cat读取，未chmod／chown或重新执行取代结果。
+原始结果、脚本与输入 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/bridge-pin-native-config-20261017`)；核验归档 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/bridge-pin-native-config-20261017/current-native-config-review.tar.gz`)。local根拥有结果只通过sudo cat读取，未chmod／chown或重新执行取代结果。

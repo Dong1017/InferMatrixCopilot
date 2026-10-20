@@ -33,7 +33,7 @@ flowchart TD
 
 ## 主流程与代码
 
-[交付目录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/shared-generation-checkpoint-20261017)包含双仓完整patch（含新增／删除）、正常安装wheel、源码／wheel身份、生产行数与AST变化、验证命令及日志。入口→SDK→应用→provider→类型化结果→发布准备通过受控回复贯通；Direct／Strict、本地／远程和stale-head拒绝一并验证。无真实GitHub发布。
+交付目录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/shared-generation-checkpoint-20261017`)包含双仓完整patch（含新增／删除）、正常安装wheel、源码／wheel身份、生产行数与AST变化、验证命令及日志。入口→SDK→应用→provider→类型化结果→发布准备通过受控回复贯通；Direct／Strict、本地／远程和stale-head拒绝一并验证。无真实GitHub发布。
 
 当前修复相对b333涉及10个生产文件，净+127行／+753个AST节点；累计相对原始HEAD统计另附，净减行不作为验收门槛。
 

@@ -9,7 +9,7 @@
 
 ## 实际捕获与验证
 
-[原命令、raw prompt／schema及验证目录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/direct-pr-diff-prompt-20261017)。使用原安装baseline与当前安装SDK，沿已有Direct评测driver／durable runtime走到CLI边界，捕获完整首次request后由受控捕获器返回exit78。没有生成模型回答，也不将driver exit1称作review成功。两个中间candidate和两个最终candidate fixture durable run均终态，未创建付费业务运行；原519、spare及unknown不改写。
+原命令、raw prompt／schema及验证目录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/direct-pr-diff-prompt-20261017`)。使用原安装baseline与当前安装SDK，沿已有Direct评测driver／durable runtime走到CLI边界，捕获完整首次request后由受控捕获器返回exit78。没有生成模型回答，也不将driver exit1称作review成功。两个中间candidate和两个最终candidate fixture durable run均终态，未创建付费业务运行；原519、spare及unknown不改写。
 
 两组最终捕获都验证exact head、同一原knowledge tree及三点diff指令，resource_revision身份从两份降为一份：PR5636从200059降至116295字节，PR6062从297931降至160004字节。仅说明注入与输入量变化，不宣称模型质量提高。custom prompt保留的权威注入由现有E2E测试覆盖。
 
@@ -21,7 +21,7 @@ baseline和candidate原schema文件及hash均保留。唯一结构差异是exist
 
 ## 可审阅代码与当前范围
 
-[完整双仓补丁、最终wheels与本次证据包](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/direct-pr-diff-prompt-20261017/direct-pr-prompt-review.tar.gz)。full patch分别对原647e6e02／1e70e983应用一次，不叠加已有full patch。新wheel完整hash、tree和私有index重建见code-identity.json／validation.json；真实index未变。production-delta.json列相对1b36的两文件行数／AST变化；累计patch包含此前保留工作，不以净减行作门槛。
+完整双仓补丁、最终wheels与本次证据包 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/direct-pr-diff-prompt-20261017/direct-pr-prompt-review.tar.gz`)。full patch分别对原647e6e02／1e70e983应用一次，不叠加已有full patch。新wheel完整hash、tree和私有index重建见code-identity.json／validation.json；真实index未变。production-delta.json列相对1b36的两文件行数／AST变化；累计patch包含此前保留工作，不以净减行作门槛。
 
 此前1b36完整套件、fresh安装及image7656的local／SSH控制均保留原范围。新产品不能借用这些结果冒称已经完整native验收；最终发布需新的不可变配对／image／环境／profile，原付费环境不在原地替换。当前Bot完整2925及回执修复的未改范围继续保留。
 

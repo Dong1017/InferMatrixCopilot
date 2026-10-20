@@ -12,7 +12,7 @@ knowledge tree SHA256：`d338c32ba22af684429186f31ab822a3912aa9d6afefad32160ce59
 
 ## 已执行验证
 
-[证据目录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/review-shared-knowledge-20261017)包含原命令、SDK计划与读取结果、字节投影和bindings。
+证据目录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/review-shared-knowledge-20261017`)包含原命令、SDK计划与读取结果、字节投影和bindings。
 
 - 原baseline安装的2351份既有冻结文件重新核对匹配。baseline与当前SDK都在源码目录外以-I运行，隔离HOME、无PYTHONPATH注入；public DirectClient.plan与绑定context的read_document读取两组真实请求，每组7份文档，内容哈希、字节数、路由、必读指南一致。规划期间明确阻止subprocess和网络；没有模型调用。
 - 两侧resource_revision不同，原因是该身份还包含各自安装的adapters；没有强行使其相等。相同knowledge输入不表示所有产品版本或未来模型输出必须相同。

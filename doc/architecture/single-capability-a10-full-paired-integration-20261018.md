@@ -21,7 +21,7 @@ Copilot wheel a10c3484d7b0ddaf26f17164af8accc53e0c96740564eb1f4664a87f7efd3379�
 
 ## 交付和剩余目标
 
-[完整配对整合证据](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-full-paired-integration-20261018/a10-full-paired-integration.tar.gz)含两仓JUnit／原进程、安装身份及namespace资源补验源文件。[可审阅的完整双仓代码与wheels](single-capability-session-deadline-delivery-20261017.md)不变，本轮生产代码行数／AST增量0；未commit／push、GitHub写入或部署。
+完整配对整合证据 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-full-paired-integration-20261018/a10-full-paired-integration.tar.gz`)含两仓JUnit／原进程、安装身份及namespace资源补验源文件。[可审阅的完整双仓代码与wheels](single-capability-session-deadline-delivery-20261017.md)不变，本轮生产代码行数／AST增量0；未commit／push、GitHub写入或部署。
 
 接下来继续关闭新模型比较的source／knowledge／schema／labels／retention batch、当前profile／proxy／credential context和预算准入；完整fixture前置已补一部分，仍不等于可派发。182调用仅未分配提案，旧519／spare／paid unknown与原环境保持。
 

@@ -12,4 +12,4 @@
 
 本次零真实模型调用，不释放、复用或重置旧439分配。新的实际质量效果须冻结新的请求／比较协议后验证；旧两owner完整案例仍未通过，不修改原标签或重派原coordinator。Foundation冲突／失败不变量、其余质量层、深层恢复及最终发布继续按原清单处理。未commit、push或部署。
 
-[验证与代码目录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/history-scope-policy-20261017)；result-selector.json、input-proof-selector.json、commands与原日志保留各自范围。
+验证与代码目录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/history-scope-policy-20261017`)；result-selector.json、input-proof-selector.json、commands与原日志保留各自范围。

@@ -7,7 +7,7 @@
 - Copilot wheel：`e98e4c087ea01853a4d088cd701d1dc8ccd8cd5a48117eadd286e45e548c8796`。ReviewBot未改，仍为`24ac7cfb…`。
 - 新镜像：`sha256:0085a291a331d33dd084728b48f2eeebee4c293bad0904562369719144f9f3a2`。
 - Personal-Agent新环境：`/home/ubuntu/single-capability-sandbox/bridge-pin-runtime-20261017/env-policy`。新建产品环境；依赖通过原环境symlink复用，**不是fresh安装验收**。旧paid环境、镜像、执行记录与proxy均未升级／重启。
-- [证据与配置目录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/bridge-pin-runtime-20261017)。`settings-profile.json`绑定同一镜像供completion与session使用，没有credentials_source和model_proxy_socket；这是无认证的预检／控制配置，不是已获模型派发准入的生产配置。
+- 证据与配置目录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/bridge-pin-runtime-20261017`)。`settings-profile.json`绑定同一镜像供completion与session使用，没有credentials_source和model_proxy_socket；这是无认证的预检／控制配置，不是已获模型派发准入的生产配置。
 
 ## 已执行结果
 
@@ -29,4 +29,4 @@
 
 后续首先检查当前镜像的真实native有效配置／认证与不可变profile，再准备完整labels和预算准入后执行真实比较；十层质量、原unknown／外层ack对账、深层恢复及其他vendor继续保留。旧519分配及spare不变；本轮新增真实模型调用0。
 
-[归档证据包](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/bridge-pin-runtime-20261017/bridge-pin-runtime-review.tar.gz)含构建／安装／配置脚本与原结果。当前可审阅双仓完整代码包仍见[bridge修复交付](single-capability-strict-bridge-pin-delivery-20261017.md)。框架不重开。
+归档证据包 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/bridge-pin-runtime-20261017/bridge-pin-runtime-review.tar.gz`)含构建／安装／配置脚本与原结果。当前可审阅双仓完整代码包仍见[bridge修复交付](single-capability-strict-bridge-pin-delivery-20261017.md)。框架不重开。

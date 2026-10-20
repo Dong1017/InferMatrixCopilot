@@ -11,12 +11,12 @@
 | 6031 | NumPy图片输出归一化 | 1 | 0 |
 | 5981 | 模型归一化 | 1 | 0 |
 
-[输入目录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/real-pr-quality-preparation-20261017)保留最初本地squash源码提案和之后从GitHub实际冻结的原PR证据，两者不混用。可从以下证据逐项复核：
+输入目录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/real-pr-quality-preparation-20261017`)保留最初本地squash源码提案和之后从GitHub实际冻结的原PR证据，两者不混用。可从以下证据逐项复核：
 
-- [宿主证据](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/real-pr-quality-preparation-20261017/host-evidence/manifest.json)：四组PR的metadata、issue comments、review comments、reviews、threads、check runs及commit statuses。32份原始响应hash已核对，分页和thread comments完整，读取前后head/base/updated_at及评论数量稳定。空讨论是真实读取结果，不把未读取当空；CI保留原结论，不把全部记录推断成通过。
-- [原PR源码快照](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/real-pr-quality-preparation-20261017/actual-pr-sources/manifest.json)：复用现有freeze_review_repository工具，逐组绑定GitHub实际base/head，保存独立bundle，fsck通过且不依赖object alternates。原仓库没有checkout、fetch或ref写入，网络fetch只发生在输出目录内的staging仓库。
-- [宿主文件列表](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/real-pr-quality-preparation-20261017/host-files/manifest.json)：实际读取全部7个changed files，均有patch；读取后再次确认metadata稳定。
-- [源码／宿主一致性](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/real-pr-quality-preparation-20261017/source-host-parity/manifest.json)：7个文件的Git blob、增删行和patch语义均匹配；6条真实review comment引用的original commit均存在于独立快照。没有运行这些上游测试，也没有将resolved线程自动标注为fixed。
+- 宿主证据 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/real-pr-quality-preparation-20261017/host-evidence/manifest.json`)：四组PR的metadata、issue comments、review comments、reviews、threads、check runs及commit statuses。32份原始响应hash已核对，分页和thread comments完整，读取前后head/base/updated_at及评论数量稳定。空讨论是真实读取结果，不把未读取当空；CI保留原结论，不把全部记录推断成通过。
+- 原PR源码快照 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/real-pr-quality-preparation-20261017/actual-pr-sources/manifest.json`)：复用现有freeze_review_repository工具，逐组绑定GitHub实际base/head，保存独立bundle，fsck通过且不依赖object alternates。原仓库没有checkout、fetch或ref写入，网络fetch只发生在输出目录内的staging仓库。
+- 宿主文件列表 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/real-pr-quality-preparation-20261017/host-files/manifest.json`)：实际读取全部7个changed files，均有patch；读取后再次确认metadata稳定。
+- 源码／宿主一致性 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/real-pr-quality-preparation-20261017/source-host-parity/manifest.json`)：7个文件的Git blob、增删行和patch语义均匹配；6条真实review comment引用的original commit均存在于独立快照。没有运行这些上游测试，也没有将resolved线程自动标注为fixed。
 
 ## 输入差异与原失败保留
 

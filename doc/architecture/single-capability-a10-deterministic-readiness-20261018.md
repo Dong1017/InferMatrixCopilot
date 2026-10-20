@@ -22,8 +22,8 @@
 
 已为当前a10 SDK／24ac Bot创建独立安装测试环境，从原Bot full patch重建tree841e653e…，启动完整tests进程。SDK从已安装a10包加载，只有被测Bot源码进入PYTHONPATH；旧Bot源没有修改。
 
-[原进程和最终结果目录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-paired-bot-full-20261018)。本页封包时该进程仍运行，不能宣称配对完整套件通过；最终以原process.json和JUnit为准。该后续检查不重开框架，不替换已有旧版本结果。
+原进程和最终结果目录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-paired-bot-full-20261018`)。本页封包时该进程仍运行，不能宣称配对完整套件通过；最终以原process.json和JUnit为准。该后续检查不重开框架，不替换已有旧版本结果。
 
-[当前验证归档](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-deterministic-readiness-20261018/a10-deterministic-readiness.tar.gz)含原JUnit、skip原因、安装namespace补验、前置准备及精确身份。完整代码仍见[当前代码交付](single-capability-session-deadline-delivery-20261017.md)。
+当前验证归档 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-deterministic-readiness-20261018/a10-deterministic-readiness.tar.gz`)含原JUnit、skip原因、安装namespace补验、前置准备及精确身份。完整代码仍见[当前代码交付](single-capability-session-deadline-delivery-20261017.md)。
 
 八层模型比较仍须完整input／label／profile／retention batch与预算准入；182调用仅为未分配提案，原519不变。Discovery／Module-card按既有策略与用户后验选择保留；真实模型、原unknown／History ack、深层恢复、其他vendor及最终release／rollout均未宣称完成。没有GitHub写入、commit／push或部署。

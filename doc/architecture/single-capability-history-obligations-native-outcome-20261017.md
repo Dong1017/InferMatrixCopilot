@@ -8,7 +8,7 @@
 
 基线aggregate批准，但最终只导出203的QuartzDecoder规则，缺两个必需正例，故也不通过。候选prepared内容正确不能抵消最终未导出；不改变原标签／聚合门槛，不用人工结论强行批准。
 
-[原始实际model/application证据](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-history-obligations-20261017/model-evidence.json)／[逐条人工裁定](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-history-obligations-20261017/adjudication.json)／[native原始留存核验](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-history-obligations-20261017/native-retention-audit.json)／[完整结果包](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-history-obligations-20261017/history-obligations-native-outcome-review.tar.gz)。
+原始实际model/application证据 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-history-obligations-20261017/model-evidence.json`)／逐条人工裁定 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-history-obligations-20261017/adjudication.json`)／native原始留存核验 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-history-obligations-20261017/native-retention-audit.json`)／完整结果包 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-history-obligations-20261017/history-obligations-native-outcome-review.tar.gz`)。
 
 此为source作者知晓标签的既有合成案例回归，不是独立／盲测、因果或统计证据。served model和USD仍缺失，按每个原receipt保留unknown，未用requested／估计值填补。完成后零模型resume仅基线实际执行；候选blocked不声称完成后resume。
 
@@ -18,7 +18,7 @@
 
 原baseline worker PID3462030／3462040当时仍存活，继续同一manifest／guard config／账本；从未启动替代worker或coordinator。它后来结束，原内部native-workflow/phase-process.json持久记录exit0、模型5次complete，最终应用结果及基线零调用resume均保留。当前所有原PID均不存在，10份原native receipts和两份内部phase收据均可核验。
 
-**外层stage ledger的baseline仍为running／returncode null，完成ack缺失。** 未伪造stage-process.json、未修改旧行，也未把内部exit0冒充外层coordinator成功。逻辑结果与模型回执完成不等于外层业务ack已结算；这是独立P1恢复缺口。[原进程／收据观察](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-history-obligations-20261017/coordinator-observation-result.json)绑定实际原记录，最后只读SQLite backups随包保留。旧Strict／Discovery unknown与本次无关，未查询或替代。
+**外层stage ledger的baseline仍为running／returncode null，完成ack缺失。** 未伪造stage-process.json、未修改旧行，也未把内部exit0冒充外层coordinator成功。逻辑结果与模型回执完成不等于外层业务ack已结算；这是独立P1恢复缺口。原进程／收据观察 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-history-obligations-20261017/coordinator-observation-result.json`)绑定实际原记录，最后只读SQLite backups随包保留。旧Strict／Discovery unknown与本次无关，未查询或替代。
 
 ## 已定位的后续实现工作
 

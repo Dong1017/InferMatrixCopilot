@@ -25,7 +25,7 @@ Copilot wheel `a10c3484d7b0ddaf26f17164af8accc53e0c96740564eb1f4664a87f7efd3379`
 
 ## 交付与未完成项
 
-[完整双仓补丁、精确wheels、增量patch、测试快照与证据](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/session-deadline-delivery-20261017/session-deadline-review.tar.gz)。完整patch分别对Copilot647e6e02／ReviewBot1e70e983应用一次，不叠加旧full patch；另有明确标名的from-e98e-product.patch只用于与前候选比较。真实git index未变，private-index重建验证树一致。
+完整双仓补丁、精确wheels、增量patch、测试快照与证据 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/session-deadline-delivery-20261017/session-deadline-review.tar.gz`)。完整patch分别对Copilot647e6e02／ReviewBot1e70e983应用一次，不叠加旧full patch；另有明确标名的from-e98e-product.patch只用于与前候选比较。真实git index未变，private-index重建验证树一致。
 
 大型原native-policy-request与worker记录保留在各自原执行根；归档保存绑定hash、proof和原路径，不重复打包其完整源输入。原包及独立labels可见范围保持；本轮不是整例模型质量比较。
 

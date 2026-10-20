@@ -10,7 +10,7 @@
 
 当前Bot wheel **f3594226e689bf6872129c2c399856db8ff20e7aeeb25f257ebfc90be850ecb2** 相对a57仅knowledge_distiller.py／RECORD改变；129个安装成员逐字节匹配。Copilot749a wheel未改。依赖复用、正常venv导入，无产品src路径注入，不称fresh最小消费者或新完整配对／远端验收。
 
-[代码、wheel与证据包](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/knowledge-clone-crash-recovery-20261017T073050Z/knowledge-clone-crash-review.tar.gz)；[结果](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/knowledge-clone-crash-recovery-20261017T073050Z/result.json)；[独立Bot overlay](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/knowledge-clone-crash-recovery-20261017T073050Z/reviewbot-overlay.patch)；[精确代码基线与重建](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/knowledge-clone-crash-recovery-20261017T073050Z/code-identity.json)。
+代码、wheel与证据包 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/knowledge-clone-crash-recovery-20261017T073050Z/knowledge-clone-crash-review.tar.gz`)；结果 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/knowledge-clone-crash-recovery-20261017T073050Z/result.json`)；独立Bot overlay (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/knowledge-clone-crash-recovery-20261017T073050Z/reviewbot-overlay.patch`)；精确代码基线与重建 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/knowledge-clone-crash-recovery-20261017T073050Z/code-identity.json`)。
 
 生产变化1个Python文件，+7／−2行、AST净0；变更是清理位置与Git参数，非新增执行循环。无本次模型／GitHub调用、commit、push、PR、生产数据修改或部署。此前框架代码包及恢复切片保持原范围。
 

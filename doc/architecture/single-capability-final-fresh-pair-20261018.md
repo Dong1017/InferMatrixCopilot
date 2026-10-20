@@ -8,4 +8,4 @@ Copilot98554010／ReviewBot24ac7cfb在全新venv安装后通过：114个选定�
 
 发布SDK verifier核对Direct1.1.0／Strict1.4.0／Knowledge1.1.0及共享capabilities、append和签名containment。没有真实模型或GitHub发布；用例中的模型／GitHub effect边界受控。本结果不替代仍在运行的Copilot全源码套件或真实模型质量。
 
-[证据目录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/final-fresh-pair-20261018)包含全新安装过程、每个原始PID／退出状态、隔离probe、JUnit、release smoke、依赖版本和安装成员核对。生产代码变化0，原519／spare／unknown不变。
+证据目录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/final-fresh-pair-20261018`)包含全新安装过程、每个原始PID／退出状态、隔离probe、JUnit、release smoke、依赖版本和安装成员核对。生产代码变化0，原519／spare／unknown不变。

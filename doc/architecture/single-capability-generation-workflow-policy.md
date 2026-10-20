@@ -12,4 +12,4 @@ Copilot应用组合在生成execution fingerprint时只计算一次policy_digest
 
 1160／Bot3bbf冻结完整运行仍按原进程／目录结束，至少已复现这一处失败；Bot全套、评测工具全套、独立安装和namespace补验各保留原范围。新修复wheel不能继承1160全量结论，下一步核对其余原完整运行结果，再做最终精确整合。新四PR质量输入已准备但未准入，需冻结修复后的artifact并补控制。
 
-[代码与验证目录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/generation-workflow-policy-20261017)提供changes.patch、wheel、重建和校验。增量patch仅应用一次到history-scope-policy-20261017交付的精确tree；不能叠加到已有本修复的工作树。框架能力归属保持，完整目标仍开放；无真实模型调用、commit、push、发布或部署。
+代码与验证目录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/generation-workflow-policy-20261017`)提供changes.patch、wheel、重建和校验。增量patch仅应用一次到history-scope-policy-20261017交付的精确tree；不能叠加到已有本修复的工作树。框架能力归属保持，完整目标仍开放；无真实模型调用、commit、push、发布或部署。

@@ -22,7 +22,7 @@ Direct／Strict阶段的workflow timeout分别明确为900／3600秒，原生单
 
 草案按现有各域内部修复上限提出新比较最多182次native call（双臂合计）；这是**尚未分配、尚未获准入的提案**。没有修改预算revision、519累计分配、spare或旧台账，没有创建run_paired live manifest、ledger或模型stage输出。
 
-[draft-stage-index.json](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-eight-strata-preparation-20261018/draft-stage-index.json)保存具体可审阅命令与hash；它不是可派发的paired manifest。仍须完成：
+draft-stage-index.json (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-eight-strata-preparation-20261018/draft-stage-index.json`)保存具体可审阅命令与hash；它不是可派发的paired manifest。仍须完成：
 
 1. 新比较的per-arm source／knowledge／schema与host-only标签完整绑定、可见范围检查和明确容差。
 2. 各完整workflow的installed fixture准备；PR-history显式留存与冻结batch。
@@ -33,6 +33,6 @@ Direct／Strict阶段的workflow timeout分别明确为900／3600秒，原生单
 
 ## 原完整源码回归
 
-a10冻结源码的完整Copilot回归仍运行在原pid1587075；[原进程与最终结果](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-full-source-20261017)。没有因观察超时重新执行，也未宣称最终通过。其冻结tree／wheel身份保持，当前新增仅准备文件和文档。
+a10冻结源码的完整Copilot回归仍运行在原pid1587075；原进程与最终结果 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-full-source-20261017`)。没有因观察超时重新执行，也未宣称最终通过。其冻结tree／wheel身份保持，当前新增仅准备文件和文档。
 
-[本轮准备归档](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-eight-strata-preparation-20261018/a10-eight-strata-preparation.tar.gz)含旧拒绝、修正后输入、phase文件、loader结果、入口日志与安装证明。没有commit／push、GitHub写入或部署；完整目标仍未完成。
+本轮准备归档 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-eight-strata-preparation-20261018/a10-eight-strata-preparation.tar.gz`)含旧拒绝、修正后输入、phase文件、loader结果、入口日志与安装证明。没有commit／push、GitHub写入或部署；完整目标仍未完成。

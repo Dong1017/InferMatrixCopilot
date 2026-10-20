@@ -10,4 +10,4 @@
 
 这与[实际Direct SSH控制](single-capability-final-direct-preparation-control-20261018.md)一起证明最终版本按local／SSH位置复用同一应用／session／provider准备路径；都在派发前停止，不证明真实模型认证、质量或完成review结果。
 
-[证据目录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/final-direct-local-control-20261018)含原失败、原进程、只读核对、冻结输入hash、配置／bridge证明及受信profile。生产代码改动0，未改519／spare／paid unknown，未commit／push／部署。
+证据目录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/final-direct-local-control-20261018`)含原失败、原进程、只读核对、冻结输入hash、配置／bridge证明及受信profile。生产代码改动0，未改519／spare／paid unknown，未commit／push／部署。

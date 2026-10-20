@@ -11,7 +11,7 @@
 
 当前core/configuration的字节记账表述没有引用payload类型检查行，judge保留unsure；tooling/api也仅引用len(payload)却声称byte length，被拒绝。两项没有进入最终tree。宿主逐项复核当前接受的七段 prose，其范围限于进程内cache、revision、snapshot和helper，未见持久化／跨进程协调／已执行测试／benchmark断言；这只是本次样本的人工复核，不是一般模型质量保证。
 
-基线模型在core prose生成[RevisionCache](pkg/core.py)、pkg/util.py、pkg/__init__.py等相对Markdown链接。从知识页位置解析目标不存在，canonical validator正确阻断batch，不能把八个judge pass当作八个最终发布facet。基线tooling/features的byte length表述也缺少明确类型证据，宿主保留证据支撑缺口；不覆盖原native pass，更不把整个blocked batch改成通过。
+基线模型在core prose生成`RevisionCache`（目标 `pkg/core.py`）、pkg/util.py、pkg/__init__.py等相对Markdown链接。从知识页位置解析目标不存在，canonical validator正确阻断batch，不能把八个judge pass当作八个最终发布facet。基线tooling/features的byte length表述也缺少明确类型证据，宿主保留证据支撑缺口；不覆盖原native pass，更不把整个blocked batch改成通过。
 
 两臂首个生成system、配置model／effort及解析后的结构化payload相同，prompt序列化文本不同。输出措辞／引用与原生judge各为一次采样，无法据此确定软件导致的质量变化。两臂都未显式展开旧revision先于capacity判断、所有失败写入保持记账等完整正向契约；validation及部分其他facet仍未覆盖。完整Foundation、unlimited correction与十层质量验收继续未通过，不通过补写、额外调用或调整标签制造pass。
 

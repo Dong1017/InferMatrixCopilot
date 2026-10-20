@@ -38,12 +38,12 @@ Bot jobs／发布回执、Copilot runs、knowledge生命周期与领域预算分
 
 ## 可审阅、可运行代码
 
-- [完整双仓补丁、精确 wheels、相关测试和运行证据](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/session-deadline-delivery-20261017/session-deadline-review.tar.gz)。SHA256 `6544d3644c4706fc4ffab5395c781d67e604d4454eb1ec0fc34f0b1009119d5c`。
-- [代码身份、基线及冻结树](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/session-deadline-delivery-20261017/code-identity.json)。两个 full patch 分别对 Copilot `647e6e02`／ReviewBot `1e70e983`应用一次，不能叠加旧 full patch。精确 wheels 在代码包内。
-- [最后的评测账本修复及回归证据](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-retained-budget-guard-20261018/a10-retained-budget-manifest-review.tar.gz)：声明 retained allowance 时，在建库／建 stage 前校验保留额度与新增双臂上限。该增量只改 eval，不需要重建产品 wheel。
-- 可审阅工作树：[Copilot](/data/zhoutaichang/copilot/wt-copilot-single-capability-20261012)、[ReviewBot](/data/zhoutaichang/copilot/wt-reviewbot-single-capability-20261012)。未 commit、push、创建 PR 或部署。
+- 完整双仓补丁、精确 wheels、相关测试和运行证据 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/session-deadline-delivery-20261017/session-deadline-review.tar.gz`)。SHA256 `6544d3644c4706fc4ffab5395c781d67e604d4454eb1ec0fc34f0b1009119d5c`。
+- 代码身份、基线及冻结树 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/session-deadline-delivery-20261017/code-identity.json`)。两个 full patch 分别对 Copilot `647e6e02`／ReviewBot `1e70e983`应用一次，不能叠加旧 full patch。精确 wheels 在代码包内。
+- 最后的评测账本修复及回归证据 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-retained-budget-guard-20261018/a10-retained-budget-manifest-review.tar.gz`)：声明 retained allowance 时，在建库／建 stage 前校验保留额度与新增双臂上限。该增量只改 eval，不需要重建产品 wheel。
+- 可审阅工作树：Copilot (host-local path: `/data/zhoutaichang/copilot/wt-copilot-single-capability-20261012`)、ReviewBot (host-local path: `/data/zhoutaichang/copilot/wt-reviewbot-single-capability-20261012`)。未 commit、push、创建 PR 或部署。
 
-[生产修复行数／AST](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/session-deadline-delivery-20261017/product-delta.json)保留原累计／切片范围；最近 session deadline 修复相对 e98e 为净 +8 行／+47 AST。随后预算修复生产增量为 0，eval ledger 净 +10 行／+111 AST。本次收口仅文档与证据更新，生产增量 0。净减行不作为验收门槛。
+生产修复行数／AST (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/session-deadline-delivery-20261017/product-delta.json`)保留原累计／切片范围；最近 session deadline 修复相对 e98e 为净 +8 行／+47 AST。随后预算修复生产增量为 0，eval ledger 净 +10 行／+111 AST。本次收口仅文档与证据更新，生产增量 0。净减行不作为验收门槛。
 
 ## 主流程与必要验证结果
 
@@ -53,8 +53,8 @@ Bot jobs／发布回执、Copilot runs、knowledge生命周期与领域预算分
 - 安装核对：当前 wheel 的 Copilot 2337、Bot 130 个产品成员逐字节匹配；安装核对无源码路径注入。测试依赖复用，不称 fresh-install 验收。
 - [当前 session 修复](single-capability-session-deadline-delivery-20261017.md)：同一完整 PR5636／source／host／knowledge 输入通过本地与 SSH Docker 的生产 session 准备、Codex 配置和受限 bridge 检查。未缩小输入，未进入模型派发。
 - stale-head 拒绝及原回执结算已有[确定性证据](single-capability-publication-original-reconciliation-20261017.md)：已接受／丢响应后即使 head 漂移，仍结算原 effect，不重新生成或 POST。
-- 本次最后必要补验：依赖边界 24 项＋评测 ledger／coordinator 100 项，共 124 passed、0 failure／error／skip。[JUnit](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/framework-handoff-20261018-final-checks.xml)。命令：`python -m pytest -q test/test_capability_ownership.py test/test_step_registration_boundary.py eval/single-capability-shadow/test_ledger.py eval/single-capability-shadow/test_run_paired.py`。
-- [交付归档身份核对](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/framework-final-handoff-20261018/artifact-verification.json)：当前代码、完整整合及最后 eval 修复包 SHA256 一致。没有因收口重跑完整套件或扩大实验。
+- 本次最后必要补验：依赖边界 24 项＋评测 ledger／coordinator 100 项，共 124 passed、0 failure／error／skip。JUnit (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/framework-handoff-20261018-final-checks.xml`)。命令：`python -m pytest -q test/test_capability_ownership.py test/test_step_registration_boundary.py eval/single-capability-shadow/test_ledger.py eval/single-capability-shadow/test_run_paired.py`。
+- 交付归档身份核对 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/framework-final-handoff-20261018/artifact-verification.json`)：当前代码、完整整合及最后 eval 修复包 SHA256 一致。没有因收口重跑完整套件或扩大实验。
 
 框架当前缺少的已登记连接为 0；清单中尚未删除的框架重复主体为 0。兼容入口只保留转换／委托；未来发现的边界回归继续修复，不以本次登记范围断言不存在任何未知缺陷。
 

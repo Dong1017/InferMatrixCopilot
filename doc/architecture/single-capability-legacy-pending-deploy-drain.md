@@ -6,7 +6,7 @@
 
 ## 必要验证及代码
 
-[代码与证据包](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/legacy-pending-deploy-drain-20261017T072042Z/legacy-pending-drain-review.tar.gz)含相对框架交付的双仓overlay、before／after、原始JUnit、命令、基线tree和重建证明；[结果](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/legacy-pending-deploy-drain-20261017T072042Z/result.json)／[独立diff](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/legacy-pending-deploy-drain-20261017T072042Z/reviewbot-overlay.patch)。
+代码与证据包 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/legacy-pending-deploy-drain-20261017T072042Z/legacy-pending-drain-review.tar.gz`)含相对框架交付的双仓overlay、before／after、原始JUnit、命令、基线tree和重建证明；结果 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/legacy-pending-deploy-drain-20261017T072042Z/result.json`)／独立diff (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/legacy-pending-deploy-drain-20261017T072042Z/reviewbot-overlay.patch`)。
 
 - 修复前两个负例失败；两个夹具的停止标记均实际存在。
 - 修复后171项相关部署／排空／回滚／provider恢复及SDK边界测试全部通过，无skip。覆盖两个实例、原标记保留、无provider调用及恢复开关；既有无标记旧schema与远程worker路径继续通过。

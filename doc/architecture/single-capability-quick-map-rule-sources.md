@@ -21,6 +21,6 @@ History新批次显式绑定输出策略v3，提取system及citation descriptor�
 
 生产增量3文件，净42行／317个AST节点，相对fd8b，含formatter／共同调用点／History兼容策略；不以净减行为门槛。没有新增model、vendor、repair循环，Bot未改。
 
-[代码与验证目录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/quick-map-rule-sources-20261017)包含当前双仓完整patch、wheels-final、源码／安装身份、实际回放和旧请求证明。wheels目录中的a52a仅为前一轮验证证据；当前应使用wheels-final与installed-final-result.json列出的精确hash。完整patch各自相对原始647e6e02／1e70e983应用一次，不能叠加到已有变更工作树。
+代码与验证目录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/quick-map-rule-sources-20261017`)包含当前双仓完整patch、wheels-final、源码／安装身份、实际回放和旧请求证明。wheels目录中的a52a仅为前一轮验证证据；当前应使用wheels-final与installed-final-result.json列出的精确hash。完整patch各自相对原始647e6e02／1e70e983应用一次，不能叠加到已有变更工作树。
 
 新版本尚未执行真实aggregate／完整原生比较；原479额度含闲置和unknown全部保留，不重跑旧coordinator。完整十层质量、深层恢复／预算／回执、其他vendor及最终immutable pair／pins／在途环境／回滚／发布仍开放。无commit、push、发布或部署，完整目标不标记完成。

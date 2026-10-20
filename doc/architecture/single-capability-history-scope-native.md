@@ -10,4 +10,4 @@ manifest 9dbd670d00e73a11f3db1c6d3b84bd12acdc34fd1ebc00d260466b5b8cb87bcc，5427
 
 准入检查包含精确完整双仓套件、四个同名skip补验、独立安装／最小消费者、实际本地／SSH Docker控制、CLI与所选账号控制、固定代理TLS和拒绝、原SDK真实gateway＋模拟RPC留存控制、68项协议检查及最新415项评测工具全套。RPC模拟不属于原生质量证据。原1160唯一失败和7095质量失败保留。
 
-[原执行目录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-history-scope-20261017)保留manifest、阶段／模型ledger、完整请求／回复和原coordinator标识。live-admission.json是准入，不是实际质量通过；最终需按冻结标签核对全部已采用rule、完整diff、精确base/head、实际留存和完成后resume。其他九层、深层恢复、deferred vendors和最终发布验收仍开放。
+原执行目录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-history-scope-20261017`)保留manifest、阶段／模型ledger、完整请求／回复和原coordinator标识。live-admission.json是准入，不是实际质量通过；最终需按冻结标签核对全部已采用rule、完整diff、精确base/head、实际留存和完成后resume。其他九层、深层恢复、deferred vendors和最终发布验收仍开放。

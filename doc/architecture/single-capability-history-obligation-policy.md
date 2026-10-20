@@ -10,4 +10,4 @@
 
 生产相对34aa为1文件净+12行／+12 AST节点。完整双仓patch包含此前保留工作，不全部归于本切片，净减行不是门槛。当前策略只完成确定性接线与兼容验证，尚未证明真实模型会满足完整性；499失败不改写，34aa完整配对／Docker证据仅属其原包，不重绑定新wheel。
 
-[当前代码／wheel／验证目录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/history-obligation-policy-20261017)包含完整binary patches、新增／删除文件、原基线私有index重建、必要验证及旧实际请求。完整patch各相对647e6e02／1e70e983应用一次，不要叠加到已有变更树。[框架交付](single-capability-framework-delivery-20261017-final.md)保持封存，架构和69能力／33删除归属不变。后续完整质量、深层恢复、其他后端及最终配对／release／pins／在途保留／回滚／发布仍开放。本切片零模型调用、未commit／push／创建PR／发布／部署。
+当前代码／wheel／验证目录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/history-obligation-policy-20261017`)包含完整binary patches、新增／删除文件、原基线私有index重建、必要验证及旧实际请求。完整patch各相对647e6e02／1e70e983应用一次，不要叠加到已有变更树。[框架交付](single-capability-framework-delivery-20261017-final.md)保持封存，架构和69能力／33删除归属不变。后续完整质量、深层恢复、其他后端及最终配对／release／pins／在途保留／回滚／发布仍开放。本切片零模型调用、未commit／push／创建PR／发布／部署。

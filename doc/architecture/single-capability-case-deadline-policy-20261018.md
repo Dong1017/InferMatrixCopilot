@@ -22,15 +22,15 @@
 
 全局旧 120／180／5790 不变。Foundation 最小 workflow 为 5790，Strict 为 4710，Direct 为 750；各自 phase／outer stage 均覆盖选中 wait 与 host 准备。既有 Direct／Strict 真实 PR4870、完整知识、私有标签隔离和精确 worktree destination 保留；Discovery／Module-card 仍为明确 deferred，不绕过领域独立 family 政策。
 
-[新完整 manifest](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-deadline-paired-draft-20261018/manifest.json)是新冻结草案，旧 manifest 原样保留。[静态结果](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-deadline-paired-draft-20261018/static-results.json)覆盖逐案例策略、16 份 phase／38 个 phase、History 显式留存及 4830 文件绑定。完整准入仍按 retained allowance 拒绝，未创建 live ledger。
+新完整 manifest (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-deadline-paired-draft-20261018/manifest.json`)是新冻结草案，旧 manifest 原样保留。静态结果 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-deadline-paired-draft-20261018/static-results.json`)覆盖逐案例策略、16 份 phase／38 个 phase、History 显式留存及 4830 文件绑定。完整准入仍按 retained allowance 拒绝，未创建 live ledger。
 
 ## 验证与可审阅代码
 
 - 相关核心回归 217 项、入口／durable worker／installed driver 等补验 111 项均 pass，0 fail／error／skip。是受控 provider／process 边界验证，不宣称真实模型结果。
 - 新测试覆盖 case native300 到 SDK／gateway、legacy host360、workflow wait、原 ledger digest、未修改原全局 plan；非法或 dormant case 在控制和 reserve 前拒绝；Direct／Strict phase 短于选中 host＋workflow 时拒绝 stage 创建；旧计划仍拒绝 native300。
 - 首次 216 项中，新测试发现 legacy_settings 仅认全局 host_timeout_s 而忽略纯 case 表；原失败／JUnit 保留。修复判断后完成上述回归，没有修改测试预期来掩盖该缺口。
-- [增量 patch](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-case-deadline-policy-20261018/case-deadline-evaluation.patch)相对前一 case-knowledge slice；before／after 及哈希均保留，git apply --check 与独立临时树的逐字节重建通过。原产品 wheels 无需重建。
-- [行数／AST](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-case-deadline-policy-20261018/code-delta.json)：评测机制净＋35 行／＋260 AST，生产增量 0。另有相关测试和协议，不用净减行作为验收门槛。
+- 增量 patch (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-case-deadline-policy-20261018/case-deadline-evaluation.patch`)相对前一 case-knowledge slice；before／after 及哈希均保留，git apply --check 与独立临时树的逐字节重建通过。原产品 wheels 无需重建。
+- 行数／AST (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-case-deadline-policy-20261018/code-delta.json`)：评测机制净＋35 行／＋260 AST，生产增量 0。另有相关测试和协议，不用净减行作为验收门槛。
 
 ## 剩余验收
 

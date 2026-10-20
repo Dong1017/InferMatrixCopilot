@@ -10,7 +10,7 @@ strict_host.frozen_gh新增显式context_version=2：issue comments、review sum
 
 ## 实际验证
 
-[原命令、源码与证据目录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/review-frozen-forge-context-20261017)。31项定向测试通过，包括实际forge CLI子进程接收v2、旧默认wire、缺少讨论的旧repo读取、unknown拒绝与已有durable guard。原baseline和当前安装SDK均在-I、源码目录外运行；原_pr_context_bundle只在GitHub读取边界注入同一冻结adapter，阻止网络及subprocess，没有替换产品renderer。
+原命令、源码与证据目录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/review-frozen-forge-context-20261017`)。31项定向测试通过，包括实际forge CLI子进程接收v2、旧默认wire、缺少讨论的旧repo读取、unknown拒绝与已有durable guard。原baseline和当前安装SDK均在-I、源码目录外运行；原_pr_context_bundle只在GitHub读取边界注入同一冻结adapter，阻止网络及subprocess，没有替换产品renderer。
 
 两种安装的同名原renderer使用v2输入时输出完全一致：PR5636为6567字符，PR6062为1652字符。候选实际frozen_pr_context序列化同一host evidence，分别12017／4051字符，且讨论对象全部保留。因此PR上下文不是字节相同：原renderer裁剪description到4000、单讨论到700、每种来源最后10条；PR5636有4条讨论超过700。原renderer也不渲染thread_ref／original_line等候选JSON保留的元数据。没有强行改baseline生产代码来抹平这些差异。
 

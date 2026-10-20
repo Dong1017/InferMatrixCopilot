@@ -10,7 +10,7 @@ Host准备新增哈希绑定github-files.json的薄适配器，调用已安装Gi
 
 ## 当前证据
 
-[准备与验证目录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/review-pr-diff-contract-20261017)保存原失败、修复后真实PR结果、21项定向测试、CLI准备driver及兼容记录。
+准备与验证目录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/review-pr-diff-contract-20261017`)保存原失败、修复后真实PR结果、21项定向测试、CLI准备driver及兼容记录。
 
 - 两组真实源均验证exact head、merge-base diff及干净checkout；生成哈希绑定request和host packet。
 - current public SDK构造Direct／Strict请求预览；carried findings和business context相同，尚未reserve／start。PR5636两条carried finding经宿主finding_identity生成83771df3e0ebd163／e47c1e384ad3b60a，保留原评论URL／ID、原head和原line映射，未读取私有标签来构造输入。

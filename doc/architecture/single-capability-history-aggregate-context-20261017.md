@@ -10,7 +10,7 @@ Copilot knowledge_service.pinned_claims.evidence_text／_evidence_chunk统一范
 
 ## 验证与代码
 
-[完整双仓补丁、当前wheel与证据包](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/history-aggregate-context-20261017T100446Z/history-aggregate-context-review.tar.gz)／[验证范围](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/history-aggregate-context-20261017T100446Z/validation.json)／[owner／迁移／删除](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/history-aggregate-context-20261017T100446Z/ownership-deletion.json)／[代码身份](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/history-aggregate-context-20261017T100446Z/code-identity.json)。
+完整双仓补丁、当前wheel与证据包 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/history-aggregate-context-20261017T100446Z/history-aggregate-context-review.tar.gz`)／验证范围 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/history-aggregate-context-20261017T100446Z/validation.json`)／owner／迁移／删除 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/history-aggregate-context-20261017T100446Z/ownership-deletion.json`)／代码身份 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/history-aggregate-context-20261017T100446Z/code-identity.json`)。
 
 源码定向／边界108＋46通过；当前正常安装211通过。Bot安装首次90通过，7个fixture／源码检查文件缺失；初次补验在fixture拷贝完成前执行也失败。静态确认文件齐全后同名7项通过，原错误全部保留，未以改产品修fixture。旧请求比较初版也漏带validator fixture，补齐后原6a8e和新wheel各实际执行0–4，每版本3提取＋1aggregate系统／prompt／record_payload字节完全一致。以上为脚本模型边界，不是真实质量证明。
 

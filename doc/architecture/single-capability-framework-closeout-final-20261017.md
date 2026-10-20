@@ -34,9 +34,9 @@ flowchart TD
 
 ## 可审阅代码与运行入口
 
-[Copilot工作区](/data/zhoutaichang/copilot/wt-copilot-single-capability-20261012)及[ReviewBot工作区](/data/zhoutaichang/copilot/wt-reviewbot-single-capability-20261012)保留全部代码，未commit／push／发布。统一交付包包含双仓完整基线补丁及后续overlay，按code-chain.json顺序应用一次；每包保留before／after、校验、wheel及报告。也可直接安装最终wheel，按最新修复包installed.py复现定向验证。
+Copilot工作区 (host-local path: `/data/zhoutaichang/copilot/wt-copilot-single-capability-20261012`)及ReviewBot工作区 (host-local path: `/data/zhoutaichang/copilot/wt-reviewbot-single-capability-20261012`)保留全部代码，未commit／push／发布。统一交付包包含双仓完整基线补丁及后续overlay，按code-chain.json顺序应用一次；每包保留before／after、校验、wheel及报告。也可直接安装最终wheel，按最新修复包installed.py复现定向验证。
 
-[统一交付包](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/framework-closeout-final-20261017/framework-review-delivery.tar.gz)；[应用顺序与哈希](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/framework-closeout-final-20261017/code-chain.json)；[最终修复代码及报告](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/preview-integrity-20261017/README.md)。
+统一交付包 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/framework-closeout-final-20261017/framework-review-delivery.tar.gz`)；应用顺序与哈希 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/framework-closeout-final-20261017/code-chain.json`)；最终修复代码及报告 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/preview-integrity-20261017/README.md`)。
 
 最终Copilot wheel `10775b23c2f8da666de95618c1b241055de9476eaf2da665c7a0439a7ab44bfb`，Bot `3bbf71df48a24eb05f6d07cb68fe145f8c2cd15b22f17a2f182dba4a7d001860`。当前修复相对9375为6个生产文件、+106行／+689 AST节点，其他wheel资源未变，Bot未改。此前完整整合相对原基线的累计生产变化及各overlay变化分别保留在原报告；不把净行数当验收门槛。
 

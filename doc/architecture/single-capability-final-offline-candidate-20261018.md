@@ -6,4 +6,4 @@ requirements.lock逐包固定版本和SHA256，包含用于验证的pytest与pip
 
 这是可审阅的host安装候选，不是published／deployable release。没有新commit、消费pin、发布或部署；source tree不冒充已发布revision。native CLI、Docker镜像、凭据和持续proxy／模型就绪不包含在包中，仍通过受信执行profile单独管理。该包不替代真实质量、深层恢复和在途／rollout验收。
 
-[安装目录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/final-offline-candidate-20261018)含README离线命令、manifest、逐wheel hash、实际原PID／退出码、依赖版本、release SDK smoke和完整锁文件。产品改动0，新增模型调用0，原519／spare／paid unknown保留。
+安装目录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/final-offline-candidate-20261018`)含README离线命令、manifest、逐wheel hash、实际原PID／退出码、依赖版本、release SDK smoke和完整锁文件。产品改动0，新增模型调用0，原519／spare／paid unknown保留。

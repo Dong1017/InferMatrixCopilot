@@ -25,7 +25,7 @@
 
 ## 可审阅代码与剩余连接
 
-[相对 a10 的生产增量](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/direct-scoped-schema-session-20261018/from-a10-product.patch)；[新 wheels 与安装身份](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/direct-scoped-schema-session-20261018/final/candidate-identity.json)；[生产变更清单／AST](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/direct-scoped-schema-session-20261018/product-delta.json)。共 8 个产品成员，相对 a10 净＋60 行／＋612 AST；测试另列，不以净减行为验收门槛。
+相对 a10 的生产增量 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/direct-scoped-schema-session-20261018/from-a10-product.patch`)；新 wheels 与安装身份 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/direct-scoped-schema-session-20261018/final/candidate-identity.json`)；生产变更清单／AST (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/direct-scoped-schema-session-20261018/product-delta.json`)。共 8 个产品成员，相对 a10 净＋60 行／＋612 AST；测试另列，不以净减行为验收门槛。
 
 接下来冻结新代码并完成新候选的完整 paired deterministic、installed 及 local／SSH runtime 验证；将真实比较 caller 显式迁移到新配置并重新冻结 account／proxy／release/profile，随后才进行模型质量比较。当前 eval Direct driver 的旧 shim 方案不能冒称已经验证这个新 SDK sandbox 路径，仍需迁移。
 

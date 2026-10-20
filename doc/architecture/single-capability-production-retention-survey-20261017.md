@@ -15,4 +15,4 @@ completed且无GitHub receipt的1026／4条是检查分类，不等于丢失发�
 
 必须保留实际原release／venv、两实例state roots和已有provider／native留存；不得为了rollout删除旧环境。provider profile／原业务键和原生终态回执仍未完整盘点，原unknown仍需在其原环境对账。当前生产记录不能自动迁成当前新候选的执行身份。旧无身份重启的本地复现已发现重复派发风险，防护修复与验证见后续legacy-review-restart证据；本调查不修改生产账本。
 
-[机器快照与采集代码](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/production-retention-survey-20261017)绑定snapshot／collector SHA，仅输出服务字段、业务标识与受限绑定字段，未读凭据。发布前必须重采样并完成原运行绑定／保留或排空、真实immutable pair／pins与回滚验收。完整保留清单和发布均未完成，框架交付不重开。
+机器快照与采集代码 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/production-retention-survey-20261017`)绑定snapshot／collector SHA，仅输出服务字段、业务标识与受限绑定字段，未读凭据。发布前必须重采样并完成原运行绑定／保留或排空、真实immutable pair／pins与回滚验收。完整保留清单和发布均未完成，框架交付不重开。

@@ -18,7 +18,7 @@ ReviewBot `knowledge_batch_recovery.COMMIT_INTENT_PROTOCOL_VERSION` 同时用于
 
 Bot wheel **41cceff52a2458ef2cfd9ea039f538a09b2331ce0da9dcc04127a1173b6d8bda** 相对0362只改变knowledge_batch_recovery.py、knowledge_distiller.py及RECORD，129成员匹配。部署shell不在wheel内，未来release bundle还必须包含本切片deploy脚本。Copilot749a未改；当前无新完整双仓／真实Docker／质量结论。
 
-[代码、wheel与证据包](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/knowledge-commit-protocol-deploy-20261017T074623Z/knowledge-commit-protocol-review.tar.gz)；[结果](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/knowledge-commit-protocol-deploy-20261017T074623Z/result.json)；[Bot overlay](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/knowledge-commit-protocol-deploy-20261017T074623Z/reviewbot-overlay.patch)；[原安装协议探针](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/knowledge-commit-protocol-deploy-20261017T074623Z/installed-protocol-gate.json)。
+代码、wheel与证据包 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/knowledge-commit-protocol-deploy-20261017T074623Z/knowledge-commit-protocol-review.tar.gz`)；结果 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/knowledge-commit-protocol-deploy-20261017T074623Z/result.json`)；Bot overlay (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/knowledge-commit-protocol-deploy-20261017T074623Z/reviewbot-overlay.patch`)；原安装协议探针 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/knowledge-commit-protocol-deploy-20261017T074623Z/installed-protocol-gate.json`)。
 
 生产3文件净+53行；Python文件AST净+31，shell中两段Python另计+284，不把shell流程混入Python文件AST。完整逐文件统计保留，不以减行数为门槛。
 

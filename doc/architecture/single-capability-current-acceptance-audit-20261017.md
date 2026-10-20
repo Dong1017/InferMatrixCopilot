@@ -10,18 +10,18 @@
 | --- | --- | --- |
 | 唯一归属／调用方迁移／旧实现删除 | [机器清单](single-capability-framework-inventory.json)：70项能力、41项初始删除记录、24项已闭环连接、0项登记的未接通框架连接；后续宿主lookup／只读transport迁移记录在相应能力条目中。 | 保持边界守卫；不因后续质量缺口重开框架。 |
 | 确定性整合 | Copilot原386份src中相对1b36累计五个成员变更；本次88项bridge／预检测试及安装MCP回归通过，前次Direct40保留原范围。原完整套件不冒充新配对全量结果。6313份原test／eval／playbook／validator输入相同是前次审计范围。本次eval输入合同／测试已变更，见下方后续进展；保留原6008项及4项环境skip／对应补证的版本范围，不重绑定为当前全部输入验收。当前Bot326份冻结输入匹配，完整2925项、安装235项通过。 | 最终发布按不可变配对重新审核证据匹配；旧成功不自动绑定改动后的产品。 |
-| 安装与包边界 | [当前配对fresh最小安装](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/strict-first-request-capture-20261017/installed/installed-proof.json)：新建venv，离线hash锁定安装，无环境复制、无MCP、无site-package symlink；2337／130产品成员完全匹配。Bot兼容prompt与SDK同对象、完整成员匹配、实际Direct首请求捕获通过；旧SDK／curation和operator证据保留原1b36范围。 | 这是实际安装／预派发证据，不是模型、MCP服务或全部运行环境的验收。 |
+| 安装与包边界 | 当前配对fresh最小安装 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/strict-first-request-capture-20261017/installed/installed-proof.json`)：新建venv，离线hash锁定安装，无环境复制、无MCP、无site-package symlink；2337／130产品成员完全匹配。Bot兼容prompt与SDK同对象、完整成员匹配、实际Direct首请求捕获通过；旧SDK／curation和operator证据保留原1b36范围。 | 这是实际安装／预派发证据，不是模型、MCP服务或全部运行环境的验收。 |
 | 原发布回执恢复 | [宿主对账入口](single-capability-publication-original-reconciliation-20261017.md)：不重算、不POST、不恢复jobs；原head漂移后可结算回执，空／坏／缺失状态不允许重发。 | 该已复现连接已关闭；不等于所有深层恢复完成。 |
 | 原native unknown／精细对账 | 原执行身份、位置、版本、profile及519累计分配／未用额度保留；原admission hash未变。已实现防重和若干原结果恢复合同。 | 原unknown、旧History外层ack、完整崩溃／并发与精细结算矩阵继续验收，不能用“不会重发”替代原结果对账。 |
 | 十层真实质量 | 以前的成功、失败和unknown保留其原artifact范围；当前配对的完整十层质量验收未完成。两组真实上游oracle提案已有canonical请求／finding-ID、共享knowledge和指定路径local／SSH控制证据，见下文。 | 完成完整独立标签／新finding裁定与容差、完整prompt比较（PR-context部分已量测）、实际profiles和预算准入，再执行并裁定。 |
 | 后端／认证 | 当前Codex及本地／SSH沙箱控制保留其确切版本证据；其他原生后端按用户指示后验。 | 保留独立model-family政策；不能用同家族profile绕过Discovery／Module-card的准入要求。 |
-| 发布／rollout | 当前代码可由[完整配对补丁和wheels](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/strict-first-request-capture-20261017/strict-bridge-pin-review.tar.gz)重建；本任务未执行发布或部署。 | 不可变发布／consumer pins、受控shadow、在途重新盘点、原环境保留或排空及rollout／rollback证据仍须完成。 |
+| 发布／rollout | 当前代码可由完整配对补丁和wheels (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/strict-first-request-capture-20261017/strict-bridge-pin-review.tar.gz`)重建；本任务未执行发布或部署。 | 不可变发布／consumer pins、受控shadow、在途重新盘点、原环境保留或排空及rollout／rollback证据仍须完成。 |
 
-[前次1b36核对记录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/current-acceptance-audit-20261017/readiness.json)保留原范围。当前2ddf的两个生产成员变更、行数／AST及新验证见Direct交付，不用测试累计数量代表整个目标进度。
+前次1b36核对记录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/current-acceptance-audit-20261017/readiness.json`)保留原范围。当前2ddf的两个生产成员变更、行数／AST及新验证见Direct交付，不用测试累计数量代表整个目标进度。
 
 ## 真实质量输入的新证据
 
-[历史peer oracle准备](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/historical-peer-oracles-20261017/preparation.json)冻结两组真实上游记录：
+历史peer oracle准备 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/historical-peer-oracles-20261017/preparation.json`)冻结两组真实上游记录：
 
 - PR5636：Gaohan123在原commit提出两条P1问题，随后在最终head `62aeffd1…` 明确APPROVED。同一审查者接受最终head，为两条carried finding提供外部判断依据；将其映射为fixed仍是明确标注的推断和待审提案。
 - PR6062：不同于PR作者的审查者在head `688143b1…` APPROVED并留下边界处理说明。其CPU／GPU测试声明仅记录为reviewer-reported，未作为本地执行结果；批准不是“无任何其他缺陷”的标签。

@@ -18,9 +18,9 @@
 
 ## 可审阅代码与所有权
 
-[完整当前双仓代码／wheel／验证包](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/paired-recovery-integration-20261017T075627Z/paired-recovery-integration-review.tar.gz) 包含相对原Copilot647e6e02／Bot1e70e983的完整binary patch、新增／删除、精确wheels、JUnit／命令、输入manifest、资源／安装及实际隔离证据。每个full patch对原始基线只应用一次，无需串联之前overlay；不能叠加到已有变更树。
+完整当前双仓代码／wheel／验证包 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/paired-recovery-integration-20261017T075627Z/paired-recovery-integration-review.tar.gz`) 包含相对原Copilot647e6e02／Bot1e70e983的完整binary patch、新增／删除、精确wheels、JUnit／命令、输入manifest、资源／安装及实际隔离证据。每个full patch对原始基线只应用一次，无需串联之前overlay；不能叠加到已有变更树。
 
-[逐项结果](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/paired-recovery-integration-20261017T075627Z/deterministic-closure.json)／[代码身份](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/paired-recovery-integration-20261017T075627Z/code-identity.json)／[原worker对账](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/paired-recovery-integration-20261017T075627Z/runtime-controls/local-absolute-reconciliation.json)。
+逐项结果 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/paired-recovery-integration-20261017T075627Z/deterministic-closure.json`)／代码身份 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/paired-recovery-integration-20261017T075627Z/code-identity.json`)／原worker对账 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/paired-recovery-integration-20261017T075627Z/runtime-controls/local-absolute-reconciliation.json`)。
 
 能力归属和架构沿用[框架交付](single-capability-framework-closeout-current-20261017.md)：Copilot拥有provider／review／knowledge／共享质量机制，ReviewBot拥有调度、GitHub业务状态、发布／回执及本地Git事务恢复。执行内核不引入业务策略；部署与手动batch复用原kernel lease，codec／部署协商由同一个host协议descriptor约束。当前登记70能力／35删除条目，框架未接连接为空，不等于所有验收已通过。
 

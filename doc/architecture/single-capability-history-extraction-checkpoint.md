@@ -12,7 +12,7 @@ History的_extract_one原来直接generate，只有成功返回后才保存pendi
 
 ## 当前验证与代码
 
-[代码／报告目录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/history-extraction-checkpoint-20261017)包含changes.patch、before、私有索引重建、wheel、可复现命令和原失败日志。patch仅对7095的两个变动文件应用一次，含新增测试。生产变化1文件、+26行／+315 AST节点；其他wheel payload逐字节未变，Bot3bbf未改。
+代码／报告目录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/history-extraction-checkpoint-20261017`)包含changes.patch、before、私有索引重建、wheel、可复现命令和原失败日志。patch仅对7095的两个变动文件应用一次，含新增测试。生产变化1文件、+26行／+315 AST节点；其他wheel payload逐字节未变，Bot3bbf未改。
 
 当前wheel SHA256 `b3337bfd0b82c687d581715048184c7d31ffa9e51e08be846eff3bca60cbb845`。独立正常安装275项零失败／错误／skip，含API／subscription未知结果不得重派、旧歧义状态原样拒绝、真实调用前拒绝重试、History／共享质量、预算原记录恢复、portable、SDK Direct／Strict及发布资格。精确验证Copilot2335与Bot128成员，无相邻产品src／产品源码路径注入；依赖复用，不称fresh最小安装。
 
@@ -20,7 +20,7 @@ History的_extract_one原来直接generate，只有成功返回后才保存pendi
 
 ## 尚未完成的公共连接
 
-同一原始7095中，Skeleton未知调用恢复后模拟调用从1增到2，仍会替换原未知调用。这是已确认P0，不延期为普通深层恢复细节。History wheel只改了History，不能宣称也修复Skeleton。复现脚本／结果在[未知调用复现目录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/history-unknown-reproduction-20261017)。
+同一原始7095中，Skeleton未知调用恢复后模拟调用从1增到2，仍会替换原未知调用。这是已确认P0，不延期为普通深层恢复细节。History wheel只改了History，不能宣称也修复Skeleton。复现脚本／结果在未知调用复现目录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/history-unknown-reproduction-20261017`)。
 
 下一项将Skeleton及其他尚未保护的init generation调用收敛到同一应用层检查点入口，删除无检查点路径和各调用点重复包裹；已由Foundation／Discovery等任务journal拥有的派发须先核对scope，保持其原身份和恢复权威，不叠加第二套业务循环。已枚举call_discovery_model、_Knowledge._sections、_KnowledgeDepth._attempt、_Modules._card、_Stage._rules_call、_Skeleton._map_call；只有Skeleton已在本轮另行证明缺陷，其余逐项确认已有意图后迁移。
 

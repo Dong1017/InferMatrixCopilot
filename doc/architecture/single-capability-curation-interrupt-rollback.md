@@ -11,7 +11,7 @@
 - 真实worker SIGINT用例确认进入validator前文件已修改，随后保留KeyboardInterrupt、停止原validator并恢复原始字节。两页异常注入同时证明原异常对象保持。模型回复与知识提案为fixture，没有真实模型／GitHub调用。
 - 当前Copilot wheel **749ab461a2ca35dc1e2868f414c99da8a43fcd13119892f80bbf676aae0c6c25**，相对564d仅apply.py与RECORD改变，全部安装payload成员逐字节匹配。ReviewBot a57 wheel未改；此前真实Docker／完整套件仍属各自原身份，不重绑定本次新wheel。
 
-[代码、wheel与证据包](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/curation-interrupt-rollback-20261017T072429Z/curation-interrupt-rollback-review.tar.gz)；[结果](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/curation-interrupt-rollback-20261017T072429Z/result.json)；[相对上一切片的overlay](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/curation-interrupt-rollback-20261017T072429Z/copilot-overlay.patch)；[生产变化](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/curation-interrupt-rollback-20261017T072429Z/production-delta.json)。
+代码、wheel与证据包 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/curation-interrupt-rollback-20261017T072429Z/curation-interrupt-rollback-review.tar.gz`)；结果 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/curation-interrupt-rollback-20261017T072429Z/result.json`)；相对上一切片的overlay (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/curation-interrupt-rollback-20261017T072429Z/copilot-overlay.patch`)；生产变化 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/curation-interrupt-rollback-20261017T072429Z/production-delta.json`)。
 
 本切片1个生产文件，+26／−22行、AST净-20；包括删除重复恢复循环，不把行数当验收门槛。所有权不迁出Copilot，当前主清单70能力／35删除条目；封存框架的70／34清单保持原范围。
 

@@ -30,6 +30,6 @@
 
 ## 交付与剩余目标
 
-[原始结果、proof、命令与身份记录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-pr4870-session-controls-20261018)；大型 inputs.json、压缩传输文件、native-policy-request 和 worker 记录留在原控制根，归档只保存绑定与 compact evidence。来源和 sidecar 仍由 canonical reader 验证。
+原始结果、proof、命令与身份记录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-pr4870-session-controls-20261018`)；大型 inputs.json、压缩传输文件、native-policy-request 和 worker 记录留在原控制根，归档只保存绑定与 compact evidence。来源和 sidecar 仍由 canonical reader 验证。
 
 本轮模型调用 0、生产行数／AST 变化 0；未改 519／spare、未新分配 182 次提案，未动原 paid unknown、History 外层 ack 或其环境。原配对草案仍不可派发。真实模型质量、完整 deadline／账号准入、深层恢复、其他后端及最终发布继续保留，未 commit／push／部署。

@@ -8,6 +8,6 @@
 
 本检查使用native completion admission API；不能冒充独立session调用的账号证明，也不能将已关闭proxy当作可持续live readiness。实际模型调用仍需按其session／completion模式绑定同一受信profile、原生context和预算。没有服务端账号HTTP／模型RPC，不证明服务端认证、served model、usage或真实质量。
 
-[证据目录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/final-auth-proxy-evidence-20261018)含最终artifact绑定、profile、控制脚本、临时proxy关闭及admission metadata；无credential原文。产品改动0，新增模型调用0，519／spare／paid unknown保留。
+证据目录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/final-auth-proxy-evidence-20261018`)含最终artifact绑定、profile、控制脚本、临时proxy关闭及admission metadata；无credential原文。产品改动0，新增模型调用0，519／spare／paid unknown保留。
 
 新八类Codex双臂质量草案182次仍未分配；已向用户请求明确预算选择，未答复或选择暂不新增时不派发。完整目标保持，框架交付不重开。

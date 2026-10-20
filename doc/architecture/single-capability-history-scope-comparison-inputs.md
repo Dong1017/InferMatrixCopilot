@@ -17,4 +17,4 @@
 
 最小分析为每臂5次，按每调用一次有界修复为10／臂、成对20；这是分析，不是新增分配。旧439及全部闲置、unknown均保持原状。后续必须冻结正确artifact/profile/roles/schema/期限/命令，并以新协议正式准入后才能调用模型。
 
-[输入和证明目录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/history-scope-comparison-preparation-20261017)保留source-proof、evidence、private labels、model-context-equality、wiring及原失败；result.json明确quality_accepted/live_admitted=false。其他十层、深层恢复、vendor和最终发布目标不变。
+输入和证明目录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/history-scope-comparison-preparation-20261017`)保留source-proof、evidence、private labels、model-context-equality、wiring及原失败；result.json明确quality_accepted/live_admitted=false。其他十层、深层恢复、vendor和最终发布目标不变。

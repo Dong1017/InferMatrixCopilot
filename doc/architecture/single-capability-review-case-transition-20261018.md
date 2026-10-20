@@ -22,7 +22,7 @@
 
 ## 可审阅证据和下一步
 
-[本轮输入及身份记录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-review-case-transition-20261018)包含 private transition 原记录引用、两臂 installed-type 验证、可见输入、四份阶段提案及 loader 结果。根和 private 目录为 0700；文件为 0600。source repo／48MB bundle 沿用原冻结位置，仅记录绑定，不重复打包。
+本轮输入及身份记录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-review-case-transition-20261018`)包含 private transition 原记录引用、两臂 installed-type 验证、可见输入、四份阶段提案及 loader 结果。根和 private 目录为 0700；文件为 0600。source repo／48MB bundle 沿用原冻结位置，仅记录绑定，不重复打包。
 
 后续仍需把新案例显式并入完整 paired manifest，冻结相同 knowledge／当前 schema、精确 worktree destination 与可见范围；随后完善有效 profile／proxy 生命周期和独立预算准入。现有固定 host preparation timeout 对真实 source 的充分性尚未验证，不能沿用 synthetic 的通过宣称真实整例可运行。旧 519／spare 保持，新 182 次提案仍未分配。只有原身份对账或明确独立的新案例才可能进入后续派发审查，不能隐式替代未知结果。
 

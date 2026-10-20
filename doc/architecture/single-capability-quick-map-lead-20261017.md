@@ -10,7 +10,7 @@
 
 ## 验证与可审阅代码
 
-[验证记录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/quick-map-lead-20261017T102801Z/validation.json)、[代码身份](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/quick-map-lead-20261017T102801Z/code-identity.json)、[完整双仓补丁／wheel及证据包](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/quick-map-lead-20261017T102801Z/quick-map-lead-review.tar.gz)。当前Copilot wheel SHA256 `2df94d6ab5773a6a95369579357052edaf0dea913a2dfdcccf53fecfb033ddc5`，Bot wheel未变。补丁各对原647e6e02／1e70e983应用一次，不叠加旧overlay；无commit、push或部署。
+验证记录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/quick-map-lead-20261017T102801Z/validation.json`)、代码身份 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/quick-map-lead-20261017T102801Z/code-identity.json`)、完整双仓补丁／wheel及证据包 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/quick-map-lead-20261017T102801Z/quick-map-lead-review.tar.gz`)。当前Copilot wheel SHA256 `2df94d6ab5773a6a95369579357052edaf0dea913a2dfdcccf53fecfb033ddc5`，Bot wheel未变。补丁各对原647e6e02／1e70e983应用一次，不叠加旧overlay；无commit、push或部署。
 
 源码定向43／边界63通过；正常安装172通过，无skip。最后常量提取后另行完成源码绑定／依赖边界31项复验；安装验证绑定最终源码。安装使用隔离目录、`-I`、清除PYTHONPATH／PYTHONHOME，依赖复用不称fresh。旧17a与当前wheel实际运行History0–5，每版本3提取＋1聚合的system／prompt／record_payload完全一致；两端前置知识树显式固定旧source／navigation渲染以比较相同输入。
 

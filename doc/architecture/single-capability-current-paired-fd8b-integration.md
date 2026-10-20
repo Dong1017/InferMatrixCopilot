@@ -20,6 +20,6 @@ Personal-Agent新venv与Docker镜像40cdfe2d3298b08f562f71c6012800daf0ca6035a961
 
 生产变化按cumulative-production-delta.json和precompletion-production-delta.json独立计算。相对原始Git基线：Copilot244文件净+12907行／+95880 AST节点，Bot37文件-1583行／-3206 AST。相对保留的重构前源码：Copilot172文件+9656行／+75722 AST节点，Bot12文件+36行／+490 AST。含此前保留改动，不全部归于本轮；净减行不是门槛。引用契约这一切片相对710d为4生产文件+65行／+317 AST。
 
-[当前代码和验证目录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/current-paired-fd8b-integration-20261017)包含双仓完整binary patch、wheel、私有index重建、源码与安装身份、原始命令／结果、metrics和实际runtime控制。完整patch分别相对Copilot647e6e02／ReviewBot1e70e983应用一次，不能叠加到已有变更的工作树。框架架构／能力／迁移和删除清单仍见[封存交付](single-capability-framework-delivery-20261017-final.md)。
+当前代码和验证目录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/current-paired-fd8b-integration-20261017`)包含双仓完整binary patch、wheel、私有index重建、源码与安装身份、原始命令／结果、metrics和实际runtime控制。完整patch分别相对Copilot647e6e02／ReviewBot1e70e983应用一次，不能叠加到已有变更的工作树。框架架构／能力／迁移和删除清单仍见[封存交付](single-capability-framework-delivery-20261017-final.md)。
 
 [引用契约真实比较准备](single-capability-history-citation-comparison-preparation.md)保留全部旧459分配，新479仅为显式新上限，未复用闲置或替代unknown。模型比较正式准入、十层质量、深层恢复／预算／回执、其他vendor及最终immutable releases／pins／在途环境保留／回滚／rollout继续开放。无commit、push、发布或部署，完整目标未标记完成。

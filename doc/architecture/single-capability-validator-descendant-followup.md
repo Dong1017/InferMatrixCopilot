@@ -6,4 +6,4 @@
 
 后续将validator的进程归属委托给共享supervisor，保留stdout＋stderr原始字节哈希、非UTF8／换行、CLI返回码、超时和containment行为；若扩展通用command接口，二进制Git archive不得被文本转换。新的validation实现指纹也必须绑定实际进程机制。验收应证明在validation报告返回前真实grandchild已停止，cleanup无法证实时不能passed。
 
-[原始probe、反例与机器清单](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/validator-process-probe-20261017)。本轮不修改冻结的85ef／a57产品输入，不重开框架交付；当前配对主流程／安装／实际沙箱控制与此项分开记录。原始unknown不重派，完整目标仍开放。
+原始probe、反例与机器清单 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/validator-process-probe-20261017`)。本轮不修改冻结的85ef／a57产品输入，不重开框架交付；当前配对主流程／安装／实际沙箱控制与此项分开记录。原始unknown不重派，完整目标仍开放。

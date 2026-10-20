@@ -9,4 +9,4 @@
 
 最终wheel：Copilot98554010edec39df8f318f297b1d694d089d7c6cb094bdf9f7a7c8bcaa76e334；Bot24ac7cfba06139988757ee192179ef77f59346066a9e2917ab6102250e84989a。
 
-[证据目录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/final-installed-mainflow-20261018)包含原始JUnit、fixture补验、复制文件hash、wheel RECORD、发布SDK smoke和依赖版本。完整源代码套件仍仅观察原PID3142657／3142674；本检查不替代它们的终态结果。
+证据目录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/final-installed-mainflow-20261018`)包含原始JUnit、fixture补验、复制文件hash、wheel RECORD、发布SDK smoke和依赖版本。完整源代码套件仍仅观察原PID3142657／3142674；本检查不替代它们的终态结果。

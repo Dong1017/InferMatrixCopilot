@@ -20,3 +20,7 @@ Merged upstream `6a6d87fb0bab609552e6907c1f747f764a0211ff` into the framework br
 Evidence: `output/single-capability-completion-20261012/conflict-resolution-20261020/` (local artifacts). Initial failures and the initial missing build-module attempt remain recorded separately; final XML files record the successful reruns.
 
 These are affected-scope integration checks, not a new full paired-suite or real-model quality claim. Historical full-suite results retain their original snapshot scope. Browser acceptance, real-model comparisons, other native vendors and release/rollout gates remain follow-up work.
+
+## Portable documentation references
+
+Historical reports retain their original host-local artifact paths as inline code, rather than repository hyperlinks. These artifacts are not bundled in Git or available to a clean CI checkout; their paths record where the original evidence was retained, not a public download or a new verification result. Repository documents continue to use relative links. The broken model-generated `RevisionCache` link quoted in the Foundation report is preserved as text with its original target. The link checker is unchanged.

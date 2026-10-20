@@ -16,9 +16,9 @@ Personal-Agent安装同一wheels，实际namespace／资源检查通过。镜像
 
 最初整合启动会话30670终止，工具返回143；核实原Copilot／Bot PID均已消失。Copilot没有完整JUnit；Bot原JUnit2862项无失败／错误／skip，但外层退出记录缺失，不把它当成已观察exit0。原因不推断，原日志保留。
 
-确认原进程已停止后，用同一不可变快照重新执行纯fixture套件：独立session的监督进程复用Copilot run_process／file_lock／immutable writer，实际子进程退出后才写terminal receipt。它们不运行真实模型，不涉及旧付费unknown的重派。监督PID为Copilot4022895／Bot4022896，原spec、started记录、日志及最终receipt都在[durable-source-attempt](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/current-pair-integration-20261017T105136Z/durable-source-attempt)。本报告观察时尚未声明完整双仓通过；后续只观察这些原监督进程，不能因观察超时重新启动。
+确认原进程已停止后，用同一不可变快照重新执行纯fixture套件：独立session的监督进程复用Copilot run_process／file_lock／immutable writer，实际子进程退出后才写terminal receipt。它们不运行真实模型，不涉及旧付费unknown的重派。监督PID为Copilot4022895／Bot4022896，原spec、started记录、日志及最终receipt都在durable-source-attempt (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/current-pair-integration-20261017T105136Z/durable-source-attempt`)。本报告观察时尚未声明完整双仓通过；后续只观察这些原监督进程，不能因观察超时重新启动。
 
-[准备结果](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/current-pair-integration-20261017T105136Z/preparation-result.json)、[本轮准备证据包](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/current-pair-integration-20261017T105136Z/current-pair-preparation-review.tar.gz)。完整可审阅代码仍是[本版本双仓补丁](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/stage-completion-20261017T103645Z/stage-completion-review.tar.gz)，各对原647e6e02／1e70e983应用一次，不叠加旧overlay；本轮补充的是验证材料。
+准备结果 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/current-pair-integration-20261017T105136Z/preparation-result.json`)、本轮准备证据包 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/current-pair-integration-20261017T105136Z/current-pair-preparation-review.tar.gz`)。完整可审阅代码仍是本版本双仓补丁 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/stage-completion-20261017T103645Z/stage-completion-review.tar.gz`)，各对原647e6e02／1e70e983应用一次，不叠加旧overlay；本轮补充的是验证材料。
 
 ## 后续门禁
 

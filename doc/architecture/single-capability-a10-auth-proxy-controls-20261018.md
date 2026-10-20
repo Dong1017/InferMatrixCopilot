@@ -22,6 +22,6 @@ canonical admission成功在此证明离线CLI登录识别、明确credential so
 
 这些proof绑定临时控制路径，不能直接复制进live campaign；临时proxy已关。实际比较需拥有自己的proxy lifetime、不可变profile／credential快照及新proof，随后重新核验完整manifest。当前主草案仍无live派发准入：保留519＋182提案需要701，但上限仍519；没有增加额度、释放spare或触碰原unknown。
 
-[两个位置的原结果、配置、失败／关闭证据与脚本](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-auth-proxy-evidence-20261018/a10-auth-proxy-review.tar.gz)仅供宿主审阅，不是模型输入。原auth-probe根保留在各自执行地点；这些路径不能替换为新的paid调用。
+两个位置的原结果、配置、失败／关闭证据与脚本 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-auth-proxy-evidence-20261018/a10-auth-proxy-review.tar.gz`)仅供宿主审阅，不是模型输入。原auth-probe根保留在各自执行地点；这些路径不能替换为新的paid调用。
 
 当前完整确定性配对保持有效，完整十层模型质量、旧unknown／History外层ack、深层恢复、其他vendor及最终release／rollout仍未完成。没有GitHub写入、commit／push或部署。

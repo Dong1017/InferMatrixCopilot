@@ -17,7 +17,7 @@
 - 整段workflow期限1830秒（6×300＋30），phase2130、stage2160。初版1530被canonical deadline检查拒绝；原manifest及失败日志保留，尚无派发时修正，不改变期限规则。
 - 额度／留存／输入协议的52项定向验证通过；未将旧413完整评测结果改名为当前439修订全量。双臂受控History接线、完整diff绑定、标签隔离和完成后恢复为0新调用的证据单列，不当作真实语义通过。
 
-正式manifest `5657b8bcc833e9c7ac48ceb31fe66bffdc0d84decc69eaa53d8e95d65f41ec91`，5313项冻结绑定。准入记录于2026-10-17 01:52:31 UTC写入；[准入审阅包](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-history-current-20261017/admission-review.tar.gz)118成员核对，SHA256 `9880d699e80815daa8f216143a5b8ffffd8b309c844a7bde3460ec8c664ac2d2`。allocation.json记录准备时状态；当前是否运行以live-admission／原coordinator和原账本为准。
+正式manifest `5657b8bcc833e9c7ac48ceb31fe66bffdc0d84decc69eaa53d8e95d65f41ec91`，5313项冻结绑定。准入记录于2026-10-17 01:52:31 UTC写入；准入审阅包 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-history-current-20261017/admission-review.tar.gz`)118成员核对，SHA256 `9880d699e80815daa8f216143a5b8ffffd8b309c844a7bde3460ec8c664ac2d2`。allocation.json记录准备时状态；当前是否运行以live-admission／原coordinator和原账本为准。
 
 原协调进程于01:52:59 UTC首次启动，session59273／PID3464539。启动不等于完成或原生质量通过；继续观察原句柄，超时不授权重启、另起付费调用或复用旧状态。实际接受内容、原生回执、费用／served model未知及最终aggregate将待终态后分别审阅，**本页不宣称质量通过**。
 

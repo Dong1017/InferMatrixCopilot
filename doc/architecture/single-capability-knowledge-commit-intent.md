@@ -18,7 +18,7 @@
 
 当前Bot wheel **0362632c7ce469a8341fb5af92309feb46204b511975199225b4565fc3e07ab6**，相对f359只改变knowledge_distiller.py、knowledge_batch_recovery.py和RECORD；129安装成员匹配。Copilot749a wheel未改，不继承新完整双仓／远端或真实质量结论。
 
-[代码／wheel／证据包](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/knowledge-commit-intent-20261017T073556Z/knowledge-commit-intent-review.tar.gz)；[原结果与命令](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/knowledge-commit-intent-20261017T073556Z/result.json)；[Bot overlay](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/knowledge-commit-intent-20261017T073556Z/reviewbot-overlay.patch)；[精确代码重建](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/knowledge-commit-intent-20261017T073556Z/code-identity.json)。
+代码／wheel／证据包 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/knowledge-commit-intent-20261017T073556Z/knowledge-commit-intent-review.tar.gz`)；原结果与命令 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/knowledge-commit-intent-20261017T073556Z/result.json`)；Bot overlay (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/knowledge-commit-intent-20261017T073556Z/reviewbot-overlay.patch`)；精确代码重建 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/knowledge-commit-intent-20261017T073556Z/code-identity.json`)。
 
 生产变化2个文件，净+112行／+1021 AST节点，明细见production-delta.json。包含协议校验与宿主序列化，不以减行数为门槛。原framework封存、70能力／35删除记录与此前代码链保持独立。
 

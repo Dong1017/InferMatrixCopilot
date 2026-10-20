@@ -28,6 +28,6 @@ mode=retain-private时，当前SDK与baseline各到达一次已知的factory拒�
 
 源批次与留存原型已准备，但仍需纳入新配对主manifest，并绑定实际worker source／knowledge／schema roots、私有标签隔离、实际profile／proxy／credential context及新预算。后续完整模型请求／回复的持久保存、实际account admission和整例质量尚未运行。baseline的legacy host留存、完整batch恢复也仍按其既有路径验证。
 
-[冻结批次、应用checkpoint、策略原型与验证归档](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-history-batch-20261018/a10-history-batch-review.tar.gz)只供宿主审阅；不要把整个控制根或其private子目录转发给worker。模型输入只能显式选择冻结源packet，不能包括checkpoint／控制结果／私有标签。
+冻结批次、应用checkpoint、策略原型与验证归档 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/a10-history-batch-20261018/a10-history-batch-review.tar.gz`)只供宿主审阅；不要把整个控制根或其private子目录转发给worker。模型输入只能显式选择冻结源packet，不能包括checkpoint／控制结果／私有标签。
 
 [当前完整确定性配对](single-capability-a10-full-paired-integration-20261018.md)保持有效；182调用仍为未分配提案，完整十层、深层恢复、其他vendor与最终发布目标不删减。没有GitHub写入、commit／push或部署。

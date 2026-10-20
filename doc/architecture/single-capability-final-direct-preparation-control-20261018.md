@@ -8,4 +8,4 @@
 - 初次控制错误混用config与legacy settings_overrides，在预留前被SDK拒绝。failure.json保留；使用环境配置后进行第一次预留，未重派未知原执行。control acquire／prepare只作观察和拒绝，没有替代生产transport、bridge、解析、repair或accounting机制。
 - 本检查只证明实际Direct入口选择现有受限session并能准备最终SSH运行环境。local底层历史控制不自动重标为本版本实际Direct local端到端验证。
 
-[证据目录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/final-direct-preparation-control-20261018)。生产代码改动0，没有真实模型或GitHub publication。原Paid unknown／519／spare与其他执行环境不变。
+证据目录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/final-direct-preparation-control-20261018`)。生产代码改动0，没有真实模型或GitHub publication。原Paid unknown／519／spare与其他执行环境不变。

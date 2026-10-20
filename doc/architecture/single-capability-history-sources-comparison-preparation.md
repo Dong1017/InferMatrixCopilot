@@ -12,4 +12,4 @@ manifest 7f76ec3feadea3ec474ce6da52bc09a2332b70a65e35489eae9e2d1a59a085fa 绑定
 
 admit.py只有在当前完整paired套件及上述精确补验均通过后才生成不可变准入。缺source原终态的实际preflight已拒绝且未建paid ledger。dispatch_once.py只接受精确manifest／准入hash，并拒绝已有paid／stage账本，不能因观察超时重派。只观察原运行。
 
-[准备目录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-history-sources-20261017)保留冻结fixture／labels、manifest、协议增量patch、所有命令／结果和准入wrapper。完整整合原进程见[34aa状态](single-capability-current-paired-34aa-integration.md)。完整十层质量、独立标签、深层恢复、其他vendor及release／pins／在途环境／回滚／发布仍开放；无commit、push或部署。
+准备目录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-history-sources-20261017`)保留冻结fixture／labels、manifest、协议增量patch、所有命令／结果和准入wrapper。完整整合原进程见[34aa状态](single-capability-current-paired-34aa-integration.md)。完整十层质量、独立标签、深层恢复、其他vendor及release／pins／在途环境／回滚／发布仍开放；无commit、push或部署。

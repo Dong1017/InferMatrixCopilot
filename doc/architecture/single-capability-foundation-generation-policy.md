@@ -8,6 +8,6 @@ worker预检、结果校验、原生回执核对及judge输入选择的重复协
 
 历史无marker请求保留v3／v4／v5逐字节system；显式未知版本拒绝，旧unknown不换身份重派且检查点不改写。Depth不继承无关的Foundation策略选项。当前wheel7095，Bot3bbf未改。生产3文件+49行／+78 AST；完整新增文件与补丁已做私有索引重建。
 
-当前正常安装217项通过，覆盖原生归档／恢复绑定、partial交接、预算与portable等。源测试及中途缺fixture／运行时指纹失败原样保留，并有同名稳定补验；不把旧失败改绿。细节、wheel与可复现输入见[本切片代码与报告](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/foundation-generation-policy-20261017/README.md)。
+当前正常安装217项通过，覆盖原生归档／恢复绑定、partial交接、预算与portable等。源测试及中途缺fixture／运行时指纹失败原样保留，并有同名稳定补验；不把旧失败改绿。细节、wheel与可复现输入见本切片代码与报告 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/foundation-generation-policy-20261017/README.md`)。
 
 接下来须冻结新的Codex质量比较，保留旧9375失败样本、标签、判断和账本；旧闲置额度不复用，未知付费调用不重派。其他质量场景、深层恢复、其他vendor、最终配对／发布仍在完整计划中。当前仅证明策略接线与兼容，不证明模型因此更好；本轮零模型调用、未提交或部署。

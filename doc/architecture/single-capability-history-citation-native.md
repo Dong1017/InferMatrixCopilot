@@ -12,4 +12,4 @@ manifest 905e37fc68f476246dff5300a731766e9df8a357c96f55efc4fc1792c65a22f4 绑定
 
 精确完整配对和当前416项评测工具补验通过，原四个环境skip保留并有精确补验；账号／CLI、固定代理TLS及拒绝、规范旧SDK留存和原paid结果只读保存检查通过。准入不是质量通过，旧SDK RPC模拟不属于原生质量。旧710d／7095失败结果及原unknown保持，不复用旧闲置。
 
-[原执行与准入目录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-history-citation-20261017)保存不可变live-admission、manifest、phases、原标签、完整请求／回复留存配置和first-dispatch wrapper。首次派发后仅观察原coordinator，不因超时或unknown换ID重派；未知留待原环境对账。最终必须按冻结标签核对真实采用规则、完整diff/base/head、原生留存和完成后resume。其余九层、独立标签、深层恢复、其他vendor及最终发布验收仍开放，无commit／push／发布／部署。
+原执行与准入目录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-history-citation-20261017`)保存不可变live-admission、manifest、phases、原标签、完整请求／回复留存配置和first-dispatch wrapper。首次派发后仅观察原coordinator，不因超时或unknown换ID重派；未知留待原环境对账。最终必须按冻结标签核对真实采用规则、完整diff/base/head、原生留存和完成后resume。其余九层、独立标签、深层恢复、其他vendor及最终发布验收仍开放，无commit／push／发布／部署。

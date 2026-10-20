@@ -1947,7 +1947,7 @@ All workers are terminal; models/vendor calls are zero. Initial cache-directory
 fixture failure is retained; corrected probes use fresh image/root, same wheel.
 
 Production changes: three existing files +31 lines/+164 AST nodes. No original
-paid/shadow/auth cache/runtime, quotas, release or pins changed. [Evidence](../../../output/single-capability-completion-20261012/claude-auth-control-20261015/evidence.json).
+paid/shadow/auth cache/runtime, quotas, release or pins changed. Evidence (host-local path: `../../../output/single-capability-completion-20261012/claude-auth-control-20261015/evidence.json`).
 Native managed/real-account/refresh, remaining recovery and accounting, final
 full suites, frozen quality and release remain open. Billing audit records the
 legacy improvement CLI zero/subscription convention and harness planning skip;
@@ -1974,7 +1974,7 @@ to produce the corrected reports. No inference replay. Vendor calls are zero.
 Production delta: one runtime file +10 lines/+134 AST nodes; retired eval
 compiler −68 lines/−354 AST nodes measured separately. No production pins,
 releases, original paid/shadow records, auth cache or retained runtime changes.
-Current evidence: [backend-conformance-20261015](../../../output/single-capability-completion-20261012/backend-conformance-20261015/evidence.json). Full native managed/auth
+Current evidence: backend-conformance-20261015 (host-local path: `../../../output/single-capability-completion-20261012/backend-conformance-20261015/evidence.json`). Full native managed/auth
 matrix, final full paired checks, recovery/accounting, quality and release remain
 open. Full goal remains active; all slice validation handles are terminal.
 

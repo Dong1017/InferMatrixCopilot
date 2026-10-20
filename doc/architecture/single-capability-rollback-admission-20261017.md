@@ -6,7 +6,7 @@
 
 strict_drain_state用一个saved_instances读取／校验原journal；两个目标及全部原flags在写任一配置之前检查，主配置不能被静默跳过。prepare和恢复使用同一实例映射。缺失／损坏拒绝恢复；pause无法持久化时保留明确错误及staging，不能把它描述为已验证的完整恢复。没有新增provider或模型循环，也没有移走Bot业务账本。
 
-[完整双仓补丁、配对wheels及证据包](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/rollback-admission-20261017T112850Z/rollback-admission-review.tar.gz)、[验证范围](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/rollback-admission-20261017T112850Z/validation.json)、[代码身份](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/rollback-admission-20261017T112850Z/code-identity.json)、[增量patch](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/rollback-admission-20261017T112850Z/repair.patch)。各完整patch对原647e6e02／1e70e983应用一次，不叠加旧overlay。真实index未变，没有commit／push／发布／部署。
+完整双仓补丁、配对wheels及证据包 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/rollback-admission-20261017T112850Z/rollback-admission-review.tar.gz`)、验证范围 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/rollback-admission-20261017T112850Z/validation.json`)、代码身份 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/rollback-admission-20261017T112850Z/code-identity.json`)、增量patch (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/rollback-admission-20261017T112850Z/repair.patch`)。各完整patch对原647e6e02／1e70e983应用一次，不叠加旧overlay。真实index未变，没有commit／push／发布／部署。
 
 当前Bot完整套件2881项和最终受影响109项通过，均无skip。复用现有run_process监督的原进程写入exit0／reason null凭证，冻结输入及日志／spec哈希匹配。bash语法与diff空白检查通过。旧4项失败、journal8项失败、缺配置2项失败及中间2项兼容断言失败全部保留；后两项改为验证“缺证据拒绝恢复，未变flags与原legacy intent仍保留”，没有删除原安全断言。
 

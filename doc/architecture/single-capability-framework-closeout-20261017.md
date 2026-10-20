@@ -42,10 +42,10 @@ SDK／CLI／MCP进入同一应用层。沙箱机制与执行位置分离，本�
 
 ## 可审阅、可运行的代码
 
-- [当前完整双仓补丁、配对wheels及证据包](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/rollback-admission-20261017T112850Z/rollback-admission-review.tar.gz)，SHA256 `84f039771d0e9e81da98f531032db020ed4caee1b370fee6ab7e9ac6dae2c475`。
-- [代码身份及补丁重建证明](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/rollback-admission-20261017T112850Z/code-identity.json)。完整patch分别对Copilot `647e6e02`／ReviewBot `1e70e983`应用一次，不能叠加旧overlay。
+- 当前完整双仓补丁、配对wheels及证据包 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/rollback-admission-20261017T112850Z/rollback-admission-review.tar.gz`)，SHA256 `84f039771d0e9e81da98f531032db020ed4caee1b370fee6ab7e9ac6dae2c475`。
+- 代码身份及补丁重建证明 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/rollback-admission-20261017T112850Z/code-identity.json`)。完整patch分别对Copilot `647e6e02`／ReviewBot `1e70e983`应用一次，不能叠加旧overlay。
 - [精确配对安装与运行验证](single-capability-current-pair-integration-20261017.md)包含fresh最小安装、公开SDK consumer探针和安装主流程；[本地／SSH Docker控制](single-capability-1b36-runtime-controls-20261017.md)绑定同一产品版本。
-- 工作树：[Copilot](/data/zhoutaichang/copilot/wt-copilot-single-capability-20261012)／[ReviewBot](/data/zhoutaichang/copilot/wt-reviewbot-single-capability-20261012)。包内为可重建完整代码，包含此前保留工作。
+- 工作树：Copilot (host-local path: `/data/zhoutaichang/copilot/wt-copilot-single-capability-20261012`)／ReviewBot (host-local path: `/data/zhoutaichang/copilot/wt-reviewbot-single-capability-20261012`)。包内为可重建完整代码，包含此前保留工作。
 
 当前wheel SHA256：Copilot `1b36ed44ab9fc649ec364aa51c0747f25aeda4e9c07cf024366db721910309a9`；ReviewBot `2db4f086ebc5549ff9ad4c11e6d9402679f7524e0171c8dee775d69fe21d8175`。最新变化为Bot部署宿主资源，不改变这两份wheel。
 
@@ -62,7 +62,7 @@ SDK／CLI／MCP进入同一应用层。沙箱机制与执行位置分离，本�
 
 最后修复详见[回滚admission报告](single-capability-rollback-admission-20261017.md)。该修复生产资源为server-deploy.sh：净+41行；5段嵌入Python AST净+290，src Python无变化。此前累计产品src相对原baseline：Copilot244文件净+13070行／+98395 AST；Bot39文件净−1108行／−1052 AST，包含此前保留工作，详细统计在配对证据包内。
 
-[收口核对记录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/framework-closeout-confirmation-20261017.json)再次验证当前完整包hash、两份wheel与当前Python源码、最后宿主源码hash、原始JUnit及清单一致性。此前已通过的套件不重复运行；初次失败、中断、原skip和unknown不改写。本次收口只更新文档和导航，不增加生产实现、真实模型调用或部署。
+收口核对记录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/framework-closeout-confirmation-20261017.json`)再次验证当前完整包hash、两份wheel与当前Python源码、最后宿主源码hash、原始JUnit及清单一致性。此前已通过的套件不重复运行；初次失败、中断、原skip和unknown不改写。本次收口只更新文档和导航，不增加生产实现、真实模型调用或部署。
 
 ## 后续优先级：完整目标保留
 

@@ -14,4 +14,4 @@ manifest 905e37fc68f476246dff5300a731766e9df8a357c96f55efc4fc1792c65a22f4 绑定
 
 admit.py只在当前完整Copilot／Bot／evaluation终态、精确skip补验、安装主流程、fresh最小消费者、实际local／SSH Docker、账号／代理、留存和新harness都通过后生成不可变准入记录；缺原source终态的实际preflight已拒绝且零派发。dispatch_once.py要求精确准入hash且不存在旧paid/stage ledger，保留首次派发身份。等待或unknown不能重启。
 
-[准备目录](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-history-citation-20261017)含原始命令／结果、冻结manifest与fixture／private labels、评测协议增量patch、admit／first-dispatch wrapper。准备归档不代表已准入或质量通过。产品代码和wheel未变化。其余九层、独立标签、深层恢复、其他vendor与最终发布验收继续开放。
+准备目录 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/native-quality-history-citation-20261017`)含原始命令／结果、冻结manifest与fixture／private labels、评测协议增量patch、admit／first-dispatch wrapper。准备归档不代表已准入或质量通过。产品代码和wheel未变化。其余九层、独立标签、深层恢复、其他vendor与最终发布验收继续开放。

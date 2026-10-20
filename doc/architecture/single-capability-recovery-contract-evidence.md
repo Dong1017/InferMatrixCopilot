@@ -17,6 +17,6 @@
 | native-budget-settlement | Receipt recovery settles once, preserves trace, retains unknown reservation, records actual overspend once; local fake provider facts, no paid model. | 3 |
 | init-review-checkpoint-settlement | Actual init recovery command handles budget/checkpoint split and rejects corrupt/unproven evidence; native outcomes use local fixtures. | 6 |
 
-[逐项机器证据](/data/zhoutaichang/copilot/output/single-capability-completion-20261012/final-recovery-contract-evidence-20261018/result.json)列出精确tree、测试文件／函数／行号、执行实例及JUnit hash。原Git blob、冻结测试和工作树相同，不能仅凭函数名或套件全绿推断所有故障组合。
+逐项机器证据 (host-local path: `/data/zhoutaichang/copilot/output/single-capability-completion-20261012/final-recovery-contract-evidence-20261018/result.json`)列出精确tree、测试文件／函数／行号、执行实例及JUnit hash。原Git blob、冻结测试和工作树相同，不能仅凭函数名或套件全绿推断所有故障组合。
 
 本轮关闭表列断点在最终版本上的证据绑定，生产代码改动0、额外测试派发0、模型派发0。它不是完整深层恢复或生产对账；原paid unknown、真实Github／多宿主一致性、其他vendor原生恢复、七阶段完整receipt／correction矩阵和部署在途清点仍保留。未知结果不能授权新identity或替代付费执行。
