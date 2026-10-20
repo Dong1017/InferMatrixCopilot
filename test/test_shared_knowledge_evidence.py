@@ -43,7 +43,7 @@ def test_codec_uses_marked_object_and_preserves_embedded_fences():
 
 def test_mapping_and_object_evidence_have_identical_priority_and_byte_bound():
     values = [
-        {"filename": "doc/readme.md", "status": "modified", "patch": "+doc"},
+        {"filename": "docs/readme.md", "status": "modified", "patch": "+doc"},
         {"filename": "test/test_core.py", "status": "modified", "patch": "+test"},
         {"filename": "src/core.py", "status": "modified", "patch": "+" + "界" * 5000},
     ]
