@@ -65,3 +65,4 @@ sources: []
 - [Model Executor — INC/AutoRound 量化配置规则](rules-inc-autoround.md)
 - [Model Executor — Orchestration Loop Rules](rules-orchestration-loop.md)
 - [MiniCPM duplex vision-only unit rules](rules-minicpm-vision-units.md)
+- [Model Executor — NPU 基础镜像与 Ascend 升级规则](rules-npu-base-image.md)
