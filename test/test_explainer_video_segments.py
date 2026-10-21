@@ -1,3 +1,4 @@
+import asyncio
 import importlib.util
 import json
 import shutil
@@ -11,8 +12,8 @@ TEMPLATES = (Path(__file__).resolve().parents[1] / "plugins" /
              "infermatrix-copilot" / "skills" / "explainer-video" / "templates")
 
 
-def load_renderer():
-    spec = importlib.util.spec_from_file_location("video_render", TEMPLATES / "render.py")
+def load_template(path):
+    spec = importlib.util.spec_from_file_location(path.stem, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -23,7 +24,8 @@ class VideoSegmentTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-        shutil.copytree(TEMPLATES / "stage", self.root / "stage")
+        # 导入临时副本，避免普通 pytest 把 .pyc 写入待分发的模板。
+        shutil.copytree(TEMPLATES, self.root, dirs_exist_ok=True)
         (self.root / "build").mkdir()
         (self.root / "narration.json").write_text(json.dumps({"output": "out.mp4"}), encoding="utf-8")
         self.timeline = {"total": 0.4, "scenes": [
@@ -33,10 +35,23 @@ class VideoSegmentTests(unittest.TestCase):
                 {"file": "points.mp3", "start": 0.2, "dur": 0.1, "cap": "Points"}]},
         ]}
         self.save_timeline()
-        self.renderer = load_renderer()
+        self.renderer = load_template(self.root / "render.py")
 
     def save_timeline(self):
         (self.root / "build" / "timeline.json").write_text(json.dumps(self.timeline), encoding="utf-8")
+
+    def test_import_uses_temporary_template_copy(self):
+        self.assertEqual(Path(self.renderer.__file__).parent, self.root)
+        self.assertEqual(Path(self.renderer.__cached__).parent.parent, self.root)
+
+    def test_duplicate_scene_ids_fail_before_writing_audio(self):
+        tts = load_template(self.root / "tts.py")
+        spec = json.loads((TEMPLATES / "narration.json").read_text(encoding="utf-8"))
+        spec["scenes"][1]["id"] = spec["scenes"][0]["id"]
+        (self.root / "narration.json").write_text(json.dumps(spec), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "scene IDs must be unique"):
+            asyncio.run(tts.main(self.root))
+        self.assertFalse((self.root / "build" / "audio").exists())
 
     def test_fingerprint_tracks_inputs_but_ignores_music_only_edits(self):
         original = self.renderer.Project(self.root).fingerprint
@@ -79,6 +94,11 @@ class VideoSegmentTests(unittest.TestCase):
     @unittest.skipUnless(importlib.util.find_spec("playwright") and shutil.which("ffmpeg"),
                          "optional media check requires Playwright/Chromium and FFmpeg")
     def test_real_render_resume_invalidation_and_final_guard(self):
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as engine:
+            if not Path(engine.chromium.executable_path).is_file():
+                self.skipTest("Chromium is absent; run python -m playwright install chromium")
         renderer = self.renderer
         project = renderer.Project(self.root)
         renderer.render_seg(project, 0)
@@ -114,6 +134,20 @@ class VideoSegmentTests(unittest.TestCase):
         renderer.FPS = 24
         with self.assertRaisesRegex(RuntimeError, "stale or unverified"):
             renderer.concat(renderer.Project(self.root))
+        self.timeline["total"] = 1
+        self.timeline["scenes"][0]["len"] = 0.5
+        self.timeline["scenes"][1].update(start=0.5, len=0.5)
+        self.timeline["scenes"][1]["lines"][0]["start"] = 0.5
+        self.save_timeline()
+        with sync_playwright() as engine:
+            browser, page = renderer.Project(self.root).open_page(engine, 1)
+            try:
+                page.evaluate("renderAt(0.5)")
+                self.assertEqual(page.locator("#tc").inner_text(), "00:00:00:12")
+                page.evaluate("renderAt(0.999)")
+                self.assertEqual(page.locator("#tc").inner_text(), "00:00:00:23")
+            finally:
+                browser.close()
 
 
 if __name__ == "__main__":

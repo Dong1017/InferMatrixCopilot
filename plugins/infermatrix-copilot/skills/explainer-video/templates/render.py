@@ -43,6 +43,7 @@ class Project:
         self.music_lufs = float(spec.get("music_lufs", -30.0))
         # inject the TTS timeline into the page
         self.tl = json.loads((self.build / "timeline.json").read_text(encoding="utf-8"))
+        self.tl["fps"] = FPS
         (self.stage / "timeline.js").write_text("window.TL = " + json.dumps(self.tl, ensure_ascii=False) + ";",
                                                 encoding="utf-8")
         self.n = int(self.tl["total"] * FPS)

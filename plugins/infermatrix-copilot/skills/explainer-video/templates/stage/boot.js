@@ -48,7 +48,7 @@
     } else cap.style.opacity = 0;
 
     // HUD
-    const fr = Math.floor((t % 1) * 30), sec = Math.floor(t);
+    const fr = Math.floor((t % 1) * tl.fps), sec = Math.floor(t);
     tc.textContent = `00:${String(Math.floor(sec / 60)).padStart(2, "0")}:${String(sec % 60).padStart(2, "0")}:${String(fr).padStart(2, "0")}`;
     idx.textContent = `${String(live.indexOf(active) + 1).padStart(2, "0")} / ${String(live.length).padStart(2, "0")}`;
     prog.style.width = (t / tl.total * 100) + "%";

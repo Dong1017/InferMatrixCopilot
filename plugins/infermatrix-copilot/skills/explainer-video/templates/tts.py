@@ -4,9 +4,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import edge_tts
-from aiohttp import ClientConnectionError
-
 GAP = 0.35        # pause between lines (seconds)
 LEAD = 0.5        # silence at the start of each scene
 TAIL = 0.6        # silence at the end of each scene
@@ -33,6 +30,9 @@ def validate_audio(path: Path) -> None:
 
 
 async def synth(text: str, voice: str, rate: str, mp3: Path) -> None:
+    import edge_tts
+    from aiohttp import ClientConnectionError
+
     part = mp3.with_suffix(".part.mp3")
     try:
         for attempt in range(MAX_ATTEMPTS):
@@ -58,6 +58,9 @@ async def synth(text: str, voice: str, rate: str, mp3: Path) -> None:
 
 async def main(root: Path) -> None:
     spec = json.loads((root / "narration.json").read_text(encoding="utf-8"))
+    ids = [scene["id"] for scene in spec["scenes"]]
+    if len(ids) != len(set(ids)):
+        raise ValueError("scene IDs must be unique")
     audio = root / "build" / "audio"
     audio.mkdir(parents=True, exist_ok=True)
     t = 0.0
