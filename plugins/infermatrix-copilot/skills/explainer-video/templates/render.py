@@ -35,6 +35,11 @@ class Project:
         pg = b.new_page(viewport={"width": 1280, "height": 720}, device_scale_factor=scale)
         pg.goto((self.stage / "index.html").as_uri() + "?capture=1")
         pg.wait_for_function("window.READY === true")
+        # 场景构建完成后，等待字体就绪和图片解码。
+        pg.evaluate("""async () => {
+            await document.fonts.ready;
+            await Promise.all(Array.from(document.images, image => image.decode()));
+        }""")
         return b, pg
 
 

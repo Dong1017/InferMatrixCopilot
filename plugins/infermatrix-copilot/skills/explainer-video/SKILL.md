@@ -80,7 +80,7 @@ python tts.py .
 ```
 
 - Writes `build/audio/<scene>_<i>.mp3` and `build/timeline.json`, and prints each scene's start and length.
-- Existing mp3 files are reused. Delete the mp3 for a line after changing its `say` text.
+- Existing MP3 files are reused only when their adjacent JSON metadata matches `say`, `voice` and `rate`. Changing any of these, or using an older cache without metadata, regenerates that line. Caption-only edits reuse the audio.
 - For a strict total, shorten narration first, then use modest `atempo` adjustment only if speech stays clear. Measure the fitted audio with `ffprobe`, retain lead/tail space, and require every line to end within its scene. The supplied `tts.py` uses narration-driven lengths; fixed-budget timing needs a project-local adaptation, not just smaller `min_len` values. Update audio cues, captions and JS animation timings together.
 - When adding, reordering or lengthening shots, update the full timeline, transitions, captions and narration cues, then remix continuous music and ducking against the new cues. Deliver the complete revised video when requested.
 - edge-tts is an online service. The template bounds each synthesis attempt to 45 s and makes at most three attempts for missing audio, connection errors or timeouts, with backoff and a pause between lines. Other errors, including rejected handshakes, propagate without an application-level retry.

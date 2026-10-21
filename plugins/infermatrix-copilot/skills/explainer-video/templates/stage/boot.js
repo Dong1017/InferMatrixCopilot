@@ -8,14 +8,19 @@
 
   const missing = tl.scenes.map(s => s.id).filter(id => !SCENES.some(s => s.id === id));
   if (missing.length) throw new Error("no scene script for: " + missing.join(", "));
-  const live = SCENES.map(s => {
+  const ordered = SCENES.map(s => {
     const meta = byId[s.id];
     if (!meta) throw new Error("timeline has no scene " + s.id);
+    return { ...s, meta };
+  }).sort((a, b) => a.meta.start - b.meta.start);
+  // 按时间轴创建 DOM，让叠放顺序与转场顺序保持一致。
+  const live = ordered.map(s => {
+    const meta = s.meta;
     const node = el("div", "scene", null, root);
     node.dataset.id = s.id;
     const ctx = s.build(node, meta) || {};
     return { ...s, meta, node, ctx };
-  }).sort((a, b) => a.meta.start - b.meta.start);
+  });
 
   const cap = $("#cap"), tc = $("#tc"), idx = $("#sceneidx"), prog = $("#prog"), flash = $("#flash");
   const lines = tl.scenes.flatMap(s => s.lines);

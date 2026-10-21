@@ -68,9 +68,14 @@ async def main(root: Path) -> None:
         lines = []
         for i, line in enumerate(scene["lines"]):
             mp3 = audio / f"{scene['id']}_{i}.mp3"
-            # reuse existing audio; delete the mp3 after changing its "say" text
-            if not mp3.exists() or mp3.stat().st_size == 0:
+            metadata = mp3.with_suffix(".json")
+            settings = {"say": line["say"], "voice": spec["voice"], "rate": spec["rate"]}
+            cached = json.loads(metadata.read_text(encoding="utf-8")) if metadata.exists() else None
+            # 仅复用相同文本、音色和语速；旧缓存缺少元数据时重新合成。
+            if not mp3.exists() or mp3.stat().st_size == 0 or cached != settings:
+                metadata.unlink(missing_ok=True)
                 await synth(line["say"], spec["voice"], spec["rate"], mp3)
+                metadata.write_text(json.dumps(settings, ensure_ascii=False), encoding="utf-8")
             else:
                 validate_audio(mp3)
             d = duration(mp3)
