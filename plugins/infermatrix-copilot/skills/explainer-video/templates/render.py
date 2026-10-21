@@ -1,15 +1,33 @@
+import hashlib
 import json
 import subprocess
 import sys
 from pathlib import Path
-
-from playwright.sync_api import sync_playwright
 
 FPS = 30
 SEG = 300       # frames per segment: each segment gets a fresh browser and encoder to cap peak memory
 SCALE = 1.0     # capture scale: 1.0 grabs 1280x720 and upscales to 1080p; use 1.5 if the machine is idle and small text looks soft
 ENCODE = ["-vf", "scale=1920:1080:flags=lanczos",
           "-c:v", "libx264", "-preset", "medium", "-crf", "17", "-pix_fmt", "yuv420p"]
+
+
+def render_fingerprint(stage: Path, timeline: dict) -> str:
+    # 覆盖时间轴、素材和渲染参数，让旧画面不能混入新版本。
+    files = []
+    for path in sorted(stage.rglob("*")):
+        if path.is_file():
+            with path.open("rb") as stream:
+                files.append((path.relative_to(stage).as_posix(), hashlib.file_digest(stream, "sha256").hexdigest()))
+    inputs = {"timeline": timeline, "stage": files, "fps": FPS, "segment_frames": SEG,
+              "scale": SCALE, "encode": ENCODE,
+              "renderer": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
+    return hashlib.sha256(json.dumps(inputs, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def segment_is_current(path: Path, fingerprint: str) -> bool:
+    metadata = path.with_suffix(".sha256")
+    return (path.is_file() and path.stat().st_size > 0 and metadata.is_file()
+            and metadata.read_text(encoding="ascii").strip() == fingerprint)
 
 
 class Project:
@@ -29,6 +47,7 @@ class Project:
                                                 encoding="utf-8")
         self.n = int(self.tl["total"] * FPS)
         self.k_total = -(-self.n // SEG)
+        self.fingerprint = render_fingerprint(self.stage, self.tl)
 
     def open_page(self, p, scale: float):
         b = p.chromium.launch()
@@ -44,6 +63,8 @@ class Project:
 
 
 def stills(pj: Project, times: list[float]) -> None:
+    from playwright.sync_api import sync_playwright
+
     # QA stills: capture at 1.5x so small text is readable
     with sync_playwright() as p:
         b, pg = pj.open_page(p, 1.5)
@@ -60,9 +81,11 @@ def render_seg(pj: Project, k: int) -> None:
     lo, hi = k * SEG, min((k + 1) * SEG, pj.n)
     pj.segs.mkdir(parents=True, exist_ok=True)
     out = pj.segs / f"seg_{k:02d}.mp4"
-    if out.exists():
+    if segment_is_current(out, pj.fingerprint):
         print(f"skip seg {k}", flush=True)
         return
+    from playwright.sync_api import sync_playwright
+
     part = pj.segs / f"seg_{k:02d}.part.mp4"
     enc = subprocess.Popen(
         ["ffmpeg", "-y", "-loglevel", "error", "-f", "image2pipe", "-framerate", str(FPS), "-c:v", "mjpeg",
@@ -78,7 +101,8 @@ def render_seg(pj: Project, k: int) -> None:
     enc.stdin.close()
     if enc.wait() != 0:
         raise RuntimeError(f"ffmpeg encode failed: seg {k}")
-    part.rename(out)
+    part.replace(out)
+    out.with_suffix(".sha256").write_text(pj.fingerprint + "\n", encoding="ascii")
     print(f"done seg {k}: frames {lo}-{hi - 1}", flush=True)
 
 
@@ -88,6 +112,9 @@ def concat(pj: Project) -> Path:
     missing = [f.name for f in files if not f.exists()]
     if missing:
         raise RuntimeError(f"missing segments: {missing}")
+    stale = [f.name for f in files if not segment_is_current(f, pj.fingerprint)]
+    if stale:
+        raise RuntimeError(f"stale or unverified segments: {stale}; rerun seg before final")
     lst = pj.segs / "list.txt"
     lst.write_text("".join(f"file '{f.name}'\n" for f in files), encoding="utf-8")
     silent = pj.build / "silent.mp4"

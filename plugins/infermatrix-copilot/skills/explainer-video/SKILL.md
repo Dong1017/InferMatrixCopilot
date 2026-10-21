@@ -105,10 +105,10 @@ python render.py . final
 ```
 
 - Each segment is `SEG = 300` frames rendered by its own browser and encoder, so memory is released between segments. A full single-pass render of ~1900 frames ran out of memory on the first use.
-- A segment is written as `.part.mp4` and renamed only on success. Re-running skips finished segments; delete a `.part.mp4` left by a crash.
+- A segment is written as `.part.mp4` and replaced only on success, then receives a `.sha256` sidecar recording its render inputs. Re-running skips a segment only when that signature matches the full timeline, stage files, renderer and capture/encode settings. Keep render assets under `stage/` so they are included in the signature. Changes conservatively invalidate all segments; older segments without signatures are regenerated. `final` rejects stale or unverified segments instead of mixing them with current narration. Keep inputs unchanged during each render command; delete a `.part.mp4` left by a crash.
 - Check the exit code before proceeding to the next segment. If piping logs through `tail` in Bash, use `pipefail` so an encoder failure is not hidden.
 - Defaults: capture at `scale = 1.0` (1280×720), ffmpeg lanczos upscale to 1920×1080, `-preset medium -crf 17`. On the first use this cut a segment from ~37 min (1.5× capture, `slow`) to ~4 min with no visible difference. Raise `scale` only when the machine is idle and small text looks soft.
-- All segments must share codec, resolution, pixel format, fps, and time base, because `final` joins them with stream copy. If you change render settings mid-run, compare with `ffprobe` before continuing (see below), or re-render all segments.
+- All segments must share codec, resolution, pixel format, fps, and time base, because `final` joins them with stream copy. Changing render settings invalidates the saved segments; re-run all segment commands before `final`.
 - Long renders: run one segment per command, or in the background with a bounded log, and report progress. If the machine becomes unresponsive, stop task-owned heavy work and reduce capture scale or encoder load before continuing; ask for help only if the available resources still block completion.
 
 ## 6. Verify the output
@@ -126,5 +126,5 @@ ffmpeg -v error -i <out.mp4> -vf "select='eq(n\,299)+eq(n\,300)+eq(n\,599)+eq(n\
 
 ## 7. Finish
 
-- Delete temporary sample/silent videos and unused QA artifacts; retain a useful storyboard/contact sheet, editable JS, narration, source references and concise validation results. Keep `build/segs/` only while more edits are expected; one scene change then needs only its segments re-rendered (delete those `seg_KK.mp4` files and run `final`). Close task-owned browsers and processes.
+- Delete temporary sample/silent videos and unused QA artifacts; retain a useful storyboard/contact sheet, editable JS, narration, source references and concise validation results. Keep `build/segs/` only while more edits are expected, including the signature sidecars needed for resuming an unchanged render. Close task-owned browsers and processes.
 - Report: output path, duration, size, checks run, checks not run, and that nothing was published or committed.
