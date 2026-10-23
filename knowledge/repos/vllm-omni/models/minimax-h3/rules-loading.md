@@ -1,10 +1,10 @@
 ---
 title: "MiniMax H3 加载规则"
 created: 2026-09-02
-updated: 2026-09-04
+updated: 2026-10-23
 type: rule
 tags: [vllm-omni, models, diffusion]
-sources: ["PR #5706", "PR #5737", "PR #5824", vllm_omni/diffusion/models/minimax_h3/encoder.py, vllm_omni/diffusion/models/minimax_h3/minimax_h3_transformer.py, vllm_omni/diffusion/models/minimax_h3/pipeline_minimax_h3.py, tests/diffusion/models/minimax_h3/test_minimax_h3_contract.py, "PR #5910", "PR #6213", "PR #6445", "PR #6486"]
+sources: ["PR #5706", "PR #5737", "PR #5824", vllm_omni/diffusion/models/minimax_h3/encoder.py, vllm_omni/diffusion/models/minimax_h3/minimax_h3_transformer.py, vllm_omni/diffusion/models/minimax_h3/pipeline_minimax_h3.py, tests/diffusion/models/minimax_h3/test_minimax_h3_contract.py, "PR #5910", "PR #6213", "PR #6445", "PR #6486", "PR #8801"]
 confidence: high
 ---
 
@@ -72,3 +72,12 @@ H3 的该 contract 当前只为 BF16 no-AllGather DLO final-layout consumer 接�
 区分 TP rank/size 与 SP layout，等价 DP replicas 才共享；TP/SP/layout/model revision 改变时必须以
 `preferred` 重新产生 artifact，`required` 只消费 exact hit。它不扩大 direct checkpoint mmap、
 online quantization 或 AllGather 的支持范围。^[PR #6486]
+
+## VLLM-OMNI-PR8801-H3-NATIVE-PARTITION — 本地 MiniMax-H3 判定必须让 native 分区布局优先于 modular 标记文件
+
+- 触发：修改 `vllm_omni/model_executor/models/minimax_h3/checkpoint.py` 的 `is_minimax_h3_modular`、`_NATIVE_PARTITIONS`、`resolve_minimax_h3_model_root`/`resolve_minimax_h3_diffusion_model_path`，或本地 checkpoint 的 native/FastH3 modular 判定顺序。
+- 强制：本地目录必须先按 native 分区判定——`FL2VA/model_index.json` 或 `Ref2VA/model_index.json` 存在即判 native（返回 `False`），之后才检查 `modular_model_index.json`/`fastvideo_inference.json` 标记。依据是官方 `MiniMaxAI/MiniMax-H3` 仓库会在根目录同时携带 `modular_model_index.json` 与 `FL2VA/`/`Ref2VA/` 分区，而 FastH3 modular release 没有分区；误判会让 pipeline init 因找不到 `fastvideo_inference.json` 抛 `FileNotFoundError`。native root 下 encoder resolver 必须返回 `FL2VA/text_encoder`，diffusion resolver 返回 `FL2VA`。Hub ID 走独立分支，不受该本地目录判定影响。
+- 禁止：仅凭 modular 标记文件存在就把含分区的本地快照判成 FastH3 modular；把没有 `model_index.json` 的空分区目录当作 native 证据；改动判定顺序时影响 Hub ID 分支或破坏既有 FastH3 本地/Hub 检测语义。
+- 验收：`tests/diffusion/models/minimax_h3/test_fasth3_checkpoint.py` 必须同时覆盖混合根 case（`FL2VA/`+`Ref2VA/`+`modular_model_index.json` 判为 native，且两个 resolver 返回分区路径）与对照 case（仅空分区目录加 modular 标记仍判为 modular），并保持既有 FastH3 本地与 Hub 检测测试全部通过。^[PR #8801]
+
+<!-- kb:rule status=active since=v0.30.0 -->
