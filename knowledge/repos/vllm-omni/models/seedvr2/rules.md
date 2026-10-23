@@ -1,10 +1,10 @@
 ---
 title: "SeedVR2 restoration 规则"
 created: 2026-10-06
-updated: 2026-10-12
+updated: 2026-10-23
 type: rule
 tags: [vllm-omni, models, diffusion]
-sources: ["PR #8102", "PR #8767"]
+sources: ["PR #8102", "PR #8767", "PR #8505"]
 confidence: high
 ---
 
@@ -103,5 +103,14 @@ confidence: high
 - 强制：FP16/BF16 输入必须先提升到 FP32，再计算 `pow(2).mean(-1)` 与归一化除法，结果 cast 回输入 dtype 后才执行原有 affine 乘法（权重跟随输出 dtype）；FP32 输入保持原实现。该修复不要求 checkpoint 转换。
 - 禁止：在输入 dtype 中对 FP16 激活求平方均值——有限值 256 平方即上溢为 inf，整个 token 除以无穷 RMS 后被静默置零；把输出-only NaN/Inf 检查当作数值验收（输出仍有限，检测不到这种 token 级置零损坏）；把单次视觉 A/B 外推为解释所有 SeedVR2 artifact 的通用结论。
 - 验收：CPU 回归以 float64 参考对照，覆盖 outlier（如 256/300/60000）、全零、极小值（如 0.0001）、FP16/BF16/FP32 与 affine 开/关，断言输出 dtype、全部有限且与参考一致。^[PR #8767]
+
+<!-- kb:rule status=active since=v0.30.0 -->
+
+## VLLM-OMNI-PR8505-COMFY-SEEDVR2 — ComfyUI 整片修复以源 VIDEO 为时序权威并复用 /v1/videos 作业
+
+- 触发：修改 `apps/ComfyUI-vLLM-Omni` 的 `VLLMOmniRestoreVideo` 节点、`comfyui_vllm_omni/utils/api_client.py` 的 `restore_video`/`_submit_video_job`，或 `bytes_to_restored_video` 解码路径。
+- 强制：提交前在客户端校验 VIDEO 已连接、model 非空、width/height 为正的 16 倍数、timeout 为正，非法直接抛 ValueError，不发请求。修复请求必须复用共享 `_submit_video_job`（/v1/videos 作业管线），表单含占位 prompt、`size`、`num_inference_steps=1`、`guidance_scale=1`、seed，并把源视频以 `input_references` mp4 上传；`fps` 与 `num_frames` 保持未设置，由服务端从源读取。返回 MP4 的 encoder 可能把分数 FPS 取整，输出 VIDEO 必须用源 VIDEO 的 frame_rate 重建时序，并保留帧数与受支持的音频。节点需轮询 `processing_interrupted` 并取消当前 task；请求的 finally 负责有界作业清理，清理完成后重新抛出 ComfyUI 中断信号，watcher task 也在 finally 中回收；提交阶段 aiohttp 超时需包装为带上下文的 RuntimeError。
+- 禁止：在表单设置 `fps`/`num_frames` 覆盖源时序；用返回 MP4 的 FPS 元数据证明时序保真；把 Stop 中断吞成正常返回、让作业清理无界或在清理后丢失中断异常；绕过 `_submit_video_job` 另写提交实现；放宽 16 倍数/非空/正数校验；把该整片节点描述成长视频窗口化支持（本 PR 只做整片，长视频是明确的后续提案）。
+- 验收：缺 VIDEO、空 model、非 16 倍数尺寸、非正 timeout 均在提交前被拒；分数 FPS 源的输出采用源 frame_rate 且帧数/音频保持；表单合同断言 fps/num_frames 缺省、one-step 字段与 input_references；提交超时呈现为 RuntimeError；中断路径确认请求被取消、清理有界、最终仍抛出中断且 watcher 已回收。测试覆盖须按实际分层描述：`tests/e2e/features/comfyui/test_seedvr2_restoration.py` 以本地 aiohttp fixture 驱动客户端合同，`tests/e2e/features/comfyui/test_seedvr2_workflows.py` 只校验 workflow JSON 模板，真实 API 链路在 `tests/e2e/features/comfyui/test_comfyui_integration.py` 且 mock 掉 GPU 推理——不得把 fixture 或 JSON 校验宣称为对真实服务的 standalone/H3 验证。^[PR #8505]
 
 <!-- kb:rule status=active since=v0.30.0 -->
