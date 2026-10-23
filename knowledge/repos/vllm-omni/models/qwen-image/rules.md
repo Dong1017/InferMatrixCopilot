@@ -1,10 +1,10 @@
 ---
 title: "Qwen-Image 实现规则"
 created: 2026-09-02
-updated: 2026-10-10
+updated: 2026-10-23
 type: rule
 tags: [vllm-omni, models, diffusion]
-sources: ["PR #5887", tests/e2e/accuracy/test_qwen_image.py, "PR #6110", vllm_omni/diffusion/models/qwen_image/qwen_image_transformer.py, "PR #5586", "PR #7513", "PR #8699"]
+sources: ["PR #5887", tests/e2e/accuracy/test_qwen_image.py, "PR #6110", vllm_omni/diffusion/models/qwen_image/qwen_image_transformer.py, "PR #5586", "PR #7513", "PR #8699", "PR #9272"]
 confidence: high
 ---
 
@@ -58,5 +58,15 @@ confidence: high
 - 强制：保持与 upstream diffusers #14950 一致的优先级：请求级 `sigmas` > 模型级 `sample_sigmas` > `linspace(1.0, 1/num_inference_steps, num_inference_steps)` 回退；网格生效时总步数由 `len(sigmas)` 决定，显式 `num_inference_steps` 被忽略。`enrich_config` 的提取条件按实现是 `self.extras.get("sample_sigmas") is None`：extras 缺失该键或显式为 `None` 时都会写入 checkpoint 网格，即显式 `None` 同样会被覆盖；只有非 `None` 的显式 extras 值胜出。请求未携带 sigmas 时，pre-process hook 必须把预设网格注入为请求级 `sigmas`，使 `StepScheduler._get_total_steps` 与 cache backends 经既有 `len(sigmas)` 路径解析正确总步数；runner 的 cache-refresh 路径经 `default_num_inference_steps` 解析步数。`sigmas` 只能通过既有多模型 extra_body 白名单机制（同 LTX2）按请求开放，并在 chat 与 images/generations 两条路径生效。
 - 禁止：让 `enrich_config` 覆盖用户显式提供的非 `None` extras 值，或把提取判定改成键存在性/truthiness 检查（现状以 `is None` 判定，显式 `None` 会被 checkpoint 网格覆盖，语义不同）；省略 hook 注入导致 step-wise 执行与缓存按调用方步数（如示例默认 50）而非网格步数（8）解析；网格生效时仍让 `num_inference_steps` 参与步数决定；绕过白名单机制向请求开放调度参数。
 - 验收：CPU 单测覆盖 extras 三种情形（从 model_index 提取、缺失不写入、显式非 `None` extras 不被覆盖）与 `prepare_timesteps` 优先级（请求 sigmas 胜出、config 网格决定步数并压过 `num_inference_steps`、无网格回退 linspace）；断言请求未携带 sigmas 时步数解析等于网格长度；extra_body `sigmas` 在 `/v1/chat/completions` 与 `/v1/images/generations` 均可覆盖默认网格。Turbo 的 CFG=1 用法与 Qwen Research License 属 checkpoint 使用约束，不是本规则的验收对象。^[PR #8699]
+
+<!-- kb:rule status=active since=v0.30.0 -->
+
+## VLLM-OMNI-PR9272-QWEN21-IDLE-KV-GRAPHS — decode graph 静态 prefix KV 必须在下次 prefill 前按 owner 存活状态释放
+
+- 触发：修改 `vllm_omni/diffusion/models/qwen_image_21/decode_graph.py` 中 `QwenImage21DecodeGraphManager` 的 entry/owner 生命周期（`release_idle_entries`、`_owners` weakref 表、`max_entries` LRU、`clear`），或 `pipeline_qwen_image_21.py` 的 `release_step_request`、`_release_idle_decode_graphs`、`_denoise_step_homogeneous` 的 prefill 相位判定，或 `cfg_parallel.py` `diffuse()` 中 prefill 前的清理，以及 Qwen-Image-2.1 前缀 K/V（`_scatter_kv_cache` clone）与 request geometry 的请求退役路径。
+- 强制：graph key 含 batch size、prefix length 与完整 `img_shapes`，每个 entry 由指向请求 prefix K tensor 的 weakref 拥有。owner 已死亡或未记录的 entry 必须在下一次 prefill clone 新 prefix 之前经 `release_idle_entries()` 释放：`cfg_parallel.diffuse()` 与 step 路径 `_denoise_step_homogeneous`（`_kv_cache_phase(...) == "prefill"` 时）都要触发，确有释放时调用 `current_omni_platform.empty_cache()`；owner 仍存活的 entry 必须保留，让并发请求继续 replay——放弃同 key 复用的代价只是下一次请求多付一次 recapture。
+- 强制：请求退役走 `release_step_request`：显式置空 `extra["kv_cache"]` 并调用 `release_request_geometry()`，但不动 graph 表，dead entry 留到下一次 prefill 释放。跨请求累积的是 graph 侧静态 prefix 拷贝（普通 tensor，不是 CUDA graph private pool），不是随请求结束被丢弃的 `state.extra["kv_cache"]`。
+- 禁止：把 `max_entries`（默认 8）的 LRU 淘汰当成唯一回收路径——每张图按自身宽高比 resize（`calculate_dimensions`）后重排即改变 `img_shapes`、更换 key，静态拷贝跨请求堆积，在下一次 `_scatter_kv_cache` clone 时 OOM（#8831；#8760 的 retention 修复不覆盖这份拷贝）；为保留同 key 复用而留下 dead-owner entry；请求退役时 `clear()` 整个 graph 表或释放 live-owner entry；用关闭默认开启的 `causal_condition` 掩盖泄漏（报告中延迟约 11 s → 36 s）。
+- 验收：CPU 单测以 weakref + `gc.collect()` 断言 `release_idle_entries()` 后 dead-owner key 从 `entries`/`_owners` 消失且静态 prefix 张量可回收（weakref 归 None）、live key 保留且 `_owners[live_key]()` 仍指向在飞请求的 key tensor；`release_step_request` 置空 kv_cache 与 geometry 且不调用 `clear`/`release_idle_entries`；prefill 路径断言 `release_idle_entries` 恰好被调用一次。weakref 单测证明的是 entry 生命周期机制，不构成 GPU 端到端 OOM 已消除的证据。^[PR #9272]
 
 <!-- kb:rule status=active since=v0.30.0 -->

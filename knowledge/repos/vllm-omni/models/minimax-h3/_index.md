@@ -171,3 +171,4 @@ CPU-only validation limit 见 [encoder state rules](rules-encoder-state.md)。
 - [latent upscaler、second-pass refinement 与容量门禁](rules-latent-refinement.md)
 
 - [MiniMax-H3 VDNH3 checkpoint 与请求合同](rules-vdnh3.md)。
+- [MiniMax-H3 audio VAE 确定性规则](rules-audio-vae-determinism.md)
