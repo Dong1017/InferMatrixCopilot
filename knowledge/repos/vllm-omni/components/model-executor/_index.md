@@ -67,3 +67,4 @@ sources: []
 - [MiniCPM duplex vision-only unit rules](rules-minicpm-vision-units.md)
 - [Model Executor — NPU 基础镜像与 Ascend 升级规则](rules-npu-base-image.md)
 - [MiniCPM-o duplex turn-end drain 规则](rules-minicpmo-turn-end-drain.md)
+- [MiMo-Audio 设备与平台支持](rules-mimo-audio-device.md)
