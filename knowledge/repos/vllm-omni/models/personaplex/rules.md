@@ -1,10 +1,10 @@
 ---
 title: "PersonaPlex 规则"
 created: 2026-09-02
-updated: 2026-10-11
+updated: 2026-10-23
 type: rule
 tags: [vllm-omni, models, model-executor]
-sources: ["PR #4771", "PR #6318", docs/design/fullduplex-personaplex.md, vllm_omni/model_executor/models/personaplex/duplex/serving_adapter.py, vllm_omni/model_executor/stage_input_processors/personaplex.py, tests/e2e/features/fullduplex/, tests/entrypoints/openai_api/test_duplex_handler.py, "PR #7399", "PR #7481", "PR #8670", "PR #8751"]
+sources: ["PR #4771", "PR #6318", docs/design/fullduplex-personaplex.md, vllm_omni/model_executor/models/personaplex/duplex/serving_adapter.py, vllm_omni/model_executor/stage_input_processors/personaplex.py, tests/e2e/features/fullduplex/, tests/entrypoints/openai_api/test_duplex_handler.py, "PR #7399", "PR #7481", "PR #8670", "PR #8751", "PR #9113"]
 confidence: high
 ---
 
@@ -149,3 +149,12 @@ confidence: high
 - 验收：READY/MERGE 只剩 Mimi 一条 `--deselect`；nightly 步骤的 collect 与 run 都只含 Mimi 用例；`tests/buildkite/test_amd_pipeline.py` 与三份 yml 当前内容一致并通过；`personaplex_temporal.py` 保留的 ring-KV/RoPE 原语仍由 `test_ring_per_row_offsets.py` 的存活用例覆盖——注意 PR #8751 同时删除了该文件中的 `test_ring_slot_recycle_masks_old_history`，不得把该文件的覆盖说成完全不变；原语的检查义务另受 PPLEX-HOIST-1a 约束。 ^[PR #8670] ^[PR #8751]
 
 <!-- kb:rule status=active since=v0.30.0 supersedes=VLLM-OMNI-PR8670-AMD-PPLEX-NIGHTLY -->
+
+## VLLM-OMNI-PR9113-CODE2WAV-DELTA — 整 session 复用的 Code2Wav 请求必须以 DELTA 音频流出
+
+- 触发：修改 PersonaPlex duplex plugin 的 `configure_sampling_params` 或任一 stage 的 `RequestOutputKind`；修改共享 `CumulativeAudioTextDataPlane`（`vllm_omni/model_executor/common/duplex/data_plane.py`）的 `audio_output_is_delta` 投影；或发现整 session 复用的 duplex stage 请求仍在用默认 CUMULATIVE 输出——那会让 output processor 在 API server 进程内每帧重 consolidate 全部历史 multimodal tensors，每帧成本随通话长度增长。
+- 强制：只为 final stage（`configured[-1]`，即 Code2Wav）在 clone 出的 sampling params 上设 `output_kind=RequestOutputKind.DELTA`，不得改写共享默认值；Stage 0 与中间 stage 保持默认 CUMULATIVE。PersonaPlex 数据平面声明 `audio_output_is_delta = True`：delta 音频按新 chunk 整段透传，不再对 running sample count 切片；DELTA 下 output processor 不做 consolidate，一次输出可能携带多个 step 的 chunk list，必须先 join 成单个 waveform 再计数与编码。文本继续走 cumulative text cursor，只发新 suffix。共享数据平面的 `audio_output_is_delta` 默认保持 `False`，其他 duplex 模型维持现有 cumulative 切片行为。
+- 禁止：直接改写共享或默认 sampling params；给非 final stage 设 DELTA；delta 模式下仍按 sample cursor 切音频，或未声明 delta 就跳过切片；假设每个输出恰好一个音频 chunk；只凭机制推理、不在目标并发下做端到端测量就宣称每帧成本不再随通话长度增长。
+- 验收：`tests/model_executor/executor_common/duplex/test_data_plane.py` 覆盖 delta 音频整段透传（短于先前 chunk 的 chunk 也整段编码；空 chunk 且无新文本不产出）与同批到达的 ragged chunks 以 numpy 与 torch tensor 形态 join 成单个 waveform（`test_delta_audio_passes_through_unsliced`、`test_delta_audio_chunks_that_arrive_together_are_joined`），且既有 cumulative 投影用例不回归；`tests/model_executor/models/personaplex/duplex/test_plugin.py` 断言 Stage 1 是 DELTA clone、Stage 0 与共享默认值未被污染，并覆盖只有 final stage 切到 DELTA（`test_only_the_final_stage_switches_to_delta_output`）；`tests/engine/duplex/test_session_runner_personaplex.py` 以 delta Code2Wav 输出驱动投影；性能收益须在目标并发（1–4 session）下端到端实测（PR #9113：4-session 下 API server CPU 0.8→0.2 cores）。^[PR #9113]
+
+<!-- kb:rule status=active since=v0.30.0 -->
