@@ -85,3 +85,4 @@ shared RMSNorm 的empty-input与fused精度边界沿 tensor dtype rules 的DIFF-
 - [Diffusion JIT CUDA 构建 include 顺序规则](rules-jit-cuda-includes.md)
 - [AR-Diffusion 实时模型集成规则](rules-ar-realtime-integration.md)
 - [Diffusion attention dense 4D mask routing](rules-4d-mask-routing.md)
+- [vllm-omni · Diffusion — Wan SDPA 对齐测试规则](rules-wan-sdpa-math.md)
