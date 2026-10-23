@@ -69,3 +69,4 @@ sources: []
 - [MiniCPM-o duplex turn-end drain 规则](rules-minicpmo-turn-end-drain.md)
 - [MiMo-Audio 设备与平台支持](rules-mimo-audio-device.md)
 - [NPU model adapter rules](rules-npu-model-adapters.md)
+- [vLLM-Omni model executor — upstream warmup request identification rules](rules-warmup-ids.md)
