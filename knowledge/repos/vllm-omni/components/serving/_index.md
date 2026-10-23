@@ -62,3 +62,4 @@ sources: []
 - [视频 timeline guides 规则](rules-timeline-guides.md)
 - [vLLM-Omni 服务：Gradio 示例 PCM 音频转换规则](rules-gradio-pcm.md)
 - [vLLM-Omni Serving：Seed-TTS 基准与准确率规则](rules-seed-tts.md)
+- [vLLM-Omni Stage-CLI 测试规则](rules-stage-cli-tests.md)
