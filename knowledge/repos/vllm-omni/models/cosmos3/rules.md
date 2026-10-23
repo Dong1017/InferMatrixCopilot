@@ -1,10 +1,10 @@
 ---
 title: "Cosmos3 规则"
 created: 2026-07-20
-updated: 2026-10-11
+updated: 2026-10-23
 type: rule
 tags: [vllm-omni, models, diffusion]
-sources: ["PR #4657", "PR #5001", "PR #5634", "PR #6049", docs/features/session_state_manager.md, recipes/cosmos3/Cosmos3-Nano.md, vllm_omni/diffusion/models/cosmos3/, vllm_omni/model_extras/cosmos3.py, vllm_omni/model_extras/registry.py, vllm_omni/experimental/world_models/adapters/state_cosmos3_adapter.py, vllm_omni/platforms/rocm/platform.py, tests/diffusion/models/cosmos3/test_session_memory_equivalence.py, tests/diffusion/models/cosmos3/test_cosmos3_pipeline.py, "PR #6107", "PR #5614", "PR #6325", "PR #6913", "PR #6920", "PR #7427", "PR #7971", "PR #7592", "PR #5712"]
+sources: ["PR #4657", "PR #5001", "PR #5634", "PR #6049", docs/features/session_state_manager.md, recipes/cosmos3/Cosmos3-Nano.md, vllm_omni/diffusion/models/cosmos3/, vllm_omni/model_extras/cosmos3.py, vllm_omni/model_extras/registry.py, vllm_omni/experimental/world_models/adapters/state_cosmos3_adapter.py, vllm_omni/platforms/rocm/platform.py, tests/diffusion/models/cosmos3/test_session_memory_equivalence.py, tests/diffusion/models/cosmos3/test_cosmos3_pipeline.py, "PR #6107", "PR #5614", "PR #6325", "PR #6913", "PR #6920", "PR #7427", "PR #7971", "PR #7592", "PR #5712", "PR #9304"]
 confidence: high
 ---
 
@@ -189,5 +189,14 @@ confidence: high
 - 强制：guardrail 视频保留原浮点路径与 float32 guardrail 算术：分类器收到 uint8 display 字节，adapter 返回 float32 归一浮点（[-1,1] 往返，测试容差 atol=1/127.5），未加载 guardrail 时原对象直通。其余一律走 legacy 路径：非 output rank、含辅助输出、非五维视频、offload、`"pil"`/`"pt"`/`"latent"` 时返回 legacy `DiffusionOutput`（`media` 为 None），不得改变返回类型或把 decoded pixels 当 latents 暴露。
 - 禁止：把 uint8 传输做成默认行为或新增采样 flag、私有 output type、auxiliary-media contract、engine postprocessing hook；为 guardrail、pil/pt/latent、offload、非 output rank 或含辅助输出的路径启用直通；在 decode dtype 之外反归一造成 display 字节漂移；OOM 时静默改变输出契约；把 byte parity 宣称成量化后浮点值不变——它只指最终 display/encoding 字节；也不得据此改动 Wan 的默认 reduction 算术。
 - 验收：参数化覆盖 fp16/bf16/fp32 × CPU/CUDA display-byte parity（含 bf16 舍入边界与饱和值）、chunk 边界（1 字节与 64 MiB）、guardrail 输入与修改输出的全字节、`output_type` 全集、aux payload IPC round-trip、offload gate、插值与初期/后期 OOM 回退。对完全合规的输入（output rank、纯五维视频、无辅助输出、无 offload、无 guardrails、`output_type` 为 None/`"np"`）断言无论开关状态 `media` 均存在且初始 `prepared_for_transport` 为假，开关只决定 transport 准备后编码是否为 `UINT8_FRAMES`；对 guardrail、非 np output_type、offload、含辅助输出或非 output rank 的路径断言 `media` 为 None 并走 legacy 后处理。`check_video_safety` 无 guardrail 时返回原对象、有 guardrail 时保持输入/输出的 dtype/device 合同。^[PR #5712]
+
+<!-- kb:rule status=active since=v0.30.0 -->
+
+## VLLM-OMNI-PR9304-EDGE-PP-OWNERSHIP — Edge 权重校验必须从活模块读取 PP 归属
+
+- 触发：修改 `vllm_omni/diffusion/models/cosmos3/transformer_cosmos3_edge.py` 的 `validate_loaded_weights` 或 `_weight_marker_is_pp_missing`，或在仓库模型代码中引入上游 `is_pp_missing_parameter` 的权重归属判定。
+- 强制：marker 是否被跳过必须由本 rank 的活模块决定：`language_model.*` 直接 `isinstance(self.language_model, PPMissingLayer)`；`gen_layers.{i}.*` 检查对应 GEN slot 模块本身（UND backbone 是单一模块、只在第一个 PP stage；每个 GEN slot 是独立模块）；其余 marker 不跳过，本 rank 拥有的 marker 缺失仍必须报错。机制事实：上游 `is_pp_missing_parameter` 把缺失层名缓存在按 `id(model)` 键控且从不清理的 `_model_to_pp_missing_layer_names`，对象 id 复用会让陈旧空缓存把活 `PPMissingLayer` 报为已加载（AMD CI build 14498 即因此漏报 `gen_layers.1`）。上游 vLLM 保持不动，也不得 vendoring 该 helper。
+- 禁止：以该 id 键控缓存的返回值决定 marker 归属；在测试中真实写入该进程级全局缓存来构造失败（同一失败会泄漏进后续测试）；借修复放宽本 rank 拥有 layer 的必需 marker。
+- 验收：测试以 `monkeypatch.setattr(model_utils, "get_pp_missing_layer_names", lambda _model: [])` 模拟陈旧缓存查找，断言 PP-missing marker 被跳过、`relu2` 等必需 marker 缺失时 `validate_loaded_weights` 仍 fail，且未污染全局缓存；PR 的通过证据是本地 CPU 运行（需预载 cosmos3 包命名空间绕过 API server import），AMD CI 未复跑，不得据此声称真实多 stage PP parity。^[PR #9304]
 
 <!-- kb:rule status=active since=v0.30.0 -->
