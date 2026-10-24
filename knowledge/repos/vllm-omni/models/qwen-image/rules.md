@@ -1,10 +1,10 @@
 ---
 title: "Qwen-Image 实现规则"
 created: 2026-09-02
-updated: 2026-10-23
+updated: 2026-10-24
 type: rule
 tags: [vllm-omni, models, diffusion]
-sources: ["PR #5887", tests/e2e/accuracy/test_qwen_image.py, "PR #6110", vllm_omni/diffusion/models/qwen_image/qwen_image_transformer.py, "PR #5586", "PR #7513", "PR #8699", "PR #9272"]
+sources: ["PR #5887", tests/e2e/accuracy/test_qwen_image.py, "PR #6110", vllm_omni/diffusion/models/qwen_image/qwen_image_transformer.py, "PR #5586", "PR #7513", "PR #8699", "PR #9272", "PR #9268"]
 confidence: high
 ---
 
@@ -68,5 +68,15 @@ confidence: high
 - 强制：请求退役走 `release_step_request`：显式置空 `extra["kv_cache"]` 并调用 `release_request_geometry()`，但不动 graph 表，dead entry 留到下一次 prefill 释放。跨请求累积的是 graph 侧静态 prefix 拷贝（普通 tensor，不是 CUDA graph private pool），不是随请求结束被丢弃的 `state.extra["kv_cache"]`。
 - 禁止：把 `max_entries`（默认 8）的 LRU 淘汰当成唯一回收路径——每张图按自身宽高比 resize（`calculate_dimensions`）后重排即改变 `img_shapes`、更换 key，静态拷贝跨请求堆积，在下一次 `_scatter_kv_cache` clone 时 OOM（#8831；#8760 的 retention 修复不覆盖这份拷贝）；为保留同 key 复用而留下 dead-owner entry；请求退役时 `clear()` 整个 graph 表或释放 live-owner entry；用关闭默认开启的 `causal_condition` 掩盖泄漏（报告中延迟约 11 s → 36 s）。
 - 验收：CPU 单测以 weakref + `gc.collect()` 断言 `release_idle_entries()` 后 dead-owner key 从 `entries`/`_owners` 消失且静态 prefix 张量可回收（weakref 归 None）、live key 保留且 `_owners[live_key]()` 仍指向在飞请求的 key tensor；`release_step_request` 置空 kv_cache 与 geometry 且不调用 `clear`/`release_idle_entries`；prefill 路径断言 `release_idle_entries` 恰好被调用一次。weakref 单测证明的是 entry 生命周期机制，不构成 GPU 端到端 OOM 已消除的证据。^[PR #9272]
+
+<!-- kb:rule status=active since=v0.30.0 -->
+
+## VLLM-OMNI-PR9268-QWEN21-ROCm-ACC-NIGHTLY — ROCm 夜间精度任务必须跑真实对照；gfx942 IT2I 的文档化 XFAIL 是对 QWENIMG-1a 的显式窄例外
+
+- 触发：修改 `tests/e2e/accuracy/qwen_image_21/` 的 contract/preflight/thresholds/测试/参考脚本、`.buildkite/amd/test-amd-nightly.yml` 或 `tests/buildkite/test_amd_pipeline.py` 中 "Qwen-Image 2.1 Accuracy" 作业合同，或 `vllm_omni/diffusion/models/qwen_image_21/autoencoder_kl_qwenimage21.py` 的 `_cudnn_deterministic()` 平台判定。
+- 强制：ROCm 在 torch 侧复用 `cuda` 设备命名空间但 cuDNN attention 不可用——contract 平台项固定 `rocm` 为 `generator_device: "cuda"`、`attention_backend: "TORCH_SDPA"`，preflight 把 `rocm` 映射到 `torch.cuda`；cuda 与 rocm 都断言 `total_memory >= 70 * 1024**3`（实际检查阈值是 70 GiB，失败文案却写 "Use one >=80 GB GPU"，审阅时不要把文案当成 80 GB 检查）。ROCm CI 镜像返回空 marketing name 时必须以 `gcnArchName` 作为稳定设备身份，防止校准静默落回 CUDA 默认阈值。VAE 的 `_cudnn_deterministic()` 只在 `torch.version.hip is None`（CUDA）时临时启用 determinism 并在退出时还原原值，HIP/MIOpen 必须保持默认卷积策略。平台 attention 策略各自固定：ROCm 用 Torch SDPA，CUDA 保留 cuDNN attention，NPU 维持既有执行 profile。AMD 夜间作业为 NonBlocking、`mi300_1`、mirror `amdproduction`、180 分钟超时，以 `full_model and diffusion and rocm and MI325 and cards_1` 标记先 collect-only 恰好收集 `it2i`、`t2i` 两个节点（数量或节点不符即 exit 5）再运行，环境固定 `QWEN_IMAGE_21_CALIBRATE=0`（正常执行而非校准掩盖）与 `DIFFUSION_ATTENTION_BACKEND=TORCH_SDPA`，并上传 junitxml、pytest 日志与 accuracy 产物（含 metrics 与图像）。T2I 保持严格数值门限 SSIM ≥ 0.99、PSNR ≥ 40 且必须真实通过。
+- 强制：与 QWENIMG-1a 的显式关系——gfx942 IT2I 必须完整执行 native/reference 对照并保留 metrics 与图像后按文档化 expected XFAIL 报告，根因是默认 MIOpen condition-image VAE 编码跨隔离进程不确定。该 XFAIL 构成对 QWENIMG-1a "先证同 seed repeatability、再上跨实现数值 gate" 要求的显式窄例外：范围仅限 ROCm gfx942 的 IT2I case，且以跨进程非确定性根因仍然成立为前提；除此之外的一切情形（含 ROCm T2I 以及 CUDA/NPU 全部 case）QWENIMG-1a 继续完全生效。任何把该 XFAIL 改为真实数值阈值的变更，必须先按 QWENIMG-1a 证明同 seed repeatability 并定位/消除 MIOpen 非确定性根因，再执行跨实现数值 gate。
+- 禁止：为 ROCm 引入未经验证的数值下限或用校准吸收差异；为通过门限删减 IT2I 真实对照或产物上传；在 HIP 上强制 `cudnn.deterministic`；省略 collect-only 精确节点守卫；把该作业加入 ready/merge pipeline 或改为 blocking；accuracy test 丢失 `os.environ.get("BUILDKITE_COMMIT")` 证据锚点；把 gfx942 IT2I 例外扩大到其他平台或 case，或在未满足 QWENIMG-1a 前置条件的情况下移除 XFAIL 改设数值阈值。
+- 验收：`test_amd_pipeline.py` 断言 grade/pool/mirror/timeout、两个 env 值、`full_model and diffusion and rocm and MI325 and cards_1` 标记、节点守卫文案、`setup_reference.sh` 与 BUILDKITE_COMMIT 读取，并断言 "Qwen-Image 2.1 Accuracy" 不出现在 ready/merge pipeline；`test_vae.py` 以 monkeypatch 分别证明 determinism scope 仅 CUDA 生效且退出后还原、MIOpen 路径保持默认策略。gfx942 IT2I XFAIL（SSIM 0.9834/PSNR 32.30）与 T2I 通过（0.9968/44.63）是 MI300 nightly 的历史证据，不构成对 MIOpen 非确定性的定量刻画。^[PR #9268]
 
 <!-- kb:rule status=active since=v0.30.0 -->
