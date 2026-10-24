@@ -70,3 +70,4 @@ sources: []
 - [MiMo-Audio 设备与平台支持](rules-mimo-audio-device.md)
 - [NPU model adapter rules](rules-npu-model-adapters.md)
 - [vLLM-Omni model executor — upstream warmup request identification rules](rules-warmup-ids.md)
+- [Host Weight Runtime 测试评审规则](rules-host-weight-runtime.md)
