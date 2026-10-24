@@ -1,10 +1,10 @@
 ---
 title: "vllm-omni AMD/ROCm CI 流水线规则"
 created: 2026-10-22
-updated: 2026-10-22
+updated: 2026-10-24
 type: rule
 tags: [vllm-omni]
-sources: ["PR #9227", "PR #9224", "PR #9126"]
+sources: ["PR #9227", "PR #9224", "PR #9126", "PR #9307"]
 ---
 
 # vllm-omni AMD/ROCm CI 流水线规则
@@ -33,5 +33,14 @@ sources: ["PR #9227", "PR #9224", "PR #9126"]
 - 强制：该精度路径必须是夜间流水线中恰好一个 NonBlocking 作业：组内仅 `Wan2.2 I2V Accuracy 2 GPU` 一步，`agent_pool: mi300_2`、`grade: NonBlocking`、`timeout_in_minutes: 180`、`env.DIFFUSION_ATTENTION_BACKEND: TORCH_SDPA`、工件根 `artifacts/rocm-wan22-accuracy-2gpu/**/*`。三个测试节点 `test_wan22_i2v_diffusers_offline_generates_video`、`test_wan22_i2v_online_serving_generates_video`、`test_wan22_i2v_serving_matches_diffusers_video_similarity` 必须在同一 pod 内按此固定顺序、以单次 `pytest -s -v` 调用执行：离线 diffusers 基线（cards_1）先运行，其产物供同 pod 内后续的 cards_2 在线生成与比对消费，基线生成与比对不得拆到不同 pod。marker 必须保持 `full_model and diffusion and rocm and MI325 and (cards_1 or cards_2)`，同时容纳 cards_1 与 cards_2，不得收窄为仅 cards_2。正式运行前必须 `pytest --collect-only -q` 预收集：输出写入工件目录 `collection.txt`，逐一 grep 确认三个节点均被收集，并断言收集到的 `::` 节点数恰好为 3；任一不满足即以 `exit 5` 失败，防止 marker 漂移导致静默少跑。比对必须 fail closed：`require_similarity_artifacts` 对任一缺失前置工件（在线视频、离线视频、离线 metadata）抛出指名缺失路径的 AssertionError——被跳过的比对不算精度覆盖。比对摘要以 `similarity.json` 落盘；生成的视频与元数据写入测试运行期在 `tests/e2e/accuracy/wan22_i2v/` 目录下生成的 `result` 输出目录（运行期产物，非仓库检入路径），作业命令须在透传退出码前以 `if [[ -d ... ]]` 守卫把该目录 `cp -a` 复制进工件目录的 `result/` 子目录。内层 `timeout --signal=TERM --kill-after=2m 165m` 必须短于外层 180 分钟作业期限，pytest 退出码经 `PIPESTATUS[0]` 透传后决定作业结果。
 - 禁止：把该组拆成多个作业，或把基线生成与比对分离到不同 pod 形成跨 pod 工件依赖；将 `grade` 改为阻塞合并的级别，或把 `Wan2.2 I2V Accuracy` 作业加入 `.buildkite/amd/test-amd-ready.yml` / `.buildkite/amd/test-amd-merge.yml`；删除 `--collect-only` 预收集、三节点逐一核对或 `exit 5` 计数断言；把缺前置工件的比对改回 skip 路径（相似度测试文件不得回归 `Missing offline artifacts` 字样）；把命令换成或混入 `test_diffusers_backend_similarity.py` 节点；删除或放宽 `test_wan22_accuracy_has_one_nonblocking_comparison_job` 与 `test_wan22_similarity_fails_when_offline_baseline_is_removed`、`test_wan22_similarity_accepts_complete_artifacts` 两个单元测试；删除 pytest 结束后复制 `result` 输出目录的命令块，使失败运行丢失视频与元数据证据。
 - 验收：`pytest tests/buildkite/test_amd_pipeline.py` 通过；`.buildkite/amd/test-amd-nightly.yml` 该组恰含一个 `mi300_2`、`NonBlocking`、`timeout_in_minutes: 180`、`TORCH_SDPA` 的 `Wan2.2 I2V Accuracy 2 GPU` 作业，命令含 `--collect-only`、`exit 5` 且三节点按固定顺序出现；ready 与 merge 流水线不含 `Wan2.2 I2V Accuracy`；`require_similarity_artifacts` 在任一工件缺失时抛 AssertionError、齐全时静默通过。^[PR #9126]
+
+<!-- kb:rule status=active since=v0.30.0 -->
+
+## VLLM-OMNI-PR9307-QOMNI-SEEDTTS-RT-NIGHTLY — Qwen3-Omni Seed-TTS 实时性能基准进 MI300 夜间：单 NonBlocking 作业、VAD 预取 pin、采集与结果双守卫、MI300 暂无基线
+
+- 触发：改动 `.buildkite/amd/test-amd-nightly.yml` 中 `Qwen3-Omni Seed-TTS Realtime Perf` 作业（label、`agent_pool`、`grade`、`depends_on`、`mirror_hardwares`、`timeout_in_minutes`、`env`、`artifact_paths` 或 commands），或 `tests/dfx/perf/tests/test_qwen3_omni_seed_tts.json` 的硬件 mark / `benchmark_params`，或删除、改写 `tests/buildkite/test_amd_pipeline.py::test_qwen3_omni_seed_tts_realtime_perf_is_one_nonblocking_nightly_job` 回归测试。本规则只覆盖 AMD 夜间通道的该作业。
+- 强制：该基准必须是夜间通道的单个 `NonBlocking` 作业：`agent_pool: mi300_2`、`depends_on: amd-build`、`mirror_hardwares: [amdproduction]`、外层 `timeout_in_minutes: 180`，工件根 `artifacts/rocm-qwen3-omni-seed-tts-perf/**/*`（`BENCHMARK_DIR` 指向其 `benchmark-results` 子目录）。跑测前必须以 `hf_hub_download` 按 `SILERO_VAD_REPO_ID`/`SILERO_VAD_FILENAME`/`SILERO_VAD_REVISION` 预取 Silero VAD 并执行 `SileroVADBackendProvider().get()`。运行前先 `pytest --collect-only` 落盘 `collection.txt`，断言恰好收集 `test_qwen3_omni_seed_tts_realtime-explicit` 与 `test_qwen3_omni_seed_tts_realtime-vad` 两个节点（总数恰为 2 且逐节点 `grep -F` 命中，否则 exit 5）；运行用内层 `timeout --signal=TERM --kill-after=2m 165m`，pytest 退出码经 `PIPESTATUS` 保留；pytest 成功后仍须核对恰好两份 `result_test_qwen3_omni_seed_tts_realtime_*.json`、文件名含 `_explicit_` 与 `_vad_` 各恰好一份，不符则置失败码 5。选择标记 `-m "full_model and omni and rocm and MI325 and cards_2"` 加 `--run-level full_model`；config JSON 的 `hardware_marks.res.rocm` 为 `MI325`（CUDA `H100`/`B200` 保留），`benchmark_params` 恰为 `explicit`/`vad` 两项且不含 `baseline` 键——MI300 基线留空，作业只记录结果 JSON 供后续 PR 选定 floors。READY 与 MERGE 管道不得出现 `Qwen3-Omni Seed-TTS Realtime Perf`。
+- 禁止：把该作业改为 Blocking，或把它加入 `test-amd-ready.yml` / `test-amd-merge.yml`；在选定 MI300 基线前给 `benchmark_params` 添加 `baseline` 键；移除 Silero VAD 预取步骤、collect-only 节点守卫或结果 JSON 数量/命名核对；令内层 timeout 不低于外层 180 分钟；改掉 `MI325` mark 或删除 CUDA `H100`/`B200`；删除该结构回归测试或其中对 READY/MERGE 管道的排除断言。
+- 验收：`pytest tests/buildkite/test_amd_pipeline.py::test_qwen3_omni_seed_tts_realtime_perf_is_one_nonblocking_nightly_job -q` 通过；夜间 YAML 中该作业保持上述结构，`tests/dfx/perf/tests/test_qwen3_omni_seed_tts.json` 的 rocm mark 为 `MI325` 且 `benchmark_params` 为无 baseline 的 explicit/vad 两项；`test-amd-ready.yml` 与 `test-amd-merge.yml` 不含该作业 label。^[PR #9307]
 
 <!-- kb:rule status=active since=v0.30.0 -->
