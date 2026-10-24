@@ -4,7 +4,7 @@ created: 2026-09-02
 updated: 2026-10-24
 type: rule
 tags: [vllm-omni, models, diffusion]
-sources: ["PR #5887", tests/e2e/accuracy/test_qwen_image.py, "PR #6110", vllm_omni/diffusion/models/qwen_image/qwen_image_transformer.py, "PR #5586", "PR #7513", "PR #8699", "PR #9272", "PR #9268"]
+sources: ["PR #5887", tests/e2e/accuracy/test_qwen_image.py, "PR #6110", vllm_omni/diffusion/models/qwen_image/qwen_image_transformer.py, "PR #5586", "PR #7513", "PR #8699", "PR #9272", "PR #9268", "PR #8868"]
 confidence: high
 ---
 
@@ -78,5 +78,14 @@ confidence: high
 - 强制：与 QWENIMG-1a 的显式关系——gfx942 IT2I 必须完整执行 native/reference 对照并保留 metrics 与图像后按文档化 expected XFAIL 报告，根因是默认 MIOpen condition-image VAE 编码跨隔离进程不确定。该 XFAIL 构成对 QWENIMG-1a "先证同 seed repeatability、再上跨实现数值 gate" 要求的显式窄例外：范围仅限 ROCm gfx942 的 IT2I case，且以跨进程非确定性根因仍然成立为前提；除此之外的一切情形（含 ROCm T2I 以及 CUDA/NPU 全部 case）QWENIMG-1a 继续完全生效。任何把该 XFAIL 改为真实数值阈值的变更，必须先按 QWENIMG-1a 证明同 seed repeatability 并定位/消除 MIOpen 非确定性根因，再执行跨实现数值 gate。
 - 禁止：为 ROCm 引入未经验证的数值下限或用校准吸收差异；为通过门限删减 IT2I 真实对照或产物上传；在 HIP 上强制 `cudnn.deterministic`；省略 collect-only 精确节点守卫；把该作业加入 ready/merge pipeline 或改为 blocking；accuracy test 丢失 `os.environ.get("BUILDKITE_COMMIT")` 证据锚点；把 gfx942 IT2I 例外扩大到其他平台或 case，或在未满足 QWENIMG-1a 前置条件的情况下移除 XFAIL 改设数值阈值。
 - 验收：`test_amd_pipeline.py` 断言 grade/pool/mirror/timeout、两个 env 值、`full_model and diffusion and rocm and MI325 and cards_1` 标记、节点守卫文案、`setup_reference.sh` 与 BUILDKITE_COMMIT 读取，并断言 "Qwen-Image 2.1 Accuracy" 不出现在 ready/merge pipeline；`test_vae.py` 以 monkeypatch 分别证明 determinism scope 仅 CUDA 生效且退出后还原、MIOpen 路径保持默认策略。gfx942 IT2I XFAIL（SSIM 0.9834/PSNR 32.30）与 T2I 通过（0.9968/44.63）是 MI300 nightly 的历史证据，不构成对 MIOpen 非确定性的定量刻画。^[PR #9268]
+
+<!-- kb:rule status=active since=v0.30.0 -->
+
+## VLLM-OMNI-PR8868-QWEN21-VAE-TILE-STARTS — VAE tiled decode 的 tile 起点必须均匀铺开且尾 tile 贴边结束
+
+- 触发：修改 Qwen-Image-2.1 VAE 的 tiling/tile 布局——`vllm_omni/diffusion/models/qwen_image_21/autoencoder_kl_qwenimage21.py` 的 `_tile_starts`、tiled decode 循环或 `tile_sample_min`/`tile_sample_stride` 语义，或 `vllm_omni/diffusion/distributed/autoencoders/autoencoder_kl_qwenimage21.py` 的 `tile_split`/`tile_merge` 与 `tile_spec` 中的 `starts_*`/`overlap_*`/`cells_per_latent` 字段。
+- 强制：轴向 tile 起点必须统一由 `_tile_starts(size, tile_min, stride)` 一类布局产生，并保持不变量：首起点为 0、严格递增、尾 tile 恰好在边界结束（`starts[-1] == size - tile_min`）、相邻间距落在 `[1, stride]` 且整数网格内尽量均匀（max-min ≤ 1）、轴尺寸 ≤ tile_min 时单 tile 覆盖；每个 tile 都保持完整 decode window。分布式 `tile_split` 的 overlap 必须由相邻起点的实际差值乘 `cells_per_latent`（`spatial_compression_ratio // (patch_size or 1)`，unpatchify 前的折算）推导并写入 `tile_spec`，`tile_merge` 从 `tile_spec` 读回同一组 starts/overlap，grid 形状等于两轴起点数、坐标使用起点索引。
+- 禁止：回到 `range(0, size, stride)` 固定步长铺 tile 使尾 tile 被图像边界截短——被截断的尾 tile 以更小窗口参与 causal conv 解码，与邻 tile 产生系统性亮度偏移，blend 掩盖不了，接缝位置恰为尾 tile 起点 + blend 宽度（#8850：tile 512/stride 384 时，高 1024、宽 1024/1408/1440/1792 出现约 8-11 px、+6/+7 luma 的固定位置竖条纹，与 prompt/seed 无关；stride 整除或尾 tile 恰为完整窗口时不可见）。不得把关闭 tiling 当作修复方向（4096x2048 untiled 时 VAE 每 rank 峰值约 74.5 GB，tiled 约 24 GiB，#8850）。
+- 验收：布局单测对 1..256 等全尺寸范围断言上述不变量（含单 tile 分支与间距均匀性）；以非 stride 整除的 latent 尺寸（如 tile 8、stride 6 下的 16x22、22x16）断言所有解码 tile 窗口等于完整 tile 尺寸；分布式路径回归 tile_split/tile_merge 与整体 tiled_decode 结果一致（16x16 latent、8x8 tile、stride 6 时起点为 [0,4,8]，9 个 task、3x3 grid）；端到端可用列中值相对两侧 6..20 像素邻域中值偏差 ≥3 的检测器确认无接缝。^[PR #8868]
 
 <!-- kb:rule status=active since=v0.30.0 -->
