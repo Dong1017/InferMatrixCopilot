@@ -172,3 +172,4 @@ CPU-only validation limit 见 [encoder state rules](rules-encoder-state.md)。
 
 - [MiniMax-H3 VDNH3 checkpoint 与请求合同](rules-vdnh3.md)。
 - [MiniMax-H3 audio VAE 确定性规则](rules-audio-vae-determinism.md)
+- [MiniMax-H3 ComfyUI audio_mode 与 supplied-audio MV 规则](rules-comfyui-audio.md)
