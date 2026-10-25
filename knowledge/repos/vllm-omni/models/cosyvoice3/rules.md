@@ -1,10 +1,10 @@
 ---
 title: "CosyVoice3 规则"
 created: 2026-09-04
-updated: 2026-09-22
+updated: 2026-10-25
 type: rule
 tags: [vllm-omni, models]
-sources: ["PR #5673", "PR #6955", vllm_omni/model_executor/models/cosyvoice3/code2wav_core/cfm.py, vllm_omni/model_executor/models/cosyvoice3/flow_estimator_trt.py, tests/model_executor/models/cosyvoice3/test_cosyvoice3_components.py, benchmarks/tts/benchmark_cosyvoice3_trt_streams.py, "PR #6896", "PR #7521"]
+sources: ["PR #5673", "PR #6955", vllm_omni/model_executor/models/cosyvoice3/code2wav_core/cfm.py, vllm_omni/model_executor/models/cosyvoice3/flow_estimator_trt.py, tests/model_executor/models/cosyvoice3/test_cosyvoice3_components.py, benchmarks/tts/benchmark_cosyvoice3_trt_streams.py, "PR #6896", "PR #7521", "PR #8730"]
 confidence: high
 ---
 
@@ -64,3 +64,12 @@ confidence: high
 - 强制：每个 chunk 只在有界 mel 窗上计算（末 64 帧再加上 F0 感受野历史），不得对累积全谱重跑。谐波相位用共享的边界 `phase_acc` 带入下一窗。noise 必须是固定、按位置索引的 buffer，不能用随 chunk 变化的 `torch.randn_like`。F0 predictor 的左因果卷积要吃 window 左侧的真实历史，不能零填充；这段 margin 属于 `cache_state`，在进入 SineGen/decode 前切掉，且短于感受野的 chunk 不得饿死下一次调用。finalize 除 `conv_pre_look_right` 外还要释放 predictor 自己扣下的 `trim`，否则流末约 3 个 mel 帧丢失。
 - 禁止：用 PCM16 逐字节相等当正确性门槛（亚 LSB 的再结合误差会翻边界样本）；只测未触发 voiced 的随机权重；把 `scipy`/`s3tokenizer` 放回 dev extra——它们是 base install 的硬依赖，scipy 下限保持 `>=1.11.0`。
 - 验收：相对全量重算，float64 应逐位一致；float32 用 `assert_close(atol=1e-6, rtol=1e-5)`。同时覆盖 SineGen（22050 Hz）与 SineGen2（24000 Hz）、强制 voiced，以及均匀 chunk 和单 mel 帧的小块。^[PR #7521]
+
+## VLLM-OMNI-PR8730-RAS-GPU-SAMPLING — V1 RAS 采样 GPU 化仅限受支持的 NVIDIA V1 runner 路径
+
+- 触发：修改 CosyVoice3 `model_executor/models/cosyvoice3/v1_sampling.py`/`cosyvoice3.py` 的 RAS rejection/replacement、generator 生命周期或采样参数路由，或 `worker/gpu_ar_model_runner.py`、`worker/sampling_utils.py`、`core/sched/omni_ar_scheduler.py` 中采样 host 同步与非有限 logits 校验。
+- 强制："初始 draw、rejection 判定与条件 replacement 在 GPU 上一次完成（含默认 async scheduling）"的保证只覆盖受支持的 NVIDIA V1 runner 路径，不得表述为对所有平台/runner 成立。模型直连 `sample()` 的 direct-call fallback（cosyvoice3.py）仍允许在 replacement 采样前以重复 `.tolist()` 读回 rejection 谓词，并保留同步有限值校验——这是合法路径，不是待修缺陷。在 V1 runner 路径上，CPU 不得在两次 draw 之间等待 rejection 谓词，且只有被拒绝的行消耗 replacement RNG。Generator 更新放在既有 token 完成边界、Generator 复用之前；deferred feedback 跨 batch 变化持有 Generator 所有权并恰好提交一次。批量采样必须保持 Torch 兼容的 Philox addressing/advancement、ATen 排序与累积概率语义。采样参数来自 request-owned CPU SamplingParams，不做 GPU 参数 readback；mixed-batch compaction 之前先对齐各行 rejection history。fused replacement kernel 只能用于已验证的 vocab 区间（2048 < vocab ≤ 9216，含 CosyVoice3 的 6761），不得 materialize 中间概率张量；seed 表以 nonblocking pinned H2D 上传，seeded-row membership 由 runtime data 决定。V1 runner 路径的逐行非有限 logits 不得用会作废 worker CUDA context 的 device assertion 处理：runner 在输出完成时以 `invalid_logits_req_ids` 报告，scheduler 只把受影响 request 置为 FINISHED_ERROR 并丢弃其 multimodal/inter-stage 输出与已采样 token；direct sampler 调用保留同步校验。
+- 禁止：把 GPU-only 采样保证写成无条件或跨平台承诺；以"消除 host 回读"为由要求 direct-call fallback 放弃 `.tolist()` 谓词读取或同步校验；在 V1 runner 路径为 rejection 检查引入 per-step CPU 同步；让未被拒绝的行也消耗 replacement RNG；改变 Philox/ATen 语义导致 seeded 输出漂移；在 batch compaction 之后才对齐 history；用 `torch._assert_async` 之类 device assertion 处理逐行无效 logits；让失败 request 的 multimodal/inter-stage 输出继续下发，或影响同批健康请求。
+- 验收：以含 RNG draw 的串行 RAS oracle（pre-B1 语义）断言批量结果与逐请求 seeded 运行（含 RNG 状态）一致；覆盖 mixed batch（greedy+random 行）的 history 对齐与 `win_size=0`；scheduler 侧断言 invalid logits（`invalid_logits_req_ids`）只终止受影响 request（含不请求 logprobs 的 request）：其 `multimodal_output` 为 None、`output_token_ids` 为空、finish_reason 为 ERROR，同批健康 request 的 token 与 multimodal 输出完整。^[PR #8730]
+
+<!-- kb:rule status=active since=v0.30.0 -->
