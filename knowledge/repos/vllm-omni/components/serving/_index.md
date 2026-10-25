@@ -64,3 +64,4 @@ sources: []
 - [vLLM-Omni Serving：Seed-TTS 基准与准确率规则](rules-seed-tts.md)
 - [vLLM-Omni Stage-CLI 测试规则](rules-stage-cli-tests.md)
 - [vLLM-Omni Serving 规则 — MiniCPM-o 注意力后端对比](rules-minicpmo-attn-compare.md)
+- [Diffusion speech 采样参数校验规则](rules-diffusion-speech-params.md)
