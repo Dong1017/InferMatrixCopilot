@@ -63,3 +63,4 @@ sources: []
 - [vLLM-Omni 服务：Gradio 示例 PCM 音频转换规则](rules-gradio-pcm.md)
 - [vLLM-Omni Serving：Seed-TTS 基准与准确率规则](rules-seed-tts.md)
 - [vLLM-Omni Stage-CLI 测试规则](rules-stage-cli-tests.md)
+- [vLLM-Omni Serving 规则 — MiniCPM-o 注意力后端对比](rules-minicpmo-attn-compare.md)
