@@ -72,3 +72,4 @@ sources: []
 - [vLLM-Omni model executor — upstream warmup request identification rules](rules-warmup-ids.md)
 - [Host Weight Runtime 测试评审规则](rules-host-weight-runtime.md)
 - [模型执行器 — Qwen2.5-Omni talker 终止 conditioning 规则](rules-qwen25-talker-eos.md)
+- [Drama 3 量化配置规则](rules-drama3-quant.md)
