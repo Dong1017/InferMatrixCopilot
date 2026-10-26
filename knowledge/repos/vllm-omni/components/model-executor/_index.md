@@ -73,3 +73,4 @@ sources: []
 - [Host Weight Runtime 测试评审规则](rules-host-weight-runtime.md)
 - [模型执行器 — Qwen2.5-Omni talker 终止 conditioning 规则](rules-qwen25-talker-eos.md)
 - [Drama 3 量化配置规则](rules-drama3-quant.md)
+- [模型执行器 — GPU 显存预算规则](rules-gpu-memory-budget.md)
