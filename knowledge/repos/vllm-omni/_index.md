@@ -48,3 +48,4 @@ owner 仍不明确时才看 [components 职责表](components/_index.md)；模�
 - [vllm-omni review-lessons rules](rules-review-lessons.md)
 - [vllm-omni AMD/ROCm CI 流水线规则](rules-amd-ci.md)
 - [vllm-omni /v1/realtime WebSocket 一致性评审规则](rules-realtime-conformance.md)
+- [vllm-omni Omni-DuplexEval 判分校验规则](rules-duplexeval-judge.md)
