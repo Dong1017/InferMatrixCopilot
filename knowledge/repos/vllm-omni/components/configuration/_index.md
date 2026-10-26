@@ -60,3 +60,4 @@ sources: ["claude-workflow-starter-private@296ea45", vllm_omni/config/]
 - [XPU eager pins 与 Intel 支持验证](rules-xpu-eager-pins.md)
 - [性能基准扩档与基线推导规则](rules-perf-baseline-derivation.md)
 - [Thinker prefix cache deploy 默认值](rules-thinker-prefix-cache.md)
+- [vLLM-Omni 配置：环境变量清单与测试同步规则](rules-environment-variables.md)
