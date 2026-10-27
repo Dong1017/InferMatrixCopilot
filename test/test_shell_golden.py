@@ -59,7 +59,14 @@ def golden_built(tmp_path_factory):
                       "timeout_in_minutes": int(t["timeout_sec"]) // 60})
     (repo / ".buildkite" / "cuda" / "test-ready.yml").write_text(
         yaml.safe_dump({"steps": steps}, allow_unicode=True))
-    return build_manifest(repo, ManifestSpec.from_manifest(MANIFEST))
+    # Captured commands still use the pre-rename paths. Replay them with
+    # their captured assignment map; live maps are checked separately below.
+    import copy
+    historical_manifest = copy.deepcopy(MANIFEST)
+    historical_manifest["rebase"]["test_manifest"]["assignment_paths"] = {
+        m: v for m, v in GOLDEN["assignment_map"].items() if m != "_provenance"
+    }
+    return build_manifest(repo, ManifestSpec.from_manifest(historical_manifest))
 
 
 def test_golden_capture_sanity():
@@ -118,13 +125,13 @@ def test_command_echo_parity_production_path(golden_built, tmp_path):
             [j["slug"] for j in golden_built.to_dict()["jobs"]].index(slug)])
         plan = runner.run(job, {}, dry_run=True).plan
         assert plan is not None, slug
-        assert plan.argv[:2] == ["bash", "-c"], slug
+        assert plan.argv[:3] == ["bash", "--norc", "-c"], slug
         # independent expected literal: the sole wrapper is the fail-fast
         # prefix, absent only when the command manages -e itself
         if "set +e" in t["cmd"]:
-            assert plan.argv[2] == t["cmd"], slug
+            assert plan.argv[3] == t["cmd"], slug
         else:
-            assert plan.argv[2] == "set -e\n" + t["cmd"], slug
+            assert plan.argv[3] == "set -e\n" + t["cmd"], slug
         assert plan.timeout_sec == float(t["timeout_sec"]), slug
         for token in shlex.split(t["env"] or ""):
             k, v = token.split("=", 1)
@@ -172,14 +179,23 @@ def test_module_routing_replay(golden_built):
     assert hist["platform"] < len(ours) / 2
 
 
-def test_assignment_map_is_parent_verbatim():
-    """The manifest's routing flavor (rebase.test_manifest
-    .assignment_paths) is the parent test_manifest.py inline map VERBATIM
-    — a DISTINCT flavor from §11 MODULE_TEST_MAP, never merged
-    (DRIFT_TRIAGE #6)."""
+def test_assignment_map_preserves_parent_with_worker_v2_extension():
+    """Keep the parent's separate routing flavor (DRIFT_TRIAGE #6), with
+    only the explicit worker_v2 coverage extension (#10)."""
     ours = MANIFEST["rebase"]["test_manifest"]["assignment_paths"]
     golden = {m: v for m, v in GOLDEN["assignment_map"].items()
               if m != "_provenance"}
+    golden["worker_runner"] = [golden["worker_runner"][0], "tests/worker_v2/",
+                               *golden["worker_runner"][1:]]
+    golden["worker_runner"] = [
+        "tests/e2e/features/custom_pipeline/"
+        if path == "tests/e2e/offline_inference/custom_pipeline/" else path
+        for path in golden["worker_runner"]
+    ]
+    golden["input_output"] = [
+        "tests/engine/test_omni_request_output.py" if p == "tests/test_outputs.py" else p
+        for p in golden["input_output"]
+    ]
     assert ours == golden
 
 
@@ -187,7 +203,8 @@ def test_assignment_map_is_parent_verbatim():
 
 def test_module_map_parity_upstream_and_tests():
     """`modules.*.upstream_paths` / `test_paths` carry the parent's §11
-    MODULE_VLLM_PATHS / MODULE_TEST_MAP verbatim (order preserved)."""
+    MODULE_VLLM_PATHS / MODULE_TEST_MAP (order preserved), with the explicit
+    worker_v2 and scheduler owner coverage (DRIFT_TRIAGE #10 and #14)."""
     mods = MANIFEST["modules"]
     golden_up = GOLDEN["module_maps"]["MODULE_VLLM_PATHS"]
     golden_tests = GOLDEN["module_maps"]["MODULE_TEST_MAP"]
@@ -198,8 +215,26 @@ def test_module_map_parity_upstream_and_tests():
     rebase_mods = {m for m, spec in mods.items() if "upstream_paths" in spec}
     assert rebase_mods == set(golden_up) == set(golden_tests)
     for mod in rebase_mods:
-        assert mods[mod]["upstream_paths"] == golden_up[mod].split(), mod
-        assert mods[mod]["test_paths"] == golden_tests[mod].split(), mod
+        expected_upstream = golden_up[mod].split()
+        if mod == "input_output":
+            expected_upstream.insert(1, "vllm/renderers/")
+        assert mods[mod]["upstream_paths"] == expected_upstream, mod
+        expected = golden_tests[mod].split()
+        if mod == "input_output":
+            expected.insert(0, "tests/inputs/")
+            expected = [
+                "tests/engine/test_omni_request_output.py" if p == "tests/test_outputs.py" else p
+                for p in expected
+            ]
+        if mod == "worker_runner":
+            expected.insert(1, "tests/worker_v2/")
+            expected = [
+                "tests/e2e/features/custom_pipeline/" if p == "tests/e2e/offline_inference/custom_pipeline/" else p
+                for p in expected]
+        if mod == "scheduler":
+            expected.insert(0, "tests/core/sched/")
+            expected.insert(2, "tests/model_executor/test_cfg_pairing.py")
+        assert mods[mod]["test_paths"] == expected, mod
 
 
 def test_module_local_paths_cover_parent_omni_files():
@@ -216,10 +251,16 @@ def test_module_local_paths_cover_parent_omni_files():
 
 def test_module_import_check_parity():
     """Per-module import smoke targets match the parent's
-    MODULE_IMPORT_CHECK (adapter data: modules.*.import_check)."""
+    MODULE_IMPORT_CHECK, plus worker_v2 coverage (DRIFT_TRIAGE #10)."""
     mods = MANIFEST["modules"]
     for mod, target in GOLDEN["module_maps"]["MODULE_IMPORT_CHECK"].items():
         ours = mods[mod].get("import_check", "")
+        if mod == "worker_runner":
+            target = target.replace(
+                "print('Worker/Runner imports OK')",
+                "from vllm_omni.worker_v2.omni_ar_model_runner import *; "
+                "from vllm_omni.worker_v2.omni_generation_model_runner import *; "
+                "print('Worker/Runner imports OK')")
         assert ours == target, (mod, ours, target)
 
 

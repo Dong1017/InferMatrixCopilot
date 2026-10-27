@@ -24,7 +24,9 @@ critical:
   # with re.I, bare FATAL tier-1-killed a HEALTHY job on the benign
   # "Dropping uncorrelated non-fatal RPC error" WARNING (live full
   # run 2026-08-23); tier 1 sees the raw tail, so noise cannot save it
-  - "(?<!non-)FATAL"
+  # Match a fatal word, not identifiers such as _raise_nonfatal_error_message
+  # or nonfatal prose in expected HTTP-400 tracebacks.
+  - "(?<![\\w-])FATAL(?!\\w)"
 
 # Tier 2: broad — an eco-tier agent decides KILL vs CONTINUE.
 review:

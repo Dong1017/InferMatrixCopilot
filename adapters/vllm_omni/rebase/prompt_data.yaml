@@ -32,6 +32,15 @@ debug_prompt_template_live: |
      rebase regression. Separate assertion failures, latency-only failures,
      cancellation, and broken reporting steps. Record unknown attribution
      when evidence is insufficient; do not weaken thresholds or skip tests.
+     A local gated-model download denial is an access failure. Preserve the
+     original model source, tokenizer, configuration, geometry, selected
+     tests and timeout. Do not replace them with a synthetic local builder
+     or a different public tokenizer to make CI pass. If authorized access
+     is unavailable, finish with the exact unresolved failure so the parent
+     can continue the other jobs. A prototype is not the original job's proof.
+     Read run-directory operator evidence when present, including
+     codex_krea_scope_rejection.json and the remote main baseline. Do not
+     claim CI has no model access when its exact job has actually passed.
   3. Read the target vLLM API and `git show origin/main:<path>` for Omni intent.
      Fix the smallest confirmed rebase-specific cause. After a startup API
      fix, inspect adjacent constructor, override, result-field, dummy-run,
@@ -39,7 +48,12 @@ debug_prompt_template_live: |
   4. Reproduce with a targeted test using the real upstream API when possible,
      then run the owning suite. Report the exact validated commit and whether
      a new remote CI build has reached a terminal result.
-  5. Write MODULE_DONE {module} to the signal file only after verification.
+  5. Use the tool environment's IMX_LOG_DIR for this run's artifact directory;
+     form the absolute signal path as IMX_LOG_DIR/module.{module}.done.
+     Search only this run directory for signals, never / or /data. Write
+     MODULE_DONE {module} there only after verification. If the original
+     test remains failed, report the exact unresolved result and finish
+     without a success signal so the parent can continue the other jobs.
 
   MODULE={module}
 
@@ -50,6 +64,20 @@ pytest_wrapper: "bash '{script_dir}/lib/run_module_pytest.sh'"
 # the LIVE wrapper (recorded divergence: live prompts reference the shipped
 # imx-omni-pytest instead of the retired shell script, and fix its quoting)
 pytest_wrapper_live: "imx-omni-pytest"
+
+# Operational coverage may grow without changing the historical prompt maps.
+# worker_v2 imports upstream worker/output APIs and must be ported with worker.
+live_module_overrides:
+  scheduler:
+    omni_files: "vllm_omni/core/sched/"
+    test_paths: ["tests/core/sched/", "tests/distributed/", "tests/model_executor/test_cfg_pairing.py"]
+  input_output:
+    vllm_paths: "vllm/inputs/ vllm/renderers/ vllm/v1/engine/input_processor.py vllm/v1/engine/output_processor.py vllm/v1/request.py"
+    test_paths: ["tests/inputs/", "tests/entrypoints/test_omni_new_request_data.py", "tests/engine/", "tests/engine/test_omni_request_output.py"]
+  worker_runner:
+    omni_files: "vllm_omni/worker/ vllm_omni/worker_v2/"
+    test_paths: ["tests/worker/", "tests/worker_v2/", "tests/diffusion/test_diffusion_worker.py", "tests/e2e/features/custom_pipeline/"]
+    import_check: "from vllm_omni.worker.gpu_model_runner import *; from vllm_omni.worker.gpu_generation_model_runner import *; from vllm_omni.worker.gpu_ar_model_runner import *; from vllm_omni.worker.gpu_ar_worker import *; from vllm_omni.worker_v2.omni_ar_model_runner import *; from vllm_omni.worker_v2.omni_generation_model_runner import *; print('OK')"
 
 module_vllm_paths:
   model_config: "vllm/config/ vllm/engine/arg_utils.py"

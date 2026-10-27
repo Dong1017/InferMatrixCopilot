@@ -1,6 +1,6 @@
 # providers/base.py —— 规范
 
-<!-- verified-against: 2026-09-30 -->
+<!-- verified-against: 2026-10-27 -->
 
 `LOC ~161 · provider 层契约 + 子进程环境白名单 · refactor-status: ok`
 
@@ -60,3 +60,9 @@ stdlib + `..scopes.ToolScope`。它是一个叶子契约模块。
 需要硬上限的调用方要预留"阈值 + 单个请求的最坏情况"。不支持的 transport 接受并忽略该参数，调用方必须先检查
 `stops_at_spend`（知识服务的 gateway 会拒绝）。不得出现声称能硬性限制单次调用花费的属性。
 `max_tokens` 对 CLI transport 不是花费上限。transport 报告的本次花费放在 `Reply.usage["cost_usd"]`（未知时不出现）。
+
+## 2026-10-27 `AgentSessionRequest.read_roots`
+
+会话审计的额外**只读**包含根（rebase module agent 必须读上游 checkout 与
+目标 venv）。只放宽读包含判定，不放宽写；cursor 传输把它并进
+`audit_events(roots=...)`。

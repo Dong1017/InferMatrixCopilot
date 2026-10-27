@@ -25,11 +25,8 @@ upstream:
   kind: fork_tracking
   repo_path: ${VLLM_UPSTREAM_REPO}
   remote: origin
-  # v0.30.0 alignment campaign (2026-09-17): wheel pick and commit
-  # assignment target the release branch, not upstream main. The branch
-  # is cut but NOT yet tagged, so this tracks the branch head and is
-  # re-pinned to the tag commit once v0.30.0 is released.
-  target_branch: releases/v0.30.0
+  # v0.32.0 alignment tracks upstream main until the release branch is cut.
+  target_branch: main
 
 # Repo-specific slice of the SHARED, human-curated knowledge base (the vendored
 # community docs at the repo-root `knowledge/` = settings.knowledge_dir;
@@ -67,10 +64,10 @@ knowledge:
 # scoping) may only ever gain coverage here, never lose it.
 modules:
   worker_runner:
-    local_paths: [vllm_omni/worker/]
+    local_paths: [vllm_omni/worker/, vllm_omni/worker_v2/]
     upstream_paths: [vllm/v1/worker/]
-    test_paths: [tests/worker/, tests/diffusion/test_diffusion_worker.py, tests/e2e/offline_inference/custom_pipeline/, tests/e2e/online_serving/test_qwen3_tts_base.py, tests/entrypoints/test_omni_sleep_mode.py]
-    import_check: "from vllm_omni.worker.gpu_model_runner import *; from vllm_omni.worker.gpu_generation_model_runner import *; from vllm_omni.worker.gpu_ar_model_runner import *; from vllm_omni.worker.gpu_ar_worker import *; print('Worker/Runner imports OK')"
+    test_paths: [tests/worker/, tests/worker_v2/, tests/diffusion/test_diffusion_worker.py, tests/e2e/features/custom_pipeline/, tests/e2e/online_serving/test_qwen3_tts_base.py, tests/entrypoints/test_omni_sleep_mode.py]
+    import_check: "from vllm_omni.worker.gpu_model_runner import *; from vllm_omni.worker.gpu_generation_model_runner import *; from vllm_omni.worker.gpu_ar_model_runner import *; from vllm_omni.worker.gpu_ar_worker import *; from vllm_omni.worker_v2.omni_ar_model_runner import *; from vllm_omni.worker_v2.omni_generation_model_runner import *; print('Worker/Runner imports OK')"
     wave: 1
     risk: high
   model_executor:
@@ -82,14 +79,14 @@ modules:
     risk: high
   input_output:
     local_paths: [vllm_omni/inputs/, vllm_omni/outputs/, vllm_omni/utils/mm_outputs.py, vllm_omni/data_entry_keys.py, vllm_omni/engine/async_omni_engine.py, vllm_omni/engine/orchestrator.py, vllm_omni/engine/serialization.py, vllm_omni/engine/stage_init_utils.py, vllm_omni/engine/stage_engine_core_client.py, vllm_omni/engine/output_processor.py, vllm_omni/request.py]
-    upstream_paths: [vllm/inputs/, vllm/v1/engine/input_processor.py, vllm/v1/engine/output_processor.py, vllm/v1/request.py]
-    test_paths: [tests/entrypoints/test_omni_new_request_data.py, tests/engine/test_async_omni_engine_input.py, tests/test_outputs.py]
+    upstream_paths: [vllm/inputs/, vllm/renderers/, vllm/v1/engine/input_processor.py, vllm/v1/engine/output_processor.py, vllm/v1/request.py]
+    test_paths: [tests/inputs/, tests/entrypoints/test_omni_new_request_data.py, tests/engine/test_async_omni_engine_input.py, tests/engine/test_omni_request_output.py]
     import_check: "from vllm_omni.inputs.data import *; from vllm_omni.inputs.preprocess import *; from vllm_omni.engine.async_omni_engine import AsyncOmniEngine; from vllm_omni.engine.orchestrator import Orchestrator; from vllm_omni.engine.serialization import serialize_additional_information; print('Input/Output imports OK')"
     wave: 1
   scheduler:
     local_paths: [vllm_omni/core/]
     upstream_paths: [vllm/v1/core/sched/]
-    test_paths: [tests/distributed/, tests/diffusion/distributed/test_ulysses_uaa_perf.py]
+    test_paths: [tests/core/sched/, tests/distributed/, tests/model_executor/test_cfg_pairing.py, tests/diffusion/distributed/test_ulysses_uaa_perf.py]
     import_check: "from vllm_omni.core.sched.omni_ar_scheduler import *; from vllm_omni.core.sched.omni_generation_scheduler import *; print('Scheduler imports OK')"
     wave: 1
     risk: high
@@ -213,18 +210,10 @@ rebase:
   # adapter is active; this whole `rebase:` section is HIGH-RISK (human-only
   # writes) so an agent can never self-install hooks
   hooks: rebase/hooks.py
-  # READ-ONLY parent-store read-compat (Rev 8 §9 PR4c, delivered by the
-  # completion design D2): v3 knowledge retrieval unions these layers LAST
-  # (runtime > adapter seed > parent) until the PR4d migration executes,
-  # after which the owner REMOVES these two keys (RUNBOOK step) and the
-  # compat layer dies. The v3 prelude fails CLOSED when a declared layer
-  # is unreadable and records open/close logical digests (§8 fairness).
-  knowledge:
-    parent_debug_db: ${REBASE_AGENT_ROOT}/agent/store/debug_memory.db
-    parent_skills_dir: ${REBASE_AGENT_ROOT}/agent/skills
-    # the parent store's own column carrying the upstream commit — repo
-    # data, so the neutral read-compat/migration code stays literal-free
-    parent_upstream_column: vllm_commit
+  # The READ-ONLY parent-store read-compat `knowledge:` block (Rev 8 §9
+  # PR4c) is removed (owner decision 2026-10-01): the parent rebase-agent
+  # checkout no longer exists, so v3 runs on its own runtime + adapter seed
+  # knowledge only. An absent declaration attests nothing and blocks nothing.
   # the shared checkout flock name: v3, the v1 backend, EXT1's external
   # startup guard, and PR7 archival ALL take locks/<lock_name>.lock inside
   # the checkout, so exclusion is mutual (repo data — the core stays neutral)
@@ -244,7 +233,10 @@ rebase:
     import_check_modules: [vllm._C_stable_libtorch, vllm._C]
     ops_namespace: _C
     stale_artifact_globs: ["_C*.so", "*.abi3.so", "_moe_C*.so"]
-    install_env: {VLLM_USE_PRECOMPILED: "1"}
+    install_env:
+      VLLM_USE_PRECOMPILED: "1"
+      VLLM_PRECOMPILED_WHEEL_COMMIT: "{commit}"
+      VLLM_PRECOMPILED_WHEEL_VARIANT: "{variant}"
     reinstall_retries: 3
     pin:
       dockerfile: docker/Dockerfile.ci
@@ -260,7 +252,7 @@ rebase:
     # trigger env (parent create_build env + trigger_and_monitor extra_env,
     # verbatim): opts the FULL suite in — a webhook build without these
     # runs fewer tests, which is why pushed rounds create their own build
-    build_env: {NIGHTLY: "1", RUN_HUNYUAN_IMAGE3_PERF: "1"}
+    build_env: {NIGHTLY: "1", RUN_HUNYUAN_IMAGE3_PERF: "1", EMAIL_DISTRIBUTION: "0"}
     # monitor classification data (parent monitor.py constants — EXCEPT
     # the pipeline upload/load lanes, moved to structural: their failure
     # suppresses every dynamic test job, so ignoring it was a false-green
@@ -310,9 +302,9 @@ rebase:
     # behavioral routing replay).
     assignment_paths:
       model_config: [tests/entrypoints/test_stage_utils.py, tests/metrics/test_stats.py]
-      input_output: [tests/entrypoints/test_omni_new_request_data.py, tests/engine/, tests/test_outputs.py]
+      input_output: [tests/entrypoints/test_omni_new_request_data.py, tests/engine/, tests/engine/test_omni_request_output.py]
       scheduler: [tests/distributed/]
-      worker_runner: [tests/worker/, tests/diffusion/test_diffusion_worker.py, tests/e2e/offline_inference/custom_pipeline/]
+      worker_runner: [tests/worker/, tests/worker_v2/, tests/diffusion/test_diffusion_worker.py, tests/e2e/features/custom_pipeline/]
       model_executor: [tests/model_executor/, tests/diffusion/, tests/e2e/offline_inference/]
       online_serving: [tests/entrypoints/, tests/e2e/online_serving/]
       benchmarks: [tests/benchmarks/test_serve_cli.py]
@@ -332,6 +324,13 @@ rebase:
     # full offline inference suite takes about four hours on the shared host,
     # so the previous 7200s default could never produce a terminal result.
     module_timeout_sec: 21600
+    # The wrapper refuses a TEST_TIMEOUT_SEC above this cap; it must not be
+    # lower than the planned budget above or every required command is refused.
+    module_max_timeout_sec: 21600
+    # Phase-2 module agents run on the CUDA wheel/runtime above. Broad pytest
+    # paths must retain CUDA-capable and platform-neutral items while leaving
+    # NPU/ROCm/XPU/MUSA-only items to their native CI lanes.
+    module_test_platform: cuda
     # root-level artifacts tests leak between runs (test_artifact_cleanup.sh
     # TEST_ARTIFACT_GLOBS, verbatim) — gitignored upstream but pile up on disk
     artifact_globs: ["audio_chatcmpl-*.wav", "audio_[0-9]*ch_*.wav",
@@ -372,7 +371,7 @@ rebase:
           candidates: [tests/entrypoints/test_stage_utils.py, tests/metrics/test_stats.py, tests/entrypoints/test_omni_llm.py]
           fallback: tests/entrypoints/test_stage_utils.py
         input_output:
-          candidates: [tests/entrypoints/test_omni_new_request_data.py, tests/engine/test_async_omni_engine_input.py, tests/entrypoints/test_omni_input_preprocessor.py, tests/test_outputs.py]
+          candidates: [tests/entrypoints/test_omni_new_request_data.py, tests/engine/test_async_omni_engine_input.py, tests/entrypoints/test_omni_input_preprocessor.py, tests/engine/test_omni_request_output.py]
           fallback: tests/entrypoints/test_omni_new_request_data.py
         online_serving:
           candidates: [tests/entrypoints/test_async_omni.py, tests/entrypoints/test_async_omni_diffusion_config.py, tests/entrypoints/test_omni_diffusion.py, tests/entrypoints/test_omni_stage_diffusion_config.py, tests/entrypoints/openai_api/]

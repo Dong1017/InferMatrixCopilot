@@ -38,6 +38,7 @@ class ModulePromptData:
     module_omni_files: Mapping[str, str] = field(default_factory=dict)
     module_test_map: Mapping[str, Sequence[str]] = field(default_factory=dict)
     module_import_check: Mapping[str, str] = field(default_factory=dict)
+    live_module_overrides: Mapping[str, Mapping] = field(default_factory=dict)
 
     @classmethod
     def load(cls, rebase_data_dir: Path) -> "ModulePromptData":
@@ -55,7 +56,8 @@ class ModulePromptData:
                    module_vllm_paths=data.get("module_vllm_paths", {}),
                    module_omni_files=data.get("module_omni_files", {}),
                    module_test_map=data.get("module_test_map", {}),
-                   module_import_check=data.get("module_import_check", {}))
+                   module_import_check=data.get("module_import_check", {}),
+                   live_module_overrides=data.get("live_module_overrides", {}))
 
 
 def _run_git(cmd: list[str], cwd: str, timeout: int = 15) -> str:
@@ -214,6 +216,8 @@ def build_module_prompt(
     live: bool = False,
     baseline_ref: str = "origin/main",
     test_timeout_sec: int = 7200,
+    target_branch: str = "",
+    upstream_commit: str = "",
     run_git: Callable[[list[str], str], str] | None = None,
 ) -> str:
     """Byte-parity render of the parent's `build_module_prompt`. `script_dir`
@@ -224,7 +228,8 @@ def build_module_prompt(
     vllm_commit = git(["rev-parse", "--short", "HEAD"], vllm_path)
     omni_commit = git(["rev-parse", "--short", "HEAD"], omni_path)
 
-    upstream_paths = data.module_vllm_paths.get(module, "")
+    overrides = data.live_module_overrides.get(module, {}) if live else {}
+    upstream_paths = overrides.get("vllm_paths", data.module_vllm_paths.get(module, ""))
     commit_list = ""
     if last_rebase_vllm_commit and upstream_paths:
         commit_list = git(
@@ -242,10 +247,13 @@ def build_module_prompt(
                         if live and data.pytest_wrapper_live
                         else data.pytest_wrapper)
     wrapper = wrapper_template.format(script_dir=script_dir)
+    test_paths = overrides.get("test_paths",
+                               data.module_test_map.get(module, []))
     pytest_cmds = [f"{wrapper} -vv -s {test_path}"
-                   for test_path in data.module_test_map.get(module, [])]
+                   for test_path in test_paths]
     test_commands = "\n".join(pytest_cmds)
-    check = data.module_import_check.get(module, 'print("OK")')
+    check = overrides.get("import_check",
+                          data.module_import_check.get(module, 'print("OK")'))
     if live:
         import shlex
         import_check_cmd = f"{wrapper} python -c {shlex.quote(check)}"
@@ -270,7 +278,8 @@ def build_module_prompt(
         "CUDA_DEVICES":      cuda_devices,
         "HF_HOME":           hf_home,
         "COMMIT_LIST":       commit_list,
-        "OMNI_FILES":        data.module_omni_files.get(module, ""),
+        "OMNI_FILES":        overrides.get("omni_files",
+                                            data.module_omni_files.get(module, "")),
         "UPSTREAM_FILES":    upstream_paths,
         "IMPORT_CHECK":      import_check_cmd,
         "PYTHON3_CMD":       "python3",
@@ -294,6 +303,25 @@ def build_module_prompt(
         "SCRIPT_DIR":        script_dir,
         "SESSION":           f"module-{module}",
     }
+    if live:
+        import sys
+        vars_map["COPILOT_PYTHON"] = shlex.quote(sys.executable)
+        # Use the run's pin even when the checkout has drifted; displaying
+        # both lets the agent verify the environment before making a port.
+        # Legacy callers without run context use observed checkout facts,
+        # never the release or prior-alignment SHA from an earlier campaign.
+        vars_map.update({
+            "TARGET_BRANCH": (target_branch
+                              or git(["symbolic-ref", "--quiet", "--short", "HEAD"],
+                                     vllm_path)
+                              or "unspecified (detached checkout)"),
+            "UPSTREAM_COMMIT": (upstream_commit
+                                or git(["rev-parse", "HEAD"], vllm_path)
+                                or "unresolved (verify upstream checkout HEAD)"),
+            "LAST_REBASE_UPSTREAM_COMMIT": (last_rebase_vllm_commit
+                                            or "not supplied"),
+            "BASELINE_REF": baseline_ref,
+        })
     for key, value in vars_map.items():
         template = template.replace("{" + key + "}", value)
     return template

@@ -1,0 +1,1635 @@
+{
+ "jobs": [
+  {
+   "slug": "simple_model_executor_test",
+   "label": "Simple \u00b7 Model Executor Test",
+   "source": "ready",
+   "command": "pytest -sv tests/model_executor -m 'core_model and cpu'",
+   "timeout_sec": 1200,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "platform",
+   "setup": ""
+  },
+  {
+   "slug": "simple_diffusion_test",
+   "label": "Simple \u00b7 Diffusion Test",
+   "source": "ready",
+   "command": "pytest -sv tests/diffusion -m 'core_model and cpu'",
+   "timeout_sec": 1800,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "platform",
+   "setup": ""
+  },
+  {
+   "slug": "simple_engineentrypoints_test",
+   "label": "Simple \u00b7 Engine&Entrypoints Test",
+   "source": "ready",
+   "command": "pytest -sv tests/entrypoints tests/engine -m 'core_model and cpu'",
+   "timeout_sec": 1200,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "platform",
+   "setup": ""
+  },
+  {
+   "slug": "simple_other_test",
+   "label": "Simple \u00b7 Other Test",
+   "source": "ready",
+   "command": "pytest -sv tests/ -m 'core_model and cpu' --ignore=tests/diffusion --ignore=tests/model_executor --ignore=tests/entrypoints --ignore=tests/engine",
+   "timeout_sec": 1200,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "platform",
+   "setup": ""
+  },
+  {
+   "slug": "diffusion_lora_test",
+   "label": "Diffusion \u00b7 LoRA Test",
+   "source": "merge",
+   "command": "pytest -sv tests/diffusion/lora/ -m 'advanced_model and cuda' --run-level \"advanced_model\"",
+   "timeout_sec": 1800,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "model_executor",
+   "setup": ""
+  },
+  {
+   "slug": "distributed_test",
+   "label": "Distributed Test",
+   "source": "ready",
+   "command": "pytest -sv tests/distributed/ -m 'core_model and cuda and L4' --run-level 'core_model'",
+   "timeout_sec": 1800,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "scheduler",
+   "setup": ""
+  },
+  {
+   "slug": "entrypoint_test_with_h100",
+   "label": "Entrypoint Test with H100",
+   "source": "merge",
+   "command": "pytest -s -v tests/entrypoints/ -m \"advanced_model and cuda and H100\" --run-level \"advanced_model\" --deselect tests/entrypoints/openai_api/test_qwen3_omni_realtime_websocket.py::TestQwen3OmniRealtimeWebSocket::test_server_vad_multi_turn_without_client_commit",
+   "timeout_sec": 3600,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "online_serving",
+   "setup": ""
+  },
+  {
+   "slug": "entrypoint_test_with_l4",
+   "label": "Entrypoint Test with L4",
+   "source": "merge",
+   "command": "set -eu\npytest -s -v tests/entrypoints/test_omni_sleep_mode.py::TestOmniDiffusionSleepMode::test_diffusion_sleep_handshake -m \"advanced_model and cuda and L4 and cards_1\" --run-level \"advanced_model\"\npytest -s -v tests/entrypoints/ -m \"advanced_model and cuda and L4 and cards_1\" --run-level \"advanced_model\" --deselect tests/entrypoints/test_omni_sleep_mode.py::TestOmniDiffusionSleepMode::test_diffusion_sleep_handshake\n",
+   "timeout_sec": 3600,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "online_serving",
+   "setup": ""
+  },
+  {
+   "slug": "entrypoint_test_with_l4_2-gpu",
+   "label": "Entrypoint Test with L4 \u00b7 2-GPU",
+   "source": "merge",
+   "command": "pytest -s -v tests/entrypoints/ -m \"advanced_model and cuda and L4 and cards_2\" --run-level \"advanced_model\"",
+   "timeout_sec": 3600,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "online_serving",
+   "setup": ""
+  },
+  {
+   "slug": "tts_qwen3-tts_customvoice_test",
+   "label": "TTS \u00b7 Qwen3-TTS CustomVoice Test",
+   "source": "ready",
+   "command": "pytest -s -v tests/e2e/online_serving/test_qwen3_tts_customvoice.py -m 'core_model' --run-level 'core_model'",
+   "timeout_sec": 1800,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60 VLLM_ALLOW_LONG_MAX_MODEL_LEN=1",
+   "module": "online_serving",
+   "setup": ""
+  },
+  {
+   "slug": "tts_qwen3-tts_base_test",
+   "label": "TTS \u00b7 Qwen3-TTS Base Test",
+   "source": "merge",
+   "command": ".buildkite/common/scripts/run_cov_split.sh \\\n  --model-id qwen3_tts \\\n  --offline tests/e2e/offline_inference/test_qwen3_tts_base.py \\\n  --online tests/e2e/online_serving/test_qwen3_tts_base.py \\\n  -- -m 'advanced_model and cuda' --run-level 'advanced_model'\n",
+   "timeout_sec": 3600,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60 VLLM_LOGGING_LEVEL=DEBUG VLLM_ALLOW_LONG_MAX_MODEL_LEN=1",
+   "module": "platform",
+   "setup": ""
+  },
+  {
+   "slug": "omni_qwen3-omni_test",
+   "label": "Omni \u00b7 Qwen3-Omni Test",
+   "source": "ready",
+   "command": "pytest -s -v tests/e2e/online_serving/test_qwen3_omni.py -m 'core_model' --run-level 'core_model'",
+   "timeout_sec": 1800,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "online_serving",
+   "setup": ""
+  },
+  {
+   "slug": "omni_minicpm-o_45_test",
+   "label": "Omni \u00b7 MiniCPM-o 4.5 Test",
+   "source": "merge",
+   "command": "pytest -s -v tests/e2e/offline_inference/test_minicpmo_4_5.py tests/e2e/online_serving/test_minicpmo_4_5.py -m 'advanced_model and cuda' --run-level 'advanced_model'",
+   "timeout_sec": 3000,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "platform",
+   "setup": ""
+  },
+  {
+   "slug": "omni_minicpm-o_45_duplex_test",
+   "label": "Omni \u00b7 MiniCPM-o 4.5 Duplex Test",
+   "source": "ready",
+   "command": "pytest -s -v tests/e2e/online_serving/test_minicpmo_4_5_duplex.py tests/e2e/online_serving/test_duplex_client_live.py -m 'core_model and cuda' --run-level 'core_model'",
+   "timeout_sec": 1800,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "online_serving",
+   "setup": ""
+  },
+  {
+   "slug": "diffusion_qwen_image_test",
+   "label": "Diffusion \u00b7 Qwen Image Test",
+   "source": "ready",
+   "command": "pytest -s -v tests/e2e/online_serving/test_qwen_image.py -m 'core_model' --run-level 'core_model'",
+   "timeout_sec": 1800,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60 VLLM_IMAGE_FETCH_TIMEOUT=60",
+   "module": "online_serving",
+   "setup": ""
+  },
+  {
+   "slug": "diffusion_wan22_test",
+   "label": "Diffusion \u00b7 Wan22 Test",
+   "source": "ready",
+   "command": "pytest -s -v tests/e2e/online_serving/test_wan22_t2v.py -m 'core_model and cuda' --run-level 'core_model'",
+   "timeout_sec": 1800,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60 VLLM_IMAGE_FETCH_TIMEOUT=60",
+   "module": "online_serving",
+   "setup": ""
+  },
+  {
+   "slug": "diffusion_hunyuanvideo-15_test",
+   "label": "Diffusion \u00b7 HunyuanVideo-1.5 Test",
+   "source": "ready",
+   "command": "pytest -s -v tests/e2e/online_serving/test_hunyuan_video_15_expansion.py -m 'core_model and diffusion' --run-level 'core_model'",
+   "timeout_sec": 1800,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60 VLLM_IMAGE_FETCH_TIMEOUT=60",
+   "module": "online_serving",
+   "setup": ""
+  },
+  {
+   "slug": "diffusion_lingbot-video_test",
+   "label": "Diffusion \u00b7 LingBot-Video Test",
+   "source": "ready",
+   "command": "pytest -s -v tests/e2e/online_serving/test_lingbot_video.py -m 'core_model and cuda' --run-level 'core_model'",
+   "timeout_sec": 1800,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60 VLLM_IMAGE_FETCH_TIMEOUT=60",
+   "module": "online_serving",
+   "setup": ""
+  },
+  {
+   "slug": "diffusion_minimax-h3_l3_dlo_dp2_and_fasth3",
+   "label": "Diffusion \u00b7 MiniMax-H3 L3 DLO DP2 and FastH3",
+   "source": "merge",
+   "command": "set -eu\nif [ -f vllm_omni/diffusion/models/minimax_h3/lora.py ]; then\n  export VLLM_TEST_MINIMAX_H3_TURBO_LORA=$(python3 -c 'from huggingface_hub import hf_hub_download; print(hf_hub_download(repo_id=\"lightx2v/Minimax-h3-Turbo\", filename=\"minimax_h3_fl2v_turbo_4step_v1.0_768p_bf16.safetensors\"))')\nfi\nif [ -f vllm_omni/diffusion/models/minimax_h3/fasth3.py ]; then\n  export VLLM_TEST_MINIMAX_H3_FASTH3_LORA=$(python3 -c 'from huggingface_hub import hf_hub_download; print(hf_hub_download(repo_id=\"FastVideo/FastVideo-FastH3-4-step-Preview-v1-LoRA\", filename=\"dense-datafree/adapter_model.safetensors\"))')\nfi\ntimeout 35m pytest -s -v tests/e2e/online_serving/minimax_h3/test_minimax_h3_dlo_dp2_fl2va.py -m 'advanced_model and cuda and diffusion' --run-level 'advanced_model'\ntimeout 35m pytest -s -v tests/e2e/online_serving/minimax_h3/test_minimax_h3_dlo_dp2_ref2va.py -m 'advanced_model and cuda and diffusion' --run-level 'advanced_model'\ntimeout 35m pytest -s -v tests/e2e/online_serving/minimax_h3/test_minimax_h3_turbo_lora.py -m 'advanced_model and cuda and diffusion' --run-level 'advanced_model'\ntimeout 35m pytest -s -v tests/e2e/online_serving/minimax_h3/test_minimax_h3_fasth3_lora.py -m 'advanced_model and cuda and diffusion' --run-level 'advanced_model'\n",
+   "timeout_sec": 9000,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60 VLLM_IMAGE_FETCH_TIMEOUT=60",
+   "module": "online_serving",
+   "setup": ""
+  },
+  {
+   "slug": "diffusion_minimax-h3_latent_upscale_and_refine",
+   "label": "Diffusion \u00b7 MiniMax-H3 Latent Upscale and Refine",
+   "source": "merge",
+   "command": "set -eu\nVLLM_TEST_MINIMAX_H3_LATENT_UPSCALER=$(python3 -c 'from huggingface_hub import hf_hub_download; print(hf_hub_download(repo_id=\"LBH-123-AI/Minimax_h3_latent_Upscaler\", filename=\"minimax_h3_latent_upscaler_3d_conv_v1/minimax_h3_latent_upscaler_3d_conv_v1_bf16.safetensors\"))')\nexport VLLM_TEST_MINIMAX_H3_LATENT_UPSCALER\ntimeout 35m pytest -s -v tests/e2e/online_serving/minimax_h3/test_minimax_h3.py -m 'advanced_model and cuda and diffusion' --run-level 'advanced_model'\n",
+   "timeout_sec": 2400,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "online_serving",
+   "setup": ""
+  },
+  {
+   "slug": "simple_cosyvoice3_packed_flow_test",
+   "label": "Simple \u00b7 CosyVoice3 Packed Flow Test",
+   "source": "ready",
+   "command": "pytest -sv tests/model_executor/models/cosyvoice3/test_cosyvoice3_full_batch.py -k packed -m 'core_model and cuda' --run-level=core_model",
+   "timeout_sec": 900,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "model_executor",
+   "setup": ""
+  },
+  {
+   "slug": "diffusion_flashattention_test",
+   "label": "Diffusion \u00b7 FlashAttention Test",
+   "source": "ready",
+   "command": "timeout 15m pytest -s -v tests/diffusion/attention/ -m 'core_model and cuda and L4 and cards_1' --run-level \"core_model\"",
+   "timeout_sec": 1200,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "model_executor",
+   "setup": ""
+  },
+  {
+   "slug": "diffusion_offloader_test",
+   "label": "Diffusion \u00b7 Offloader Test",
+   "source": "ready",
+   "command": "timeout 40m pytest -s -v tests/diffusion/offloader -m \"core_model and cuda\" --run-level \"core_model\"",
+   "timeout_sec": 1800,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "model_executor",
+   "setup": ""
+  },
+  {
+   "slug": "diffusion_cache_test",
+   "label": "Diffusion \u00b7 Cache Test",
+   "source": "ready",
+   "command": "timeout 15m pytest -sv tests/diffusion/cache -m 'core_model and cuda' --run-level \"core_model\"",
+   "timeout_sec": 1800,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "model_executor",
+   "setup": ""
+  },
+  {
+   "slug": "diffusion_batch_test",
+   "label": "Diffusion \u00b7 Batch Test",
+   "source": "ready",
+   "command": "timeout 15m pytest -sv tests/diffusion/batching -m 'core_model and cuda' --run-level \"core_model\"",
+   "timeout_sec": 1800,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "model_executor",
+   "setup": ""
+  },
+  {
+   "slug": "diffusion_distributed_test_single-gpu",
+   "label": "Diffusion \u00b7 Distributed Test \u00b7 Single-GPU",
+   "source": "ready",
+   "command": "timeout 20m pytest -sv tests/diffusion/distributed -m 'core_model and cuda and L4 and cards_1' --run-level \"core_model\"",
+   "timeout_sec": 1800,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "model_executor",
+   "setup": ""
+  },
+  {
+   "slug": "diffusion_distributed_test_2-gpu",
+   "label": "Diffusion \u00b7 Distributed Test \u00b7 2-GPU",
+   "source": "ready",
+   "command": "timeout 20m pytest -sv tests/diffusion/distributed -m 'core_model and cuda and L4 and cards_2' --run-level \"core_model\"\ntimeout 10m pytest -sv tests/diffusion/attention/test_ulysses_uaa.py -m 'core_model and cuda and L4 and cards_2' --run-level \"core_model\"",
+   "timeout_sec": 1800,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "model_executor",
+   "setup": ""
+  },
+  {
+   "slug": "diffusion_distributed_attention_test_4-gpu",
+   "label": "Diffusion \u00b7 Distributed & Attention Test \u00b7 4-GPU",
+   "source": "ready",
+   "command": "timeout 20m pytest -sv tests/diffusion/distributed -m 'core_model and cuda and L4 and cards_4' --run-level \"core_model\"\ntimeout 20m pytest -sv tests/diffusion/attention/test_attention_sp.py -m 'core_model and cuda and L4 and cards_4' --run-level \"core_model\"",
+   "timeout_sec": 1800,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "model_executor",
+   "setup": ""
+  },
+  {
+   "slug": "diffusion_model_test",
+   "label": "Diffusion \u00b7 Model Test",
+   "source": "ready",
+   "command": "timeout 15m pytest -sv tests/diffusion/models/ -m 'core_model and cuda' --run-level \"core_model\"",
+   "timeout_sec": 1800,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "model_executor",
+   "setup": ""
+  },
+  {
+   "slug": "diffusion_other_test",
+   "label": "Diffusion \u00b7 Other Test",
+   "source": "ready",
+   "command": "timeout 15m pytest -sv tests/diffusion/*.py tests/diffusion/ar_diffusion -m 'core_model and cuda' --run-level \"core_model\"",
+   "timeout_sec": 1800,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "model_executor",
+   "setup": ""
+  },
+  {
+   "slug": "tiny_model_tests_diffusion_base",
+   "label": "Tiny Model Tests \u00b7 Diffusion (base)",
+   "source": "ready",
+   "command": "timeout 15m pytest -sv -n 4 tests/model_tests/diffusion -m 'core_model and cuda' --run-level \"core_model\"",
+   "timeout_sec": 1800,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "platform",
+   "setup": ""
+  },
+  {
+   "slug": "enginemodel_executor_test",
+   "label": "Engine&Model Executor Test",
+   "source": "ready",
+   "command": "pytest -sv tests/engine/ tests/model_executor/ tests/worker/test_batched_omni_output.py tests/worker_v2/ -m 'core_model and cuda' --run-level 'core_model'",
+   "timeout_sec": 1800,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "platform",
+   "setup": ""
+  },
+  {
+   "slug": "entrypoints_test",
+   "label": "Entrypoints Test",
+   "source": "ready",
+   "command": "pytest -sv tests/entrypoints/test_async_omni.py::test_diffusion_generate_request_id -m 'core_model and cuda' --run-level 'core_model'\n  pytest -sv tests/entrypoints/ -m 'core_model and cuda' --run-level 'core_model' --deselect tests/entrypoints/test_async_omni.py::test_diffusion_generate_request_id",
+   "timeout_sec": 1800,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60 VLLM_WORKER_MULTIPROC_METHOD=spawn",
+   "module": "online_serving",
+   "setup": ""
+  },
+  {
+   "slug": "custom_pipeline_test",
+   "label": "Custom Pipeline Test",
+   "source": "ready",
+   "command": "timeout 20m pytest -s -v tests/e2e/features/custom_pipeline/ -m \"core_model\"",
+   "timeout_sec": 1800,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "worker_runner",
+   "setup": ""
+  },
+  {
+   "slug": "rlhf_verl-omni_e2e_test",
+   "label": "RLHF \u00b7 VeRL-Omni E2E Test",
+   "source": "ready",
+   "command": "pytest -s -v tests/e2e/features/rlhf_test/test_verl_omni_e2e.py",
+   "timeout_sec": 1800,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "platform",
+   "setup": ""
+  },
+  {
+   "slug": "omni_minicpm-o_45_offline_test",
+   "label": "Omni \u00b7 MiniCPM-o 4.5 Offline Test",
+   "source": "ready",
+   "command": "pytest -s -v tests/e2e/offline_inference/test_minicpmo_4_5.py -m 'core_model' --run-level 'core_model'",
+   "timeout_sec": 1800,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "model_executor",
+   "setup": ""
+  },
+  {
+   "slug": "omni_minicpm-o_45_online_test",
+   "label": "Omni \u00b7 MiniCPM-o 4.5 Online Test",
+   "source": "ready",
+   "command": "pytest -s -v tests/e2e/online_serving/test_minicpmo_4_5.py -m 'core_model' --run-level 'core_model'",
+   "timeout_sec": 1800,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "online_serving",
+   "setup": ""
+  },
+  {
+   "slug": "tts_higgs_v3_full_response_test",
+   "label": "TTS \u00b7 Higgs v3 Full Response Test",
+   "source": "ready",
+   "command": "timeout 20m pytest -s -v tests/e2e/online_serving/test_higgs_audio_v3.py::test_full_response_v1_preserves_audio -m 'core_model and cuda' --run-level 'core_model'",
+   "timeout_sec": 1800,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "online_serving",
+   "setup": ""
+  },
+  {
+   "slug": "diffusion_cosmos3_test",
+   "label": "Diffusion \u00b7 Cosmos3 Test",
+   "source": "ready",
+   "command": "pytest -s -v tests/e2e/online_serving/test_cosmos3.py -m 'core_model' --run-level 'core_model'",
+   "timeout_sec": 1800,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60 VLLM_IMAGE_FETCH_TIMEOUT=60",
+   "module": "online_serving",
+   "setup": ""
+  },
+  {
+   "slug": "diffusion_minimax-h3_dlo_dp2_t2va_test",
+   "label": "Diffusion \u00b7 MiniMax-H3 DLO DP2 T2VA Test",
+   "source": "ready",
+   "command": "pytest -s -v tests/e2e/online_serving/test_minimax_h3_dlo_dp2_t2va.py -m 'core_model and cuda and diffusion' --run-level 'core_model'",
+   "timeout_sec": 5400,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60 VLLM_IMAGE_FETCH_TIMEOUT=60",
+   "module": "online_serving",
+   "setup": ""
+  },
+  {
+   "slug": "full_moon_omni_function_test_with_h100_single-gpu",
+   "label": ":full_moon: Omni \u00b7 Function Test with H100 \u00b7 Single-GPU",
+   "source": "nightly",
+   "command": "pytest -sv tests/e2e --run-level \"full_model\" -m \"full_model and H100 and B200 and omni and cards_1\" --ignore=tests/e2e/accuracy --ignore=tests/e2e/online_serving/test_minicpmo_4_5_duplex_expansion.py --ignore=tests/e2e/online_serving/test_minicpmo_4_5_window.py",
+   "timeout_sec": 7200,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "platform",
+   "setup": ""
+  },
+  {
+   "slug": "full_moon_omni_function_test_with_h100_2-gpu",
+   "label": ":full_moon: Omni \u00b7 Function Test with H100 \u00b7 2-GPU",
+   "source": "nightly",
+   "command": "pytest -sv tests/e2e --run-level \"full_model\" -m \"full_model and H100 and B200 and omni and cards_2\" --ignore=tests/e2e/accuracy --ignore=tests/e2e/online_serving/test_qwen3_omni_multi_replicas.py",
+   "timeout_sec": 5400,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "platform",
+   "setup": ""
+  },
+  {
+   "slug": "full_moon_omni_minicpm-o_45_duplex_test",
+   "label": ":full_moon: Omni \u00b7 MiniCPM-o 4.5 Duplex Test",
+   "source": "nightly",
+   "command": "pytest -s -v tests/e2e/online_serving/test_minicpmo_4_5_duplex_expansion.py -m \"full_model and cuda and H100 and B200 and omni and cards_1\" --run-level \"full_model\"\npytest -s -v tests/e2e/online_serving/test_minicpmo_4_5_window.py -m \"full_model and cuda and H100 and B200 and omni and cards_1\" --run-level \"full_model\"",
+   "timeout_sec": 7200,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "online_serving",
+   "setup": ""
+  },
+  {
+   "slug": "full_moon_omni_doc_test_with_l4_4-gpu",
+   "label": ":full_moon: Omni \u00b7 Doc Test with L4 \u00b7 4-GPU",
+   "source": "nightly",
+   "command": "pytest -s -v tests/examples/ -m \"full_model and omni and L4 and B200 and cards_4\" --run-level \"full_model\"",
+   "timeout_sec": 5400,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60 VLLM_ALLOW_LONG_MAX_MODEL_LEN=\"1\"",
+   "module": "platform",
+   "setup": ""
+  },
+  {
+   "slug": "full_moon_omni_doc_test_with_h100_2-gpu",
+   "label": ":full_moon: Omni \u00b7 Doc Test with H100 \u00b7 2-GPU",
+   "source": "nightly",
+   "command": "pytest -s -v tests/examples/ -m \"full_model and omni and H100 and B200 and cards_2\" --run-level \"full_model\"",
+   "timeout_sec": 5400,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "platform",
+   "setup": ""
+  },
+  {
+   "slug": "full_moon_omni_omni-duplexeval_ci_guard",
+   "label": ":full_moon: Omni \u00b7 Omni-DuplexEval CI Guard",
+   "source": "nightly",
+   "command": "set +e\npytest -s -v tests/e2e/accuracy/omni_duplex_eval/test_omni_duplex_eval_ci.py \\\n  -m \"full_model and H100 and B200 and cuda and cards_2\" \\\n  --run-level full_model \\\n  --basetemp /tmp/omni_duplex_ci\nEXIT=$$?\nbuildkite-agent artifact upload \"tests/e2e/accuracy/omni_duplex_eval/results/*.json\"\nexit $$EXIT\n",
+   "timeout_sec": 14400,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "platform",
+   "setup": ""
+  },
+  {
+   "slug": "full_moon_omni_multi-replica_startup_test_with_4x_h100",
+   "label": ":full_moon: Omni \u00b7 Multi-Replica Startup Test with 4x H100",
+   "source": "nightly",
+   "command": "pytest -s -v tests/e2e/online_serving/test_qwen3_omni_multi_replicas.py -m \"full_model and H100 and B200 and cards_4\" --run-level \"core_model\"",
+   "timeout_sec": 2700,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "online_serving",
+   "setup": ""
+  },
+  {
+   "slug": "full_moon_entrypoint_test_with_h100",
+   "label": ":full_moon: Entrypoint Test with H100",
+   "source": "nightly",
+   "command": "pytest -s -v tests/entrypoints/ -m \"full_model and cuda and H100 and B200 and cards_2\" --run-level \"full_model\"",
+   "timeout_sec": 10800,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "online_serving",
+   "setup": ""
+  },
+  {
+   "slug": "full_moon_tts_function_test_with_l4",
+   "label": ":full_moon: TTS \u00b7 Function Test with L4",
+   "source": "nightly",
+   "command": "pytest -s -v tests/e2e/ -m \"full_model and L4 and B200 and tts and cards_1\" --run-level \"full_model\" --ignore=tests/e2e/accuracy",
+   "timeout_sec": 7200,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60 VLLM_ALLOW_LONG_MAX_MODEL_LEN=\"1\" VLLM_USE_DEEP_GEMM=\"0\" VLLM_MOE_USE_DEEP_GEMM=\"0\"",
+   "module": "platform",
+   "setup": ""
+  },
+  {
+   "slug": "full_moon_tiny_model_tests_diffusion_multi-gpu_accelerations_2-gpu",
+   "label": ":full_moon: Tiny Model Tests \u00b7 Diffusion (Multi-GPU accelerations) \u00b7 2-GPU",
+   "source": "nightly",
+   "command": "pytest -sv tests/model_tests/diffusion -m 'full_model and L4 and B200 and cuda and cards_2' --run-level \"core_model\"",
+   "timeout_sec": 1800,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "platform",
+   "setup": ""
+  },
+  {
+   "slug": "full_moon_tiny_model_tests_diffusion_multi-gpu_accelerations_4-gpu",
+   "label": ":full_moon: Tiny Model Tests \u00b7 Diffusion (Multi-GPU accelerations) \u00b7 4-GPU",
+   "source": "nightly",
+   "command": "pytest -sv tests/model_tests/diffusion -m 'full_model and L4 and B200 and cuda and cards_4' --run-level \"core_model\"",
+   "timeout_sec": 1800,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "platform",
+   "setup": ""
+  },
+  {
+   "slug": "full_moon_diffusion_x2iat_function_test_with_h100_single-gpu",
+   "label": ":full_moon: Diffusion X2I(&A&T) \u00b7 Function Test with H100 \u00b7 Single-GPU",
+   "source": "nightly",
+   "command": "pytest -sv tests/e2e/online_serving/test_qwen_image_expansion.py -m \"full_model and diffusion and H100 and B200 and cards_1\" --run-level \"full_model\"",
+   "timeout_sec": 7200,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "online_serving",
+   "setup": ""
+  },
+  {
+   "slug": "full_moon_diffusion_x2iat_function_test_with_h100_2-gpu",
+   "label": ":full_moon: Diffusion X2I(&A&T) \u00b7 Function Test with H100 \u00b7 2-GPU",
+   "source": "nightly",
+   "command": "pytest -sv tests/e2e/online_serving/test_qwen_image_expansion.py -m \"full_model and diffusion and H100 and B200 and cards_2\" --run-level \"full_model\"",
+   "timeout_sec": 7200,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "online_serving",
+   "setup": ""
+  },
+  {
+   "slug": "full_moon_diffusion_x2iat_function_test_with_l4_single-gpu",
+   "label": ":full_moon: Diffusion X2I(&A&T) \u00b7 Function Test with L4 \u00b7 Single-GPU",
+   "source": "nightly",
+   "command": "pytest -sv tests/e2e/offline_inference/test_qwen_image_autoround_w4a16_expansion.py -m \"full_model and diffusion and L4 and B200 and cards_1\" --run-level \"full_model\"",
+   "timeout_sec": 7200,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "model_executor",
+   "setup": ""
+  },
+  {
+   "slug": "full_moon_diffusion_x2iat_doc_test",
+   "label": ":full_moon: Diffusion X2I(&A&T) \u00b7 Doc Test",
+   "source": "nightly",
+   "command": "pytest -s -v tests/examples/*/test_text_to_image.py -m \"full_model and example and H100 and B200 and (cards_1 or cards_2)\" --run-level \"full_model\"",
+   "timeout_sec": 3600,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "",
+   "setup": ""
+  },
+  {
+   "slug": "full_moon_diffusion_x2v_wan22_t2v_function_test_single-gpu",
+   "label": ":full_moon: Diffusion X2V \u00b7 Wan2.2 T2V Function Test \u00b7 Single-GPU",
+   "source": "nightly",
+   "command": "pytest -s -v tests/e2e/online_serving/test_wan22_expansion.py -k \"t2v\" -m \"full_model and cuda and H100 and B200 and cards_1\" --run-level \"full_model\"",
+   "timeout_sec": 5400,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "online_serving",
+   "setup": ""
+  },
+  {
+   "slug": "full_moon_diffusion_x2v_wan22_t2v_function_test_2-gpu",
+   "label": ":full_moon: Diffusion X2V \u00b7 Wan2.2 T2V Function Test \u00b7 2-GPU",
+   "source": "nightly",
+   "command": "pytest -s -v tests/e2e/online_serving/test_wan22_expansion.py -k \"t2v\" -m \"full_model and cuda and H100 and B200 and cards_2\" --run-level \"full_model\"",
+   "timeout_sec": 5400,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "online_serving",
+   "setup": ""
+  },
+  {
+   "slug": "full_moon_diffusion_x2v_wan22_i2vti2v_function_test_single-gpu",
+   "label": ":full_moon: Diffusion X2V \u00b7 Wan2.2 I2V/TI2V Function Test \u00b7 Single-GPU",
+   "source": "nightly",
+   "command": "pytest -s -v tests/e2e/online_serving/test_wan22_expansion.py -k \"i2v\" -m \"full_model and cuda and H100 and B200 and cards_1\" --run-level \"full_model\"",
+   "timeout_sec": 5400,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "online_serving",
+   "setup": ""
+  },
+  {
+   "slug": "full_moon_diffusion_x2v_wan22_i2vti2v_function_test_2-gpu",
+   "label": ":full_moon: Diffusion X2V \u00b7 Wan2.2 I2V/TI2V Function Test \u00b7 2-GPU",
+   "source": "nightly",
+   "command": "pytest -s -v tests/e2e/online_serving/test_wan22_expansion.py -k \"i2v\" -m \"full_model and cuda and H100 and B200 and cards_2\" --run-level \"full_model\"",
+   "timeout_sec": 5400,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "online_serving",
+   "setup": ""
+  },
+  {
+   "slug": "full_moon_diffusion_x2v_hunyuanvideo-15_function_test",
+   "label": ":full_moon: Diffusion X2V \u00b7 HunyuanVideo-1.5 Function Test",
+   "source": "nightly",
+   "command": "pytest -s -v tests/e2e/online_serving/test_hunyuan_video_15_expansion.py -m \"full_model and H100 and B200 and cuda and (cards_1 or cards_2)\" --run-level \"full_model\"",
+   "timeout_sec": 5400,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "online_serving",
+   "setup": ""
+  },
+  {
+   "slug": "full_moon_diffusion_x2v_lingbot_function_test",
+   "label": ":full_moon: Diffusion X2V \u00b7 LingBot Function Test",
+   "source": "nightly",
+   "command": "pytest -s -v tests/e2e/online_serving/test_lingbot_video_expansion.py tests/e2e/online_serving/test_lingbot_video_moe.py tests/e2e/offline_inference/test_lingbot_world_v2.py -m \"full_model and diffusion and H100 and B200 and cards_1\" --run-level \"full_model\"",
+   "timeout_sec": 7200,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "platform",
+   "setup": ""
+  },
+  {
+   "slug": "full_moon_diffusion_x2v_doc_test",
+   "label": ":full_moon: Diffusion X2V \u00b7 Doc Test",
+   "source": "nightly",
+   "command": "pytest -s -v tests/examples/offline_inference/test_image_to_video.py -m \"full_model and example and H100 and B200 and cards_1\" --run-level \"full_model\"",
+   "timeout_sec": 3600,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "platform",
+   "setup": ""
+  },
+  {
+   "slug": "full_moon_diffusion_x2v_wan22_autoround_function_test",
+   "label": ":full_moon: Diffusion X2V \u00b7 Wan2.2 Autoround Function Test",
+   "source": "nightly",
+   "command": "pytest -s -v tests/e2e/offline_inference/test_wan22_autoround_w4a16_expansion.py -m \"full_model and H100 and B200 and cuda and (cards_1 or cards_2)\" --run-level \"full_model\"",
+   "timeout_sec": 5400,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "model_executor",
+   "setup": ""
+  },
+  {
+   "slug": "full_moon_diffusion_x2v_wan22_device-postprocess_equivalence_test",
+   "label": ":full_moon: Diffusion X2V \u00b7 Wan2.2 Device-Postprocess Equivalence Test",
+   "source": "nightly",
+   "command": "VLLM_OMNI_DEVICE_POSTPROCESS_MODEL=Wan-AI/Wan2.2-TI2V-5B-Diffusers \\\n  pytest -s -v tests/e2e/offline_inference/test_device_postprocess_equivalence.py -m \"full_model and H100 and B200 and cuda and cards_1\" --run-level \"full_model\"\n",
+   "timeout_sec": 5400,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "model_executor",
+   "setup": ""
+  },
+  {
+   "slug": "full_moon_diffusion_distributed_test_with_l4_2-gpu",
+   "label": ":full_moon: Diffusion \u00b7 Distributed Test with L4 \u00b7 2-GPU",
+   "source": "nightly",
+   "command": "pytest -sv tests/diffusion/distributed/ -m 'full_model and cuda and L4 and B200 and cards_2' --run-level \"full_model\"",
+   "timeout_sec": 3600,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "model_executor",
+   "setup": ""
+  },
+  {
+   "slug": "full_moon_diffusion_distributed_test_with_l4_3-gpu",
+   "label": ":full_moon: Diffusion \u00b7 Distributed Test with L4 \u00b7 3-GPU",
+   "source": "nightly",
+   "command": "pytest -sv tests/diffusion/distributed/ -m 'full_model and cuda and L4 and B200 and cards_3' --run-level \"full_model\"",
+   "timeout_sec": 3600,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "model_executor",
+   "setup": ""
+  },
+  {
+   "slug": "full_moon_diffusion_distributed_test_with_l4_4-gpu",
+   "label": ":full_moon: Diffusion \u00b7 Distributed Test with L4 \u00b7 4-GPU",
+   "source": "nightly",
+   "command": "pytest -sv tests/diffusion/distributed/ -m 'full_model and cuda and L4 and B200 and cards_4' --run-level \"full_model\"",
+   "timeout_sec": 3600,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "model_executor",
+   "setup": ""
+  },
+  {
+   "slug": "full_moon_diffusion_distributed_test_with_h100_2-gpu",
+   "label": ":full_moon: Diffusion \u00b7 Distributed Test with H100 \u00b7 2-GPU",
+   "source": "nightly",
+   "command": "pytest -sv tests/diffusion/distributed/ -m 'full_model and cuda and H100 and B200 and cards_2' --run-level \"full_model\"",
+   "timeout_sec": 3600,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "model_executor",
+   "setup": ""
+  },
+  {
+   "slug": "full_moon_diffusion_distributed_test_with_h100_4-gpu",
+   "label": ":full_moon: Diffusion \u00b7 Distributed Test with H100 \u00b7 4-GPU",
+   "source": "nightly",
+   "command": "pytest -sv tests/diffusion/distributed/ -m 'full_model and cuda and H100 and B200 and cards_4' --run-level \"full_model\"",
+   "timeout_sec": 3600,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "model_executor",
+   "setup": ""
+  },
+  {
+   "slug": "full_moon_diffusion_offloader_test",
+   "label": ":full_moon: Diffusion \u00b7 Offloader Test",
+   "source": "nightly",
+   "command": "pytest -sv tests/diffusion/offloader -m \"full_model and L4 and B200 and cuda and cards_1\"",
+   "timeout_sec": 3600,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "model_executor",
+   "setup": ""
+  },
+  {
+   "slug": "full_moon_diffusion_quantization_test_with_h100_single-gpu",
+   "label": ":full_moon: Diffusion \u00b7 Quantization Test with H100 \u00b7 Single-GPU",
+   "source": "nightly",
+   "command": "pytest -sv tests/diffusion/quantization -m 'full_model and cuda and H100 and B200 and cards_1' --run-level \"full_model\"",
+   "timeout_sec": 3600,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "model_executor",
+   "setup": ""
+  },
+  {
+   "slug": "full_moon_diffusion_minimax_h3_fp8_quality_test_with_h100_2-gpu",
+   "label": ":full_moon: Diffusion \u00b7 MiniMax H3 FP8 Quality Test with H100 \u00b7 2-GPU",
+   "source": "nightly",
+   "command": "pytest -sv tests/diffusion/models/minimax_h3/test_minimax_h3_quantization_quality.py -m 'full_model and cuda and H100 and B200 and cards_2' --run-level \"full_model\"",
+   "timeout_sec": 3600,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "model_executor",
+   "setup": ""
+  },
+  {
+   "slug": "full_moon_diffusion_quantization_test_with_l4",
+   "label": ":full_moon: Diffusion \u00b7 Quantization Test with L4",
+   "source": "nightly",
+   "command": "pip install \"vllm-gguf-plugin==0.0.4\"\npytest -sv tests/diffusion/quantization -m 'full_model and cuda and L4 and B200 and cards_1' --run-level \"full_model\"",
+   "timeout_sec": 3600,
+   "min_gpus": 1,
+   "hw": "any",
+   "env": "VLLM_WORKER_MULTIPROC_METHOD=spawn HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ETAG_TIMEOUT=60",
+   "module": "model_executor",
+   "setup": ""
+  }
+ ],
+ "changes": [
+  {
+   "path": "tests/buildkite/test_rocm_dockerfile.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/buildkite/test_upload_pipeline.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/core/sched/test_generation_scheduler_restore.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/core/sched/test_omni_ar_scheduler_aborted_queue_sweep.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/core/sched/test_omni_ar_scheduler_logprobs.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/core/sched/test_omni_ar_scheduler_stale_drain.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/core/sched/test_omni_ar_scheduler_streaming.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/core/sched/test_omni_ar_scheduler_unified_decode_deferral.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/core/sched/test_omni_cfg_ar_scheduler.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/core/sched/test_omni_generation_scheduler_update_session.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/core/sched/test_omni_sched_deferred_free_fence.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/core/sched/test_omni_scheduler_finish_requests_purge.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/core/sched/test_omni_scheduler_input_coordinator_cleanup.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/core/sched/test_omni_scheduler_mixin_shared.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/core/sched/test_omni_scheduler_ready_inbox.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/core/sched/test_omni_scheduler_streaming_input_counter.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/diffusion/cache/test_seacache.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/diffusion/diffusion_kv/test_kv_cache_utils.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/diffusion/diffusion_kv/test_mooncake_cfg_fanout.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/diffusion/diffusion_kv/test_paged_attention_adapter.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/diffusion/distributed/test_comm.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/diffusion/distributed/test_pipeline_parallel.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/diffusion/models/boogu_image/test_pipeline_boogu_image.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/diffusion/models/flux2/test_flux2_quantization.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/diffusion/models/minimax_h3/test_minimax_h3_quantization.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/diffusion/quantization/test_fp8_config.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/diffusion/quantization/test_online_fp8_gpu.py",
+   "type": "added",
+   "new_path": ""
+  },
+  {
+   "path": "tests/distributed/omni_connectors/test_chunk_transfer_adapter.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/engine/test_arg_utils_shared_fields.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/engine/test_async_omni_engine_input.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/engine/test_async_omni_engine_stage_init.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/engine/test_omni_request.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/engine/test_omni_request_output.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/engine/test_orchestrator_error_handling.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/engine/test_output_processor_mrv2_text.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/engine/test_stage_engine_args.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/engine/test_stage_engine_core_client.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/engine/test_stage_pool_collective_rpc.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/entrypoints/test_async_omni.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/entrypoints/test_async_omni_pause_sleep_routing.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/helpers/cpu_collective_server.py",
+   "type": "added",
+   "new_path": ""
+  },
+  {
+   "path": "tests/helpers/distributed.py",
+   "type": "added",
+   "new_path": ""
+  },
+  {
+   "path": "tests/helpers/runtime.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/helpers/tests/test_runtime_omni_runner.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/inputs/test_mm_processor.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/inputs/test_preprocess.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/metrics/test_emit_calls.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/metrics/test_stat_logger.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/model_executor/models/omnivoice/test_processor_prompt_tokenization.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/model_executor/models/qwen2_5_omni/test_per_video_audio_mask.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/model_executor/models/test_omni_processing.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/model_executor/test_cfg_pairing.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/worker/test_omni_v2_profile_dispatch.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/worker_v2/test_capture_query_bound_gpu.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/worker_v2/test_omni_ar_model_runner.py",
+   "type": "modified",
+   "new_path": ""
+  },
+  {
+   "path": "tests/worker_v2/test_omni_generation_model_runner.py",
+   "type": "modified",
+   "new_path": ""
+  }
+ ],
+ "dropped": [],
+ "module_plans": {
+  "platform": {
+   "ci_tests": [
+    "simple_model_executor_test",
+    "simple_diffusion_test",
+    "simple_engineentrypoints_test",
+    "simple_other_test",
+    "tts_qwen3-tts_base_test",
+    "omni_minicpm-o_45_test",
+    "tiny_model_tests_diffusion_base",
+    "enginemodel_executor_test",
+    "rlhf_verl-omni_e2e_test",
+    "full_moon_omni_function_test_with_h100_single-gpu",
+    "full_moon_omni_function_test_with_h100_2-gpu",
+    "full_moon_omni_doc_test_with_l4_4-gpu",
+    "full_moon_omni_doc_test_with_h100_2-gpu",
+    "full_moon_omni_omni-duplexeval_ci_guard",
+    "full_moon_tts_function_test_with_l4",
+    "full_moon_tiny_model_tests_diffusion_multi-gpu_accelerations_2-gpu",
+    "full_moon_tiny_model_tests_diffusion_multi-gpu_accelerations_4-gpu",
+    "full_moon_diffusion_x2v_lingbot_function_test",
+    "full_moon_diffusion_x2v_doc_test"
+   ],
+   "upstream_changes": [],
+   "omni_specific": []
+  },
+  "model_executor": {
+   "ci_tests": [
+    "diffusion_lora_test",
+    "simple_cosyvoice3_packed_flow_test",
+    "diffusion_flashattention_test",
+    "diffusion_offloader_test",
+    "diffusion_cache_test",
+    "diffusion_batch_test",
+    "diffusion_distributed_test_single-gpu",
+    "diffusion_distributed_test_2-gpu",
+    "diffusion_distributed_attention_test_4-gpu",
+    "diffusion_model_test",
+    "diffusion_other_test",
+    "omni_minicpm-o_45_offline_test",
+    "full_moon_diffusion_x2iat_function_test_with_l4_single-gpu",
+    "full_moon_diffusion_x2v_wan22_autoround_function_test",
+    "full_moon_diffusion_x2v_wan22_device-postprocess_equivalence_test",
+    "full_moon_diffusion_distributed_test_with_l4_2-gpu",
+    "full_moon_diffusion_distributed_test_with_l4_3-gpu",
+    "full_moon_diffusion_distributed_test_with_l4_4-gpu",
+    "full_moon_diffusion_distributed_test_with_h100_2-gpu",
+    "full_moon_diffusion_distributed_test_with_h100_4-gpu",
+    "full_moon_diffusion_offloader_test",
+    "full_moon_diffusion_quantization_test_with_h100_single-gpu",
+    "full_moon_diffusion_minimax_h3_fp8_quality_test_with_h100_2-gpu",
+    "full_moon_diffusion_quantization_test_with_l4"
+   ],
+   "upstream_changes": [
+    {
+     "path": "tests/diffusion/cache/test_seacache.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/diffusion/diffusion_kv/test_kv_cache_utils.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/diffusion/diffusion_kv/test_mooncake_cfg_fanout.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/diffusion/diffusion_kv/test_paged_attention_adapter.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/diffusion/distributed/test_comm.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/diffusion/distributed/test_pipeline_parallel.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/diffusion/models/boogu_image/test_pipeline_boogu_image.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/diffusion/models/flux2/test_flux2_quantization.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/diffusion/models/minimax_h3/test_minimax_h3_quantization.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/diffusion/quantization/test_fp8_config.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/diffusion/quantization/test_online_fp8_gpu.py",
+     "type": "added",
+     "new_path": ""
+    },
+    {
+     "path": "tests/model_executor/models/omnivoice/test_processor_prompt_tokenization.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/model_executor/models/qwen2_5_omni/test_per_video_audio_mask.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/model_executor/models/test_omni_processing.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/model_executor/test_cfg_pairing.py",
+     "type": "modified",
+     "new_path": ""
+    }
+   ],
+   "omni_specific": []
+  },
+  "scheduler": {
+   "ci_tests": [
+    "distributed_test"
+   ],
+   "upstream_changes": [
+    {
+     "path": "tests/distributed/omni_connectors/test_chunk_transfer_adapter.py",
+     "type": "modified",
+     "new_path": ""
+    }
+   ],
+   "omni_specific": []
+  },
+  "online_serving": {
+   "ci_tests": [
+    "entrypoint_test_with_h100",
+    "entrypoint_test_with_l4",
+    "entrypoint_test_with_l4_2-gpu",
+    "tts_qwen3-tts_customvoice_test",
+    "omni_qwen3-omni_test",
+    "omni_minicpm-o_45_duplex_test",
+    "diffusion_qwen_image_test",
+    "diffusion_wan22_test",
+    "diffusion_hunyuanvideo-15_test",
+    "diffusion_lingbot-video_test",
+    "diffusion_minimax-h3_l3_dlo_dp2_and_fasth3",
+    "diffusion_minimax-h3_latent_upscale_and_refine",
+    "entrypoints_test",
+    "omni_minicpm-o_45_online_test",
+    "tts_higgs_v3_full_response_test",
+    "diffusion_cosmos3_test",
+    "diffusion_minimax-h3_dlo_dp2_t2va_test",
+    "full_moon_omni_minicpm-o_45_duplex_test",
+    "full_moon_omni_multi-replica_startup_test_with_4x_h100",
+    "full_moon_entrypoint_test_with_h100",
+    "full_moon_diffusion_x2iat_function_test_with_h100_single-gpu",
+    "full_moon_diffusion_x2iat_function_test_with_h100_2-gpu",
+    "full_moon_diffusion_x2v_wan22_t2v_function_test_single-gpu",
+    "full_moon_diffusion_x2v_wan22_t2v_function_test_2-gpu",
+    "full_moon_diffusion_x2v_wan22_i2vti2v_function_test_single-gpu",
+    "full_moon_diffusion_x2v_wan22_i2vti2v_function_test_2-gpu",
+    "full_moon_diffusion_x2v_hunyuanvideo-15_function_test"
+   ],
+   "upstream_changes": [
+    {
+     "path": "tests/entrypoints/test_async_omni.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/entrypoints/test_async_omni_pause_sleep_routing.py",
+     "type": "modified",
+     "new_path": ""
+    }
+   ],
+   "omni_specific": []
+  },
+  "worker_runner": {
+   "ci_tests": [
+    "custom_pipeline_test"
+   ],
+   "upstream_changes": [
+    {
+     "path": "tests/worker/test_omni_v2_profile_dispatch.py",
+     "type": "modified",
+     "new_path": ""
+    }
+   ],
+   "omni_specific": []
+  },
+  "unknown": {
+   "ci_tests": [
+    "full_moon_diffusion_x2iat_doc_test"
+   ],
+   "upstream_changes": [
+    {
+     "path": "tests/buildkite/test_rocm_dockerfile.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/buildkite/test_upload_pipeline.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/core/sched/test_generation_scheduler_restore.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/core/sched/test_omni_ar_scheduler_aborted_queue_sweep.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/core/sched/test_omni_ar_scheduler_logprobs.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/core/sched/test_omni_ar_scheduler_stale_drain.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/core/sched/test_omni_ar_scheduler_streaming.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/core/sched/test_omni_ar_scheduler_unified_decode_deferral.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/core/sched/test_omni_cfg_ar_scheduler.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/core/sched/test_omni_generation_scheduler_update_session.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/core/sched/test_omni_sched_deferred_free_fence.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/core/sched/test_omni_scheduler_finish_requests_purge.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/core/sched/test_omni_scheduler_input_coordinator_cleanup.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/core/sched/test_omni_scheduler_mixin_shared.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/core/sched/test_omni_scheduler_ready_inbox.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/core/sched/test_omni_scheduler_streaming_input_counter.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/helpers/cpu_collective_server.py",
+     "type": "added",
+     "new_path": ""
+    },
+    {
+     "path": "tests/helpers/distributed.py",
+     "type": "added",
+     "new_path": ""
+    },
+    {
+     "path": "tests/helpers/runtime.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/helpers/tests/test_runtime_omni_runner.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/inputs/test_mm_processor.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/inputs/test_preprocess.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/metrics/test_emit_calls.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/metrics/test_stat_logger.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/worker_v2/test_capture_query_bound_gpu.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/worker_v2/test_omni_ar_model_runner.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/worker_v2/test_omni_generation_model_runner.py",
+     "type": "modified",
+     "new_path": ""
+    }
+   ],
+   "omni_specific": []
+  },
+  "input_output": {
+   "ci_tests": [],
+   "upstream_changes": [
+    {
+     "path": "tests/engine/test_arg_utils_shared_fields.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/engine/test_async_omni_engine_input.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/engine/test_async_omni_engine_stage_init.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/engine/test_omni_request.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/engine/test_omni_request_output.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/engine/test_orchestrator_error_handling.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/engine/test_output_processor_mrv2_text.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/engine/test_stage_engine_args.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/engine/test_stage_engine_core_client.py",
+     "type": "modified",
+     "new_path": ""
+    },
+    {
+     "path": "tests/engine/test_stage_pool_collective_rpc.py",
+     "type": "modified",
+     "new_path": ""
+    }
+   ],
+   "omni_specific": []
+  },
+  "model_config": {
+   "ci_tests": [],
+   "upstream_changes": [],
+   "omni_specific": []
+  },
+  "diffusion": {
+   "ci_tests": [],
+   "upstream_changes": [],
+   "omni_specific": []
+  },
+  "deploy": {
+   "ci_tests": [],
+   "upstream_changes": [],
+   "omni_specific": []
+  },
+  "distributed": {
+   "ci_tests": [],
+   "upstream_changes": [],
+   "omni_specific": []
+  },
+  "engine": {
+   "ci_tests": [],
+   "upstream_changes": [],
+   "omni_specific": []
+  },
+  "attention": {
+   "ci_tests": [],
+   "upstream_changes": [],
+   "omni_specific": []
+  },
+  "quantization": {
+   "ci_tests": [],
+   "upstream_changes": [],
+   "omni_specific": []
+  },
+  "runtime_patch": {
+   "ci_tests": [],
+   "upstream_changes": [],
+   "omni_specific": []
+  },
+  "host_weight_runtime": {
+   "ci_tests": [],
+   "upstream_changes": [],
+   "omni_specific": []
+  },
+  "sampling": {
+   "ci_tests": [],
+   "upstream_changes": [],
+   "omni_specific": []
+  },
+  "tokenizers": {
+   "ci_tests": [],
+   "upstream_changes": [],
+   "omni_specific": []
+  },
+  "metrics": {
+   "ci_tests": [],
+   "upstream_changes": [],
+   "omni_specific": []
+  },
+  "benchmarks": {
+   "ci_tests": [],
+   "upstream_changes": [],
+   "omni_specific": []
+  },
+  "fullduplex": {
+   "ci_tests": [],
+   "upstream_changes": [],
+   "omni_specific": []
+  }
+ }
+}

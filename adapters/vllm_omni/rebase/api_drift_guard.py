@@ -2,10 +2,8 @@
 # api_drift_guard.py — Inheritance/constructor/unpack drift guard for vllm-omni.
 # Ported from the rebase agent (agent/lib/api_drift_guard.py); runs
 # standalone with the TARGET repo python (cwd or OMNI_PATH = vllm-omni root).
-# Verbatim except two documented divergences: the pooling constructor entry
-# (parent's spelling could never import) and constructor-check import
-# failures counting as mismatches instead of silent SKIPs (see inline
-# comments at both sites).
+# Documented divergences cover the pooling constructor/import checks and
+# current renderer/EngineClient contracts (see doc/DRIFT_TRIAGE.md).
 # Repo-specific maps (INHERITANCE_MAP etc.) are the point of this file living
 # in the adapter tree; the copilot core never imports it.
 # Run with cwd = vllm-omni repo root (same as tasks/41_check_api_drift.sh).
@@ -19,13 +17,10 @@ import textwrap
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# Block flash attention C extensions from loading to prevent SIGBUS (signal 7)
-# when the .so was compiled for a different CUDA / GPU architecture.
-#
-# The guard only inspects method signatures — it does not need the real
-# flash attention kernels.  By raising ImportError (instead of letting the
-# process crash with SIGBUS), the existing try/except in the INHERITANCE_MAP
-# loop can skip affected classes gracefully.
+# Use real extensions by default: current vLLM refuses to import its flash
+# attention package when both extensions are blocked, which skips worker and
+# serving signatures. For a known incompatible binary, an operator may opt
+# into the blocker with IMX_API_DRIFT_BLOCK_FLASH_ATTN=1. That run is partial.
 # ---------------------------------------------------------------------------
 class _BlockFlashAttnExtensions:
     @staticmethod
@@ -40,14 +35,20 @@ class _BlockFlashAttnExtensions:
         return None
 
 
-sys.meta_path.insert(0, _BlockFlashAttnExtensions)
+_block_flash_attn = os.environ.get("IMX_API_DRIFT_BLOCK_FLASH_ATTN", "0")
+if _block_flash_attn not in ("0", "1"):
+    raise ValueError("IMX_API_DRIFT_BLOCK_FLASH_ATTN must be 0 or 1")
+if _block_flash_attn == "1":
+    sys.meta_path.insert(0, _BlockFlashAttnExtensions)
+    print("PARTIAL  Flash attention extensions blocked by operator request; "
+          "affected import checks may be skipped.")
 
 # Ensure relative paths (vllm_omni/...) resolve when invoked from any cwd.
 if "OMNI_PATH" in os.environ:
     os.chdir(os.environ["OMNI_PATH"])
 
 INHERITANCE_MAP = [
-    ("vllm.inputs.preprocess", "InputPreprocessor", "vllm_omni.inputs.preprocess", "OmniInputPreprocessor"),
+    ("vllm.renderers", "BaseRenderer", "vllm_omni.inputs.preprocess", "omni_renderer_cls"),
     ("vllm.v1.engine.core_client", "AsyncMPClient", "vllm_omni.engine.stage_engine_core_client", "StageEngineCoreClient"),
     ("vllm.engine.protocol", "EngineClient", "vllm_omni.entrypoints.async_omni", "AsyncOmni"),
     ("vllm.v1.worker.gpu_model_runner", "GPUModelRunner", "vllm_omni.worker.gpu_model_runner", "OmniGPUModelRunner"),
@@ -219,12 +220,17 @@ def _forbidden_test_imports() -> list[str]:
     return findings
 
 
-def main() -> int:
+def _check_inheritance() -> list[str]:
     mismatches: list[str] = []
     for up_mod, up_cls_name, omni_mod, omni_cls_name in INHERITANCE_MAP:
         try:
             UpCls = import_class(up_mod, up_cls_name)
             OmniCls = import_class(omni_mod, omni_cls_name)
+            # OmniRenderer is a mixin; the actual upstream subclass is
+            # constructed by this factory rather than declared statically.
+            if omni_cls_name == "omni_renderer_cls":
+                OmniCls = OmniCls(UpCls)
+                omni_cls_name = OmniCls.__name__
         except Exception as e:
             print(f"SKIP  {omni_cls_name}: import error — {e}")
             continue
@@ -232,6 +238,14 @@ def main() -> int:
         if not issubclass(OmniCls, UpCls):
             print(f"SKIP  {omni_cls_name}: not a subclass of {up_cls_name}")
             continue
+
+        if up_cls_name == "EngineClient" and inspect.isabstract(OmniCls):
+            msg = (
+                f"MISMATCH {omni_cls_name}: missing EngineClient implementations "
+                f"{sorted(OmniCls.__abstractmethods__)}; the engine cannot be instantiated"
+            )
+            print(msg)
+            mismatches.append(msg)
 
         for name in dir(OmniCls):
             if name.startswith("__") and name != "__init__":
@@ -273,6 +287,11 @@ def main() -> int:
             else:
                 print(f"  OK   {omni_cls_name}.{name}")
 
+    return mismatches
+
+
+def main() -> int:
+    mismatches = _check_inheritance()
     constructor_call_checks = [
         (
             "vllm.entrypoints.openai.responses.serving",

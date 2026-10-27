@@ -91,6 +91,26 @@ def test_failed_decision_write_leaves_gate_shut():
     assert gate.refusal("edit_file", {}) is not None
 
 
+def test_gate_restores_existing_decision_after_bridge_restart(tmp_path):
+    from infermatrix_copilot.run_trace import RunTrace
+
+    plans = tmp_path / "plans" / "module-x" / "dispatch_initial"
+    plans.mkdir(parents=True)
+    decision = plans / "plan-v0-002.decision.md"
+    decision.write_text("accepted\n")
+    trace_path = tmp_path / "trace.jsonl"
+
+    gate = PlanGate(str(tmp_path / "plans" / "module-x"), GATED,
+                    trace=RunTrace(trace_path))
+
+    assert gate.open is True
+    assert gate.refusal("edit_file", {}) is None
+    restored = [json.loads(line) for line in trace_path.read_text().splitlines()]
+    assert restored[-1]["kind"] == "plan_gate_opened"
+    assert restored[-1]["decision"] == str(decision)
+    assert restored[-1]["restored"] is True
+
+
 def test_gate_records_opening_for_the_parent(tmp_path):
     from infermatrix_copilot.rebase_engine.module_rebase import _plan_gate_opened
     from infermatrix_copilot.run_trace import RunTrace
@@ -256,6 +276,7 @@ def test_bridge_passes_repo_ROOT_not_repo_name(tmp_path, monkeypatch):
                       read_only=False, root=str(root))
     spec = {"run_dir": str(run_dir), "repo": "vllm-omni",
             "rebase": {"tool_schemas": "", "manifest_path": "", "model": "m",
+                       "backend": "zcode", "backend_model": "GLM-5.3",
                        "paths": {"omni_path": str(root),
                                  "vllm_path": str(root)}}}
     try:
@@ -265,6 +286,8 @@ def test_bridge_passes_repo_ROOT_not_repo_name(tmp_path, monkeypatch):
 
     assert seen.get("repo") == str(root), seen.get("repo")
     assert seen["state"]["task_spec"]["repo"] == "vllm-omni"
+    assert seen["settings"].rebase_backend == "zcode"
+    assert seen["settings"].rebase_backend_model == "GLM-5.3"
 
 
 def test_failed_tool_records_the_reason(tmp_path):
@@ -374,3 +397,95 @@ def test_stale_self_written_mcp_config_is_replaced(tmp_path):
     assert t._is_our_stale_config(config) is False
     t._write_mcp_config(cwd, Path("/runs/LIVE/bridge/new.json"))
     assert config.read_text() == foreign
+
+
+@pytest.mark.parametrize("signal,expected", [
+    ("missing", False), ("stale", False), ("wrong_module", False),
+    ("malformed", False), ("fresh", True), ("rewritten", True),
+    ("failure", False), ("truncated", False),
+])
+def test_harness_requires_current_attempt_completion_signal(tmp_path, monkeypatch,
+                                                           signal, expected):
+    import asyncio
+    from types import SimpleNamespace
+
+    from infermatrix_copilot import tool_bridge
+    from infermatrix_copilot.providers import registry
+    from infermatrix_copilot.rebase_engine.module_rebase import (
+        ModuleRunConfig, _harness_attempt,
+    )
+
+    root = tmp_path / "repo"
+    run = tmp_path / "run"
+    signals = run / "signals"
+    root.mkdir()
+    signals.mkdir(parents=True)
+    done = signals / "module.fixture.done"
+    if signal in ("stale", "rewritten"):
+        done.write_text("MODULE_DONE fixture\n")
+
+    class Session:
+        def run_session(self, req):
+            # The module contract (including the authoritative completion
+            # signal) rides the USER channel: a --system-prompt argv element
+            # is bound by the 128KiB per-arg limit evidence packs exceed.
+            assert str(done) in req.prompt
+            assert req.system == ""
+            if signal == "wrong_module":
+                done.write_text("MODULE_DONE other\n")
+            elif signal == "malformed":
+                done.write_text("withheld MODULE_DONE fixture\n")
+            elif signal in ("fresh", "rewritten", "failure", "truncated"):
+                done.write_text("MODULE_DONE fixture\nOUT_OF_SCOPE_EDITS none\n")
+            if signal == "failure":
+                (signals / "module.fixture.fail").write_text("verification failed\n")
+            return SimpleNamespace(truncated=signal == "truncated",
+                                   text="withheld MODULE_DONE", iterations=1)
+
+    monkeypatch.setattr(registry, "transport_for_id", lambda *a, **k: Session())
+    monkeypatch.setattr(tool_bridge, "write_bridge_spec", lambda **k: None)
+    cfg = ModuleRunConfig(vllm_path=str(root), omni_path=str(root),
+                          script_dir=str(root), model="m", log_dir=str(run),
+                          signal_dir=str(signals), backend="zcode")
+    scope = ToolScope(name="fixture", allowed_tools=frozenset(), path_scope=None,
+                      read_only=True, root=str(root))
+    result = asyncio.run(_harness_attempt(
+        "debug attempt", module="fixture", config=cfg, scope=scope, trace=None,
+        tool_defs=[], plan_prefix="", require_plan_review=False))
+    assert result["done"] is expected
+    if not expected:
+        assert "completion rejected" in result["text"]
+
+
+@pytest.mark.parametrize("done,expected", [(True, "done"), (False, "not_done")])
+def test_ci_debug_harness_has_its_own_completion_signal(tmp_path, monkeypatch,
+                                                       done, expected):
+    import asyncio
+    from types import SimpleNamespace
+    from infermatrix_copilot.engine.steps import rebase_v3 as rv
+    from infermatrix_copilot.rebase_engine import module_rebase as mr
+    from infermatrix_copilot.rebase_engine import rebase_tools as rt
+    from infermatrix_copilot.rebase_engine import prompt_builder as pb
+
+    data = SimpleNamespace(debug_prompt_template_live="MODULE={module}\n{traceback}",
+                           debug_prompt_template="")
+    monkeypatch.setattr(pb.ModulePromptData, "load", lambda *a: data)
+    monkeypatch.setattr(rt, "load_tool_schemas", lambda *a: [])
+    monkeypatch.setattr(rt, "build_rebase_tools", lambda *a: {})
+    monkeypatch.setattr(rv, "_tier_client", lambda ctx: (
+        None, SimpleNamespace(kind="harness", provider_id="zcode", model="m")))
+    monkeypatch.setattr(rv, "_agent_shell_env", lambda *a: {})
+    monkeypatch.setattr(rv, "_build_backends", lambda *a: None)
+    monkeypatch.setattr(rv, "_module_scope", lambda *a, **k: None)
+    async def attempt(prompt, *, config, **kwargs):
+        assert config.signal_dir == str(tmp_path / "signals/debug/failing_job")
+        assert kwargs["module"] == "platform"
+        return {"done": done, "session_completed": True, "text": "unresolved"}
+    monkeypatch.setattr(mr, "_harness_attempt", attempt)
+    ctx = SimpleNamespace(
+        state={"task_spec": {"repo": "vllm-omni"}, "repo_path": str(tmp_path)},
+        settings=SimpleNamespace(adapters_dir=str(tmp_path)), run_dir=tmp_path,
+        trace=SimpleNamespace(record=lambda *a, **k: None))
+    monkeypatch.setattr(rv, "_task_params", lambda *a: {})
+    assert asyncio.run(rv._run_debug_agent(
+        ctx, {}, "platform", "failing_job", "test failed")) == expected

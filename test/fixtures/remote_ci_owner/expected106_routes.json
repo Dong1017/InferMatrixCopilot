@@ -1,0 +1,1207 @@
+{
+  "target_branch": "releases/v0.31.0",
+  "target_commit": "f42629247d0efcd4f7fd9d0a1cf6fb2060909fc9",
+  "active_modules": [
+    "worker_runner",
+    "model_executor",
+    "input_output",
+    "scheduler",
+    "online_serving",
+    "model_config",
+    "platform",
+    "benchmarks"
+  ],
+  "missing_leaf_ids": [
+    "ready:024",
+    "nightly:005",
+    "nightly:006",
+    "nightly:008",
+    "nightly:009",
+    "nightly:010",
+    "nightly:011",
+    "nightly:015",
+    "nightly:016",
+    "nightly:022",
+    "nightly:023",
+    "nightly:024",
+    "nightly:025",
+    "nightly:026",
+    "nightly:036",
+    "nightly:037",
+    "nightly:038",
+    "nightly:039",
+    "nightly:040",
+    "nightly:041",
+    "nightly:042",
+    "nightly:043"
+  ],
+  "leaves": [
+    {
+      "expected_leaf_id": "ready:000",
+      "source": "ready",
+      "name_template": "Simple · Model Executor Test",
+      "original_command_sha256": "79faec301b62a087e70e54f77cfaf5a13d6da781aaa10542e740d9203c828694",
+      "rendered_command_sha256": "5998b08b0e8f0e52030459b62202a8ea48dd502ec7c388babaa7bbe31804cb99",
+      "parent_dependencies": [
+        "upload-ready-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "ready:001",
+      "source": "ready",
+      "name_template": "Simple · CosyVoice3 Packed Flow Test",
+      "original_command_sha256": "035324b722c07b60c9d9bc5f65fafe068cb591fa5b6a5e1c2c768cd41b6d0a61",
+      "rendered_command_sha256": "1d14724ebd1a81c62c65bced73767aea983d15286d7ba5d49451d18c99d5bc6f",
+      "parent_dependencies": [
+        "upload-ready-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "ready:002",
+      "source": "ready",
+      "name_template": "Simple · Diffusion Test",
+      "original_command_sha256": "b02536970c506eef713c98f179aba982e22ff989b8463a18e69983d948383394",
+      "rendered_command_sha256": "8f3fac6a49ca302ac74efef38753a62f0ed7ce81cc6fdb704de70e949e677312",
+      "parent_dependencies": [
+        "upload-ready-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "ready:003",
+      "source": "ready",
+      "name_template": "Simple · Engine&Entrypoints Test",
+      "original_command_sha256": "9dd19813764f64ccef3d765d952208526cb383c0f206b3dc374545ccdba49dc8",
+      "rendered_command_sha256": "a5edd03570c8aeb7db41b68db220ae0d95b27ab8ab7145627ef0ea744765d3a6",
+      "parent_dependencies": [
+        "upload-ready-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "ready:004",
+      "source": "ready",
+      "name_template": "Simple · Other Test",
+      "original_command_sha256": "697c03294f78a15ef3052a8134c8af79c8fbcd18a4c2d00e8c00f7181d986287",
+      "rendered_command_sha256": "852f685907066e17cad84fb1f986512d08e7eadfc7c1dfa9954dd3b7efcbe847",
+      "parent_dependencies": [
+        "upload-ready-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "ready:005",
+      "source": "ready",
+      "name_template": "Diffusion · FlashAttention Test",
+      "original_command_sha256": "01fd2da0e0e2a815de293aa4fa8dba2bede43140a8e1d57c76e2bca3cc205f70",
+      "rendered_command_sha256": "c6c783074eb4aeccbe839bb158ecde33cdfd6f33dde52c3fd7d35910a2f12068",
+      "parent_dependencies": [
+        "upload-ready-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "ready:006",
+      "source": "ready",
+      "name_template": "Diffusion · Offloader Test",
+      "original_command_sha256": "74377c5598432b187c417a46136929fd4a6cf66c94b5f82fb56683afe7ee0300",
+      "rendered_command_sha256": "bb3745110c3750b9eeac5d76b54162392b000478f4833fb64085a2c401287b31",
+      "parent_dependencies": [
+        "upload-ready-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "ready:007",
+      "source": "ready",
+      "name_template": "Diffusion · Cache Test",
+      "original_command_sha256": "e2681bb8c99f8c3e00805c6c15f2087682465300c19d0ed47eed3ff58dc2576a",
+      "rendered_command_sha256": "932f93774830b6a3adaea1b142d11025b448a28c0c056a7c27fee41ad04d5025",
+      "parent_dependencies": [
+        "upload-ready-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "ready:008",
+      "source": "ready",
+      "name_template": "Diffusion · Batch Test",
+      "original_command_sha256": "4f70051edea538dd06c6d76342dea5e862841785a9abaa2cecc4e7fd9b3a063d",
+      "rendered_command_sha256": "23fedfea361608713073e88b7a3a1843f5ffcef2a58e736c0fd8be2bd053edaf",
+      "parent_dependencies": [
+        "upload-ready-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "ready:009",
+      "source": "ready",
+      "name_template": "Diffusion · Distributed Test · Single-GPU",
+      "original_command_sha256": "01c779e2a7c278c92de8dbaf1dbb5a60528d09e8332e4fc66066963970daba92",
+      "rendered_command_sha256": "0d7d68951ad30532c5c5db7c61b92e312089b6d77ef3b0998e9594fcb479b60e",
+      "parent_dependencies": [
+        "upload-ready-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "ready:010",
+      "source": "ready",
+      "name_template": "Diffusion · Distributed Test · 2-GPU",
+      "original_command_sha256": "5dd031fc9f97c6bd3206cbb97285c64a94710c983b7a72258e7a4e407d135936",
+      "rendered_command_sha256": "b8e3edad4f787272cb42f899d3ce93b03ee8ad68a734d318eba15325c6c0f68f",
+      "parent_dependencies": [
+        "upload-ready-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "ready:011",
+      "source": "ready",
+      "name_template": "Diffusion · Distributed & Attention Test · 4-GPU",
+      "original_command_sha256": "87e3cc98fe7d43d5b3e9d371ea4f2ed3451a734f5279ac3680888fa5472ad988",
+      "rendered_command_sha256": "d15ab88ed56453d76ce6d8f800c15310584ccc50841bec4e4a514857947434c4",
+      "parent_dependencies": [
+        "upload-ready-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "ready:012",
+      "source": "ready",
+      "name_template": "Diffusion · Model Test",
+      "original_command_sha256": "b2428ab3584dee774c302ff7f27191cf0bf3cae6bd336cabb27f1d07b935187a",
+      "rendered_command_sha256": "847bb59ef3bde5928e71c2c14cf887ad05521b2a1e07a884d21836a4271f6c09",
+      "parent_dependencies": [
+        "upload-ready-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "ready:013",
+      "source": "ready",
+      "name_template": "Diffusion · Other Test",
+      "original_command_sha256": "40f8372ae22bfcf67992ddbc99a988ae337d618d61f25ea4f2331b7a4995423c",
+      "rendered_command_sha256": "fe640e2069de8fd1924ad3638a3835ab6604271a28ae18a6e4904f36fbfaa174",
+      "parent_dependencies": [
+        "upload-ready-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "ready:014",
+      "source": "ready",
+      "name_template": "Tiny Model Tests · Diffusion (base)",
+      "original_command_sha256": "27e463994eaaaa33ac0762d9479e301309eb2b6712f886ad4459b8315b02f39c",
+      "rendered_command_sha256": "8876ed3f5eb4e3fb1244f1c9db717a141d96f48c0ed95c9b72c76659d677c5d6",
+      "parent_dependencies": [
+        "upload-ready-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "ready:015",
+      "source": "ready",
+      "name_template": "Engine&Model Executor Test",
+      "original_command_sha256": "83ab5648ecc9d8cfcbaeadfe224e23170f8510bbfe7417bbf54cf64bd5942f9c",
+      "rendered_command_sha256": "a55916712a15cc09b4b7e290304a6f039752f8b7245bfac65b603898cf54d107",
+      "parent_dependencies": [],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "ready:016",
+      "source": "ready",
+      "name_template": "Distributed Test",
+      "original_command_sha256": "947b586a66bb3cb07b42116d33d2b5ce8ed6c1eeef0e6fb8bd3cf1c1aa25d904",
+      "rendered_command_sha256": "6e38518a4b6408bae217e072a591883be790613f39d8378863b611536440fa21",
+      "parent_dependencies": [],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "ready:017",
+      "source": "ready",
+      "name_template": "Entrypoints Test",
+      "original_command_sha256": "5973d6295aed0b46852f73635215e1198a3b455a15596a3d62b4af3bcf9342a7",
+      "rendered_command_sha256": "7fa60e23748f3182f7dcd554ea7d955194afe98e88503d3c7cc7e78fa13cb39f",
+      "parent_dependencies": [],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "ready:018",
+      "source": "ready",
+      "name_template": "Custom Pipeline Test",
+      "original_command_sha256": "f8c1e3d6741dbae4244cdb510837a68161d9c19936e32ba091a76ba454b2d759",
+      "rendered_command_sha256": "2c2f7dfd2801df17ab6682fb4904132e3d640b441ecc0f84867beea6b8f4a2da",
+      "parent_dependencies": [
+        "upload-ready-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "ready:019",
+      "source": "ready",
+      "name_template": "RLHF · VeRL-Omni E2E Test",
+      "original_command_sha256": "48a2319e6709b0c6fff53509932ccfa0371316f6170594d889d2eb410d0e5961",
+      "rendered_command_sha256": "2a07fa11c8f46d269c4be712eda5d205b5ae2ed0cae6475d7e5d7a8cdd123bb7",
+      "parent_dependencies": [
+        "upload-ready-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "ready:020",
+      "source": "ready",
+      "name_template": "Omni · Qwen3-Omni Test",
+      "original_command_sha256": "b01c8b488039ffb55305fdd18f49d80ae66e73749689c1a1071a3481bf534e4e",
+      "rendered_command_sha256": "e89b6c7c8c4f9d8ac258faa6b7d34fb5904b1ed39e31abafed0c2dbd3078ac15",
+      "parent_dependencies": [
+        "upload-ready-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "ready:021",
+      "source": "ready",
+      "name_template": "Omni · MiniCPM-o 4.5 Offline Test",
+      "original_command_sha256": "4d16271f187984493a2d08b082539805b6a5279dbc3eef9ce602ffb62df9b05e",
+      "rendered_command_sha256": "20deba619a908c54aa12c950566381c9015cb0f8955781559a21283de114901c",
+      "parent_dependencies": [
+        "upload-ready-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "ready:022",
+      "source": "ready",
+      "name_template": "Omni · MiniCPM-o 4.5 Online Test",
+      "original_command_sha256": "2327729368ad440927462e0303261bcf3bc7732b4a8dcdb8c96a3be5256d0251",
+      "rendered_command_sha256": "1ab4a6cfa741c5e0e271b0beb7f2ac0de4007cb308111bbe2258b31070605f48",
+      "parent_dependencies": [
+        "upload-ready-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "ready:023",
+      "source": "ready",
+      "name_template": "Omni · MiniCPM-o 4.5 Duplex Test",
+      "original_command_sha256": "4816bf279e52db4d42d628efee229908ffa16ba18f147fe64b419c25864bca88",
+      "rendered_command_sha256": "1ed1178c4621bc917d089de5e25ebf76b9f1cef8599be89e62f78fddf769b4bf",
+      "parent_dependencies": [
+        "upload-ready-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "ready:024",
+      "source": "ready",
+      "name_template": "Omni · MiniCPM-o 4.5 Perf Test",
+      "original_command_sha256": "a887839b14ea0c77f8ace593a8bdbc4eee5cd5db23bff57de3b01c4ad5465354",
+      "rendered_command_sha256": "57f54ced3b19bbb3a522964cdaafdb3a96716e0df134f5f39cbcce405a306291",
+      "parent_dependencies": [
+        "upload-ready-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "ready:025",
+      "source": "ready",
+      "name_template": "TTS · Higgs v3 Full Response Test",
+      "original_command_sha256": "405b4e26663e9be5a3707a310c9ee5a67ccffbb7b6d45f62cfc963fb9fe82357",
+      "rendered_command_sha256": "a35b4c17134709a00253a754c7adde22f7c1c1c978ff71b664f76c20b4153143",
+      "parent_dependencies": [
+        "upload-ready-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "ready:026",
+      "source": "ready",
+      "name_template": "TTS · Qwen3-TTS CustomVoice Test",
+      "original_command_sha256": "6aaef03a87e621a48841f8c8b317625d458fdd0854866893b41f14868488d862",
+      "rendered_command_sha256": "c4a5c9b607c1bf8eb63f843bfcb6a504941a40c0cd5572b4f74af9a6e49a0362",
+      "parent_dependencies": [
+        "upload-ready-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "ready:027",
+      "source": "ready",
+      "name_template": "Diffusion · Wan22 Test",
+      "original_command_sha256": "73662fcf7acc32ca0da6a936470827966231cc7b2a10dbd21f548d8049ede7cf",
+      "rendered_command_sha256": "c42f98b636b4b38bdf24d1e6de0bc3780ffb4cf3c02d5adf3f041e73e934d7ba",
+      "parent_dependencies": [
+        "upload-ready-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "ready:028",
+      "source": "ready",
+      "name_template": "Diffusion · Cosmos3 Test",
+      "original_command_sha256": "d2860a3e3eed5e20d5174f093142fa5f4b5b152d29b36971c71fe542c7f7912d",
+      "rendered_command_sha256": "7b232701e7e8ab1d0f4b9e19a55410d5534b6ed1b8c10475f4dd50cb16d37358",
+      "parent_dependencies": [
+        "upload-ready-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "ready:029",
+      "source": "ready",
+      "name_template": "Diffusion · MiniMax-H3 DLO DP2 T2VA Test",
+      "original_command_sha256": "a090fd8bb6f475a1e1b0145caec10c0653b4a5e32d7b089c9aa1cbdf26ac57c0",
+      "rendered_command_sha256": "ffea7c82d1f8a1093f5578013c976841f8ba43cc6c1f3d250664d1cf1018a235",
+      "parent_dependencies": [
+        "upload-ready-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "ready:030",
+      "source": "ready",
+      "name_template": "Diffusion · Qwen Image Test",
+      "original_command_sha256": "654f25291cc36e9f5795f70c779ee76fe751f5dd925c9125fe5fbf5104ef0457",
+      "rendered_command_sha256": "501a11908d2c8e6ab6a937566bb9a1b94df69228478a30ce9b85c0341b9dd36a",
+      "parent_dependencies": [
+        "upload-ready-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "ready:031",
+      "source": "ready",
+      "name_template": "Diffusion · HunyuanVideo-1.5 Test",
+      "original_command_sha256": "4bd8099d0be72ee8ca20082f97736fcbe50b08e589338013de608337d68166c0",
+      "rendered_command_sha256": "4f788cb7f11f96ac04e4da768c402febdb51c0940c54a77d84cb80b0cd2922b4",
+      "parent_dependencies": [
+        "upload-ready-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "ready:032",
+      "source": "ready",
+      "name_template": "Diffusion · LingBot-Video Test",
+      "original_command_sha256": "f38ed5a4897d346eb7656b25cc378c28bc602798ab7912e086df5cc27b98fe2c",
+      "rendered_command_sha256": "9ae60d69c0298d2fa0626c4b73e9a44cf49a826d4cc0a352a56d35408bc80fe5",
+      "parent_dependencies": [
+        "upload-ready-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "merge:000",
+      "source": "merge",
+      "name_template": "Simple · Model Executor Test",
+      "original_command_sha256": "79faec301b62a087e70e54f77cfaf5a13d6da781aaa10542e740d9203c828694",
+      "rendered_command_sha256": "5998b08b0e8f0e52030459b62202a8ea48dd502ec7c388babaa7bbe31804cb99",
+      "parent_dependencies": [
+        "upload-merge-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "merge:001",
+      "source": "merge",
+      "name_template": "Simple · Diffusion Test",
+      "original_command_sha256": "b02536970c506eef713c98f179aba982e22ff989b8463a18e69983d948383394",
+      "rendered_command_sha256": "8f3fac6a49ca302ac74efef38753a62f0ed7ce81cc6fdb704de70e949e677312",
+      "parent_dependencies": [
+        "upload-merge-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "merge:002",
+      "source": "merge",
+      "name_template": "Simple · Engine&Entrypoints Test",
+      "original_command_sha256": "9dd19813764f64ccef3d765d952208526cb383c0f206b3dc374545ccdba49dc8",
+      "rendered_command_sha256": "a5edd03570c8aeb7db41b68db220ae0d95b27ab8ab7145627ef0ea744765d3a6",
+      "parent_dependencies": [
+        "upload-merge-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "merge:003",
+      "source": "merge",
+      "name_template": "Simple · Other Test",
+      "original_command_sha256": "697c03294f78a15ef3052a8134c8af79c8fbcd18a4c2d00e8c00f7181d986287",
+      "rendered_command_sha256": "852f685907066e17cad84fb1f986512d08e7eadfc7c1dfa9954dd3b7efcbe847",
+      "parent_dependencies": [
+        "upload-merge-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "merge:004",
+      "source": "merge",
+      "name_template": "Diffusion · LoRA Test",
+      "original_command_sha256": "b05e923b42847aadb01898fe0421ec49bcfb77744102bc1e18a8a357fbed43bc",
+      "rendered_command_sha256": "d28893f0b4864ce8f67e2dc4b74486fd32d2029ba6b6e096af96ec9785843f85",
+      "parent_dependencies": [
+        "upload-merge-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "merge:005",
+      "source": "merge",
+      "name_template": "Distributed Test",
+      "original_command_sha256": "27ab1bd1f2676c4d4d573980891fa70372a077a0f3e063d853b82ff3eb463591",
+      "rendered_command_sha256": "06f10b908174fc8e70e7bcf9c8812168964e70652bf1f36a98e4a734aff29247",
+      "parent_dependencies": [],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "merge:006",
+      "source": "merge",
+      "name_template": "Entrypoint Test with H100",
+      "original_command_sha256": "1074ac8cf5c0a7efd93e1dce86039fdee56431cadf546a4a868ff0b528130ea5",
+      "rendered_command_sha256": "4f86636e0086e86b321f60e72ece8db9d0436093867e5b6e3d1b0b2e0f23cf63",
+      "parent_dependencies": [
+        "upload-merge-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "merge:007",
+      "source": "merge",
+      "name_template": "Entrypoint Test with L4",
+      "original_command_sha256": "3f39c1035f8ef278a295babd67244c0c32e1889aae07d62691d0aa30aae3c819",
+      "rendered_command_sha256": "c873271e7bdd6eaf4793987c47522bbd6f579ff9d3f6727b5348e39f78c04220",
+      "parent_dependencies": [
+        "upload-merge-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "merge:008",
+      "source": "merge",
+      "name_template": "Entrypoint Test with L4 · 2-GPU",
+      "original_command_sha256": "ccb17eafcb7332af99f141bf69210d1352641a464eeca6e40ccac58e794294ad",
+      "rendered_command_sha256": "0335fc81b8ae7e530a43e88f763ae31e9f988349aeeaf1d0502910cdfd9f95c7",
+      "parent_dependencies": [
+        "upload-merge-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "merge:009",
+      "source": "merge",
+      "name_template": "TTS · Qwen3-TTS CustomVoice Test",
+      "original_command_sha256": "c5109d2c909ed3936ad6b1a23afc45444d664a571d2a19d7ebd2b0d0d8e6dfc0",
+      "rendered_command_sha256": "9572bbd61031b8929447cee013ceb3510ba922de4e4d726b207c6bf1aa3fc98e",
+      "parent_dependencies": [
+        "upload-merge-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "merge:010",
+      "source": "merge",
+      "name_template": "TTS · Qwen3-TTS Base Test",
+      "original_command_sha256": "cbb1d42f72631c106d941e7a0e1864baa4169a6746bd2af44ed99454160422a0",
+      "rendered_command_sha256": "63ac8193b278140c9e4811587909f86733f6cd7b68d8d5055462789e10147bdb",
+      "parent_dependencies": [
+        "upload-merge-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "merge:011",
+      "source": "merge",
+      "name_template": "Omni · Qwen3-Omni Test",
+      "original_command_sha256": "36ce9d924d7a40cbf4e51170e9bfce40d8662aa6312d15aea2fe2174ab479bd4",
+      "rendered_command_sha256": "bf157f9268da5878db4417a51396fedf0976438b786222e53d5bb50d13a3eb0d",
+      "parent_dependencies": [
+        "upload-merge-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "merge:012",
+      "source": "merge",
+      "name_template": "Omni · MiniCPM-o 4.5 Test",
+      "original_command_sha256": "0fc80ab5d86065d12bdf95804b4c92d067b7e1bbd9239f7edace589fe14543be",
+      "rendered_command_sha256": "6d7a91420b701ecac3b5bacbaf0c03d0b2b59f9ff69a42ae9a78c096311b5e4d",
+      "parent_dependencies": [
+        "upload-merge-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "merge:013",
+      "source": "merge",
+      "name_template": "Omni · MiniCPM-o 4.5 Duplex Test",
+      "original_command_sha256": "97e413cfdc6f301f5c39ddbd01cf9f9b79a9c959a12ed7daf2a862b011d9395d",
+      "rendered_command_sha256": "2b3209e48003d9fc6bc66c26e08f07b4a1bdbc7745a167d3e191452a253c3f80",
+      "parent_dependencies": [
+        "upload-merge-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "merge:014",
+      "source": "merge",
+      "name_template": "Diffusion · Qwen Image Test",
+      "original_command_sha256": "35ea1a0c17f71d0f7d07dc7921d959e67405e3e9b1c28893d3988a4928208414",
+      "rendered_command_sha256": "2510f38a8aa7f39fd1fee33c4c2074caf2a7a18c86b62136a566e2300460cc2c",
+      "parent_dependencies": [
+        "upload-merge-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "merge:015",
+      "source": "merge",
+      "name_template": "Diffusion · Wan22 Test",
+      "original_command_sha256": "f8193cfaae1f84d376fb395ec5c60d8126f92c5746dc8a91f9b8f176b7727f01",
+      "rendered_command_sha256": "223ca11e8b70873f8ec9af56abfd1e79bcd085a6b630d55fd48dcf9b8a473cfa",
+      "parent_dependencies": [
+        "upload-merge-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "merge:016",
+      "source": "merge",
+      "name_template": "Diffusion · HunyuanVideo-1.5 Test",
+      "original_command_sha256": "5278ed4c44675722ccacec3682f1f81fc4d70afdc38c6a392d5583efb6ad58db",
+      "rendered_command_sha256": "91d0e50591bf17b1e7471e3ce12738fa19d7badda6fc075f1076ed125a2d06d5",
+      "parent_dependencies": [
+        "upload-merge-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "merge:017",
+      "source": "merge",
+      "name_template": "Diffusion · LingBot-Video Test",
+      "original_command_sha256": "e026e14d68d150188fe01080ca28d95445c3fdd3e8a74419cc45c45618260c11",
+      "rendered_command_sha256": "cc8763c7cc37cecbf5056d27fa45b9c4d904725ae9bad24a6af3fae69b5718c1",
+      "parent_dependencies": [
+        "upload-merge-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "merge:018",
+      "source": "merge",
+      "name_template": "Diffusion · MiniMax-H3 L3 DLO DP2 and FastH3",
+      "original_command_sha256": "4a5e7ce1eda59300946ea2491c09470ef6cdc12ca62636f7bf112047253cc647",
+      "rendered_command_sha256": "72927324f691b687fbc89e8154f9c79f7974265c46a5edb636f25a62cc593b1e",
+      "parent_dependencies": [
+        "upload-merge-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "merge:019",
+      "source": "merge",
+      "name_template": "Diffusion · MiniMax-H3 Latent Upscale and Refine",
+      "original_command_sha256": "52cbabdb7cd434aa8e1d7f49618d0ed0ea5ba32a1a4b31f8939a8e3ae1db90ec",
+      "rendered_command_sha256": "e21ee8c56d70c6b1fb83ffba828e51301c6f963e305ea8dea7b970b023c34895",
+      "parent_dependencies": [
+        "upload-merge-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:000",
+      "source": "nightly",
+      "name_template": ":full_moon: Omni · Function Test with H100 · Single-GPU",
+      "original_command_sha256": "6e9f497ffc63756ccdff00623a53af1b3bb07ce2c354112143bac2ce9a499e6d",
+      "rendered_command_sha256": "9ad0b6bd60b4fe816be5a91bb64f78c785fe5ee1781243725ce60bdbd9075d0f",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:001",
+      "source": "nightly",
+      "name_template": ":full_moon: Omni · Function Test with H100 · 2-GPU",
+      "original_command_sha256": "12d9341d4b1fc20a431de5a31a172503cde8c3e080b20b9ea8bdac31913b33bc",
+      "rendered_command_sha256": "e7fdc619160947454061e40299c7c18541675f8c5f2b271dc20b314615c66d45",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:002",
+      "source": "nightly",
+      "name_template": ":full_moon: Omni · MiniCPM-o 4.5 Duplex Test",
+      "original_command_sha256": "f1234049eb2c5a567ec3565618f52ff9fb0272171977d1790eb65a18722e7981",
+      "rendered_command_sha256": "a68b1aab0ed1db2abc309a056a26aacc3986d26907260fc86ea0cd7fa956e5c4",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:003",
+      "source": "nightly",
+      "name_template": ":full_moon: Omni · Doc Test with L4 · 4-GPU",
+      "original_command_sha256": "4b11ce65aefc0d8fd30d5be0c6d8383894cfafdb8146944bd8b05cc1bae61ba6",
+      "rendered_command_sha256": "32340770f96e4fe3d2ed8e213a1bf9615247a075a857fcf92776966b9ad2cb5c",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:004",
+      "source": "nightly",
+      "name_template": ":full_moon: Omni · Doc Test with H100 · 2-GPU",
+      "original_command_sha256": "ae7dad6cec575d0d2408f0689f6db9a21e7e03b59e7560df76ae35640b2b6a45",
+      "rendered_command_sha256": "1ef16c4ac893f4d156f12db41af2dcb9ca66989e14b5f02921ac569d84278167",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:005",
+      "source": "nightly",
+      "name_template": ":full_moon: Omni · Accuracy Test",
+      "original_command_sha256": "5d42362224b19e74b923da3fea32c0b8203ccb12708933cbb258426697985fb7",
+      "rendered_command_sha256": "4c505c5a1c567ee57d1128e640553efa61d2bf04d91656cb553738cc22974ebf",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:006",
+      "source": "nightly",
+      "name_template": ":full_moon: Omni · MiniCPM-o 4.5 · Accuracy Test",
+      "original_command_sha256": "178b56499595f3af8884ccb54538a5d3b335699906be8d571204d379aaf85fab",
+      "rendered_command_sha256": "301d792f551690b3dd17a978b2774bbd4d33b82dd8619a71abaf82d3ce3eb644",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:007",
+      "source": "nightly",
+      "name_template": ":full_moon: Omni · Omni-DuplexEval CI Guard",
+      "original_command_sha256": "22fa36754cf0fb0980f06d51a27a6260621b9f1c374b03f7ca8806d4d7489cf3",
+      "rendered_command_sha256": "3e002e7c5db537f01f7d66ee1921510f296f099a9b26bd6cdfd868d4165ead11",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:008",
+      "source": "nightly",
+      "name_template": ":full_moon: Omni · Perf Test · No Async Chunk",
+      "original_command_sha256": "ba3eb175c806616f72b1bd343fbb2ab0e886d7f8ec77b2f1621c1eac58d7f8a2",
+      "rendered_command_sha256": "ad012394a329b39674569c1ec5e733dd17d69c4ecc82c091741bf2729bad0430",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:009",
+      "source": "nightly",
+      "name_template": ":full_moon: Omni · Perf Test · Async Chunk",
+      "original_command_sha256": "4e142f7227f2ec8f49e2c076fe4abf7b3e4684367ffb43bb48ac4cb8dd2a31c9",
+      "rendered_command_sha256": "87f305c8d0e4de9956618b9bffd2ceabeca799cea6acf5c8536f790d0d038ae1",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:010",
+      "source": "nightly",
+      "name_template": ":full_moon: Omni · MiniCPM-o 4.5 · Perf Test",
+      "original_command_sha256": "4a46fe6f4cc260ce212218a2a9d3b386c0c16fdd7abd7a1e551b48720d065a2a",
+      "rendered_command_sha256": "d0ae0fe1883a8728d00086f4e5a954fba74d067b89bdbb11157655d6ed873c0a",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:011",
+      "source": "nightly",
+      "name_template": ":full_moon: Omni · MiniCPM-o 4.5 · Duplex Seed-TTS Perf Test",
+      "original_command_sha256": "bacd1de059f3fd7a18571d0bd6fae71173080acea332a9c706c6614b2226b15c",
+      "rendered_command_sha256": "30123a181b309adb785fd022ebb4b4daead4b436ef932183fd779f2c3937f4fe",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:012",
+      "source": "nightly",
+      "name_template": ":full_moon: Omni · Multi-Replica Startup Test with 4x H100",
+      "original_command_sha256": "4a5642b81ac5ebc11fe2fd7855b9ea87bc5febca418637cc1ea64b1e99e97a85",
+      "rendered_command_sha256": "562fd704dd4dafa0658e99ed99f084f97945263dd582b9be861164b0155bd521",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:013",
+      "source": "nightly",
+      "name_template": ":full_moon: Entrypoint Test with H100",
+      "original_command_sha256": "8cd65b1c0609c5e044e1a9cda4a44dc05cc62b86175a6bf0877992830c359d38",
+      "rendered_command_sha256": "d8109f61e7c7464eb4723f632db843100fed2d745b31c259bd6e962a2d696c1e",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:014",
+      "source": "nightly",
+      "name_template": ":full_moon: TTS · Function Test with L4",
+      "original_command_sha256": "9916565ac09f042ecccbd236856e82d556b8007b1c2aa603238ddac1af007087",
+      "rendered_command_sha256": "d2aacbbfb38972e79a525557a2ed15384f0e8406149b61519ee3edc0e7dfaa7d",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:015",
+      "source": "nightly",
+      "name_template": ":full_moon: TTS · Perf Test · Single-GPU",
+      "original_command_sha256": "f02abd3e31374257d05053ea122358f6a40963ca95512604d9be6a885194ce6d",
+      "rendered_command_sha256": "8e74932ec0eef74283035c3ba2585ba3afb6113b9aacb92c12ae2cabd6b52395",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:016",
+      "source": "nightly",
+      "name_template": ":full_moon: TTS · Perf Test · 2-GPU",
+      "original_command_sha256": "5a57bee8ac2ea890c12063bd77405f940b54a371877af0d9c98323789960fb31",
+      "rendered_command_sha256": "33762cdd06825ddc77ce9ce3f9f0b95dd15e6afdd736564fb477add225e2090b",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:017",
+      "source": "nightly",
+      "name_template": ":full_moon: Tiny Model Tests · Diffusion (Multi-GPU accelerations) · 2-GPU",
+      "original_command_sha256": "a5f299b5628ff7e9c9dde94f138e4d4b28e9683c530809b7b4bce5f45fa73f77",
+      "rendered_command_sha256": "d5e90d7716ca85505968637472f53f4d49ed63388bd33517f949bc1a50a1be66",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:018",
+      "source": "nightly",
+      "name_template": ":full_moon: Tiny Model Tests · Diffusion (Multi-GPU accelerations) · 4-GPU",
+      "original_command_sha256": "790ff6be8d11dccbdc197d98d09e1ae75fd6be5f3d13ce5da7ad3e84049c4ec1",
+      "rendered_command_sha256": "3aaba4cfe6c078f8b76b4be94e23509c6e38141e843bf58b16354685d16deda4",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:019",
+      "source": "nightly",
+      "name_template": ":full_moon: Diffusion X2I(&A&T) · Function Test with H100 · Single-GPU",
+      "original_command_sha256": "20c70cbc9384e224bf5d0b05e9ca60b0432319dd719e3ed1fd8d8a1fcc72ce95",
+      "rendered_command_sha256": "5e9ef1133e3d50bd6871d6ed7c0b309d1a9010002e2a738b9553dd3d6d15d7b0",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:020",
+      "source": "nightly",
+      "name_template": ":full_moon: Diffusion X2I(&A&T) · Function Test with H100 · 2-GPU",
+      "original_command_sha256": "9513ee60be1311801f8dd5018e6b723bddad1daf3d1fe79e52553338349aa21a",
+      "rendered_command_sha256": "537b962e7a0876c868ae6df5ff48a80891fa47b4a3c75b6ae5ff05fe35391f5a",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:021",
+      "source": "nightly",
+      "name_template": ":full_moon: Diffusion X2I(&A&T) · Function Test with L4 · Single-GPU",
+      "original_command_sha256": "8d11d2e19e3e04386838d79a3292b35a5ae82bda8ba7aa00d883d07b01e31230",
+      "rendered_command_sha256": "f0c0bd2156e5c34b8e6511516f212f46fc00a3713f99835bbf04f441306dc453",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:022",
+      "source": "nightly",
+      "name_template": ":full_moon: Diffusion X2I(&A&T) · Doc Test",
+      "original_command_sha256": "c3cc39c8187259ab40846e77fa211b3a557c4888e6163de6a0c18593f184f2b1",
+      "rendered_command_sha256": "b543dd67ed1d36708702f09803db604ee38759ef9eb0f5a04572a078accdc0df",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:023",
+      "source": "nightly",
+      "name_template": ":full_moon: Diffusion X2I(&A&T) · Accuracy Test",
+      "original_command_sha256": "93698921abd81c9ce689e041a05cb61e37bd97c6a1912d3b2bcb412a751e550d",
+      "rendered_command_sha256": "08ac73b3ee8912a89d62ae1c365dadcb26ec9ae81813187c7240819558db3c5e",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:024",
+      "source": "nightly",
+      "name_template": ":full_moon: HunyuanImage3-DIT · Accuracy Test",
+      "original_command_sha256": "078dcea1a5d189ef31abd356bb22465c8fba4c133dcdc698527723e2ce801c18",
+      "rendered_command_sha256": "f3816500f04a1f2fae268fdde8d12630a54bac849a00e525884e0f26f0317d0e",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:025",
+      "source": "nightly",
+      "name_template": ":full_moon: Diffusion X2I(&A&T) · Perf Test · Qwen-Image · Single-GPU",
+      "original_command_sha256": "aca5e654e69063d2850b05282c65a72f0cf56f6bcd1b9b48531a911bff710889",
+      "rendered_command_sha256": "e84e9c4ca477ecf227d12d337519916b0d22bcf6869042f2a045a824aa818521",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:026",
+      "source": "nightly",
+      "name_template": ":full_moon: Diffusion X2I(&A&T) · Perf Test · Qwen-Image · 4-GPU",
+      "original_command_sha256": "3575b58c519207a70185c19b3ae75a117ac70ec718ba80ff8225915d7eb3b75e",
+      "rendered_command_sha256": "3e0c6a9a2e6d3c014b6c04739cdcf8da69b0ded67008bb01de8def933710b306",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:027",
+      "source": "nightly",
+      "name_template": ":full_moon: Diffusion X2V · Wan2.2 T2V Function Test · Single-GPU",
+      "original_command_sha256": "292f1b8a8137dc7a5ffe00b5aa209260354d5205b16dd04dce1754e002b2307d",
+      "rendered_command_sha256": "6be14d3d6312eb4f92f4a3f2afd767998c64d2b142cc19d203bb2fe43e5b778a",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:028",
+      "source": "nightly",
+      "name_template": ":full_moon: Diffusion X2V · Wan2.2 T2V Function Test · 2-GPU",
+      "original_command_sha256": "c1a1352de99b8c3b1f94ab176a7e8ae89c57210082d3c7d71d7c39543f4d5489",
+      "rendered_command_sha256": "67d36cc83e11cf571a131fee4f34c00867c79e5fc03e7619c8197c11379ba936",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:029",
+      "source": "nightly",
+      "name_template": ":full_moon: Diffusion X2V · Wan2.2 I2V/TI2V Function Test · Single-GPU",
+      "original_command_sha256": "a60cbced1da1d071378f7968856e0169bf5c78199042c25f09b4e96c01e130fd",
+      "rendered_command_sha256": "bbb1c184de66d849623544e0386d10a129d24b745ebae24d3e20e1f07b644979",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:030",
+      "source": "nightly",
+      "name_template": ":full_moon: Diffusion X2V · Wan2.2 I2V/TI2V Function Test · 2-GPU",
+      "original_command_sha256": "3f6772d8697b0b0028e6b41d3d8740817ba078a0c11ad27d61a44da04e3b242f",
+      "rendered_command_sha256": "0636f469957d568aeb9b818c03cee3c9353c2b9a5238ebe74e9988bd0eb44569",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:031",
+      "source": "nightly",
+      "name_template": ":full_moon: Diffusion X2V · HunyuanVideo-1.5 Function Test",
+      "original_command_sha256": "28ef7151f133a81cff5bda97617e5030af9236a5f335a45803bc0805d335d20d",
+      "rendered_command_sha256": "2aa2d2553b1971daa22fb0db5cc5e4f61c27f78fd0a1687d7c32ac7d2581d4ca",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:032",
+      "source": "nightly",
+      "name_template": ":full_moon: Diffusion X2V · LingBot Function Test",
+      "original_command_sha256": "5571f0874c8d25171963d35d57a4c2e4b4a501fe0a367bddfb314cb93a8d43e7",
+      "rendered_command_sha256": "961fdb6b3caa2bd1ba59a0b6aa12c3e865071d150ece0ea71c0894eb83b2fc57",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:033",
+      "source": "nightly",
+      "name_template": ":full_moon: Diffusion X2V · Doc Test",
+      "original_command_sha256": "e4047bcb51809021bf5e72a95c2be712f0c95acafad928b09b92992cafc5a912",
+      "rendered_command_sha256": "ebf2dc82cadf9d6631cab86eb10e91628eeb5a06729124bc531fa1a38e25c914",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:034",
+      "source": "nightly",
+      "name_template": ":full_moon: Diffusion X2V · Wan2.2 Autoround Function Test",
+      "original_command_sha256": "84709626ea3751563251f988ea8195383c8234376269777a81978d2a3ff7156a",
+      "rendered_command_sha256": "a1852c757f87531bf5f405ec3e96a921ff3f67ca6731c441fa3f9cb7b6db166f",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:035",
+      "source": "nightly",
+      "name_template": ":full_moon: Diffusion X2V · Wan2.2 Device-Postprocess Equivalence Test",
+      "original_command_sha256": "3d3616ab502b9bea0856f88348457e047ff1237a9a951e4ea5a0c261dd71866f",
+      "rendered_command_sha256": "30b0bc30cf89969c8b959a2c7d48b5acb6cdb17e67cf92fb870721329ec6764b",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:036",
+      "source": "nightly",
+      "name_template": ":full_moon: Diffusion X2V · Wan2.2 Accuracy Test",
+      "original_command_sha256": "041a2ec1385238acd9766a77f2784055d8cd08dc88865c3f43581924ad09ac4e",
+      "rendered_command_sha256": "fce83d98e23d3b0bd0dc007f5aa0baa1e9e5835ff4f2008c2c8b49557cd14223",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:037",
+      "source": "nightly",
+      "name_template": ":full_moon: Diffusion X2V · MiniMax H3 I2VA/Ref2VA Accuracy Test",
+      "original_command_sha256": "2300c429a866177d2b8f714bd6b3a02a1f63a0c0fb36ac33eee38b24c65213ab",
+      "rendered_command_sha256": "a4045d043c401269a6048a3d728b66e3f39eea8ea613a4913d8aab0b699f6b7d",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:038",
+      "source": "nightly",
+      "name_template": ":full_moon: Diffusion X2V · HunyuanVideo-1.5 Accuracy Test",
+      "original_command_sha256": "55bb50ededa0fe3d3b18b1b666f7301de6aa4470b6eeb060fbc4545fb1bfc6f4",
+      "rendered_command_sha256": "ec0bec7c17869e2853ba6472206777b9f6f6b62ab12e3a5370f6e29fe392a62c",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:039",
+      "source": "nightly",
+      "name_template": ":full_moon: Diffusion X2V · Perf Test · Single-GPU",
+      "original_command_sha256": "92768159d84f80b87230f4dc745c58c7499e5d384200bef40bf0e6fa1c3a8e91",
+      "rendered_command_sha256": "433aa72c2dd5209d9e3bced6ffa87c46680af9977246f59c585c504f1b798780",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:040",
+      "source": "nightly",
+      "name_template": ":full_moon: Diffusion X2V · Perf Test · 2-GPU",
+      "original_command_sha256": "ee144208d545a2b5b8fe5b88e179f1e876ae46e0d21ff425b9c92a5e12ace7b2",
+      "rendered_command_sha256": "d06273df766860d29638dd6e8769d079e31a46447bf0876a004c16d8e0e5661c",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:041",
+      "source": "nightly",
+      "name_template": ":full_moon: Diffusion X2V · Perf Test · HunyuanVideo-1.5",
+      "original_command_sha256": "1aa53dacc60c6fde30f32cbc3061eda1476c4880d91ac3e1495c87f4e7e7cb9f",
+      "rendered_command_sha256": "f2674652f4020f06fa46cbd3e91d81824f87a528e6dd58fc11b6e91b6ac2e5b5",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:042",
+      "source": "nightly",
+      "name_template": ":full_moon: Diffusion X2V · Perf Test · MiniMax-H3",
+      "original_command_sha256": "2d59a88ba93fdc830a90f754f05628e83c02794f5cd7594ef5934accb84058ea",
+      "rendered_command_sha256": "ae72ee413d638033a7e9ff9174df34bb292de665a33616a92f45ead076957e72",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:043",
+      "source": "nightly",
+      "name_template": ":full_moon: Diffusion X2V · Perf Test · LingBot",
+      "original_command_sha256": "f5a4dbee2e37a1161061fdbf61ad9b69a3f10e1dba3177953936f795605eb1a4",
+      "rendered_command_sha256": "22e812fbe76137db7e48e3e93de48b9c1f313d345618ff0eef94c8ef6b4dd82a",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:044",
+      "source": "nightly",
+      "name_template": ":full_moon: Diffusion · Distributed Test with L4 · 2-GPU",
+      "original_command_sha256": "133fa34aa808adf95157a9bb7706075bd2ffa0ee8199a1131e39339e8881ab07",
+      "rendered_command_sha256": "96bae51b1ab0afe75828cfa237836c711bf4b27b3482d869928c5d1c4624bc86",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:045",
+      "source": "nightly",
+      "name_template": ":full_moon: Diffusion · Distributed Test with L4 · 3-GPU",
+      "original_command_sha256": "cffc92f84a03dae305da96156fe0884dfce44a2e2b2b8b4f6f289bbdf3dcaccd",
+      "rendered_command_sha256": "28d1cd08dc22b8f2bc68026b0733bae6a3384ae8dc053762df6a1f3d96ea475c",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:046",
+      "source": "nightly",
+      "name_template": ":full_moon: Diffusion · Distributed Test with L4 · 4-GPU",
+      "original_command_sha256": "c44890b440542cb478445eaf2129f9a982cff77129c8cc5dd3953abe3e6360cc",
+      "rendered_command_sha256": "d0d23f6bea13af24c8924f7080abfa5e470bbb32d16b633b077daff5a4577173",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:047",
+      "source": "nightly",
+      "name_template": ":full_moon: Diffusion · Distributed Test with H100 · 2-GPU",
+      "original_command_sha256": "53f3489c9b24b7e078addb0782368cd9341b3aa0943dbe3374ef489ae6ebd039",
+      "rendered_command_sha256": "ac31a565dd52f3ceeda0457a2a55714d9abe389e4a4737454ae9755a1863db18",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:048",
+      "source": "nightly",
+      "name_template": ":full_moon: Diffusion · Distributed Test with H100 · 4-GPU",
+      "original_command_sha256": "713b205389bc55b67d592e3fbb3d5f614dfa73867b0c1aa1bca3a82b9b40404a",
+      "rendered_command_sha256": "27186112630c6e9bf9e93de08f46ff81e5c4d38b8c6579091efb569914818e7e",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:049",
+      "source": "nightly",
+      "name_template": ":full_moon: Diffusion · Offloader Test",
+      "original_command_sha256": "6ac3fde8a922dd4e8fd36c28fb3654b76ef8bc9425ffee2874fbc8d88725aa08",
+      "rendered_command_sha256": "b8618e5f2aed7c2caf5fc07f691e57247b559ee0c65ac7f2730f57b8abf9c906",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:050",
+      "source": "nightly",
+      "name_template": ":full_moon: Diffusion · Quantization Test with H100 · Single-GPU",
+      "original_command_sha256": "4818fd901c7c8136e742da594ae9be4c2b60a598e3e4ae80d382dd5f0668b5ff",
+      "rendered_command_sha256": "e3012f07e54bfcff619edaf41153149c3a4f71cf1a00d8ca81dc5749da9e981d",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:051",
+      "source": "nightly",
+      "name_template": ":full_moon: Diffusion · MiniMax H3 FP8 Quality Test with H100 · 2-GPU",
+      "original_command_sha256": "7f2ab66d7558eb07f946198d310d33da48096037ed4d673e4ac9e62f381c0685",
+      "rendered_command_sha256": "fa71789b3d8b7a1674b3b180c2b3184dff4c97170074e0fde4663dbd4cf7f1ad",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:052",
+      "source": "nightly",
+      "name_template": ":full_moon: Diffusion · Quantization Test with L4",
+      "original_command_sha256": "248656fc3042194306104d894f4a3e0508fa7909c992d7b22dcd804be9c3cbde",
+      "rendered_command_sha256": "e17851caa4c24669a06071eb448a6208e4db35e66776ff016cd8ecb3101964d3",
+      "parent_dependencies": [
+        "upload-nightly-pipeline"
+      ],
+      "expected_enabled_under_campaign_env": true
+    },
+    {
+      "expected_leaf_id": "nightly:053",
+      "source": "nightly",
+      "name_template": ":email: Nightly Collection & Email",
+      "original_command_sha256": "f9ea18a97d78ddc0881b1e034ed8ac3ac9dc688a00b8aeb39afc5d4219d7293b",
+      "rendered_command_sha256": "f9ea18a97d78ddc0881b1e034ed8ac3ac9dc688a00b8aeb39afc5d4219d7293b",
+      "parent_dependencies": [],
+      "expected_enabled_under_campaign_env": false
+    }
+  ]
+}

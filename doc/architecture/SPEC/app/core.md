@@ -1,6 +1,6 @@
 # app/core.py —— 规范
 
-<!-- verified-against: 2026-09-26 -->
+<!-- verified-against: 2026-10-27 -->
 
 `Copilot` is the headless workflow application. It resolves a TaskSpec,
 delegates reviewer verdict policy to `review.plan_gate`, confirms when needed,
@@ -31,3 +31,11 @@ through the compatibility module. The application passes its reviewer to the
 plan gate, preserving the no-human fail-closed rule. Only orchestration belongs
 here; command argument parsing and stdio protocol registration remain
 transport concerns.
+
+## `--resume <run-id>` 断言式恢复（2026-10-27）
+
+`resume_last(run_id, *, repo, playbook, params)`：给定 run id 时只恢复那个
+run（`_contained_run_dir` 拒绝越界路径）；`--repo/--playbook/--task-param`
+在恢复时是对已保存 task.json 的**断言**而非修改，任一不匹配即 BLOCKED。
+发布 launcher 因此能把 resume 绑定到不可变的 campaign，而不会误入更新的
+无关任务。损坏的 task.json 同样 BLOCKED 而非崩溃。

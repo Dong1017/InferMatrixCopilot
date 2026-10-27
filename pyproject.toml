@@ -11,6 +11,7 @@ dependencies = [
     "openai>=1.50",
     "rich>=13.0",
     "markdown-it-py>=3",
+    "packaging>=24.0",
 ]
 
 [project.optional-dependencies]
@@ -45,4 +46,7 @@ packages = ["src/infermatrix_copilot"]
 
 [tool.pytest.ini_options]
 testpaths = ["test"]
+# fixture trees under test/fixtures contain real-looking test_*.py files and
+# conftest.py copies of target repos; they are data, never collected
+norecursedirs = ["fixtures", ".*", "build", "dist", "node_modules"]
 addopts = "-q"

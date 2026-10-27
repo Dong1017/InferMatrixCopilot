@@ -11,14 +11,22 @@ Behavioral parity notes (each pinned by a test):
   variant listing mentions our arch wins; on reaching the last-known-good
   baseline without a hit, fall back to the baseline itself if it has a wheel,
   else keep searching older commits.
-- A forced commit must resolve and (outside release mode) must have a wheel.
+- A forced commit must belong to the target branch and (outside release mode)
+  must have a wheel.
 - Release mode uses the branch tip and skips the wheel probe.
-- Install failures abort immediately; only *import-validation* failures retry
-  (with a stale-artifact clean between attempts).
+- The last-rebase baseline is resolved to a full commit id before the walk;
+  a baseline that does not resolve is a configuration error (hard fail), not
+  a silent walk past it.
+- Install failures abort immediately, except a busy-target failure (EBUSY/
+  ETXTBSY — another process holds venv files open, e.g. a leftover test
+  python from a crashed run): those first release the holders, then retry
+  within the same bounded attempts; only *import-validation* failures retry
+  with a stale-artifact clean between attempts.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -27,6 +35,10 @@ import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Mapping
+from urllib.parse import unquote, urldefrag, urlsplit
+
+from packaging.utils import parse_wheel_filename
+from packaging.version import Version
 
 from ..testing.process_tree import _pgrep, kill_tree
 
@@ -62,6 +74,9 @@ class WheelSpec:
     stale_artifact_globs: tuple[str, ...] = ()
     install_env: Mapping[str, str] = field(default_factory=dict)
     reinstall_retries: int = 3
+    # Complete published wheels avoid editable installs tied to a disposable
+    # source checkout. Optional: existing adapters retain editable installs.
+    install_url_template: str = ""
 
     @classmethod
     def from_manifest(cls, data: Mapping) -> "WheelSpec":
@@ -75,6 +90,7 @@ class WheelSpec:
             stale_artifact_globs=tuple(data.get("stale_artifact_globs", ())),
             install_env=dict(data.get("install_env", {})),
             reinstall_retries=int(data.get("reinstall_retries", 3)),
+            install_url_template=str(data.get("install_url_template", "")),
         )
 
 
@@ -145,34 +161,76 @@ def pick_wheel_commit(repo: Path, target_branch: str, spec: WheelSpec, *,
     the newest commit with a usable wheel, and leave the checkout AT that
     commit (detached). Returns the selected full SHA."""
     repo = Path(repo)
-    rc, _, err = run(["git", "fetch", "origin"], cwd=repo)
+    rc, _, err = run(["git", "check-ref-format",
+                      f"refs/heads/{target_branch}"], cwd=repo)
     if rc != 0:
-        raise WheelPickError(f"git fetch origin failed in {repo}: {err.strip()}")
+        raise WheelPickError(f"invalid upstream target branch {target_branch!r}")
+    # Scratch clones can inherit a single-branch fetch refspec. Fetch the
+    # requested branch explicitly, including its tracking ref, rather than
+    # depending on remote.origin.fetch (the v0.31.0 campaign hit this).
+    # A failed fetch must never fall through to a stale local tracking ref.
+    remote_ref = f"refs/remotes/origin/{target_branch}"
+    rc, _, err = run(["git", "fetch", "origin",
+                      f"+refs/heads/{target_branch}:{remote_ref}"], cwd=repo)
+    if rc != 0:
+        raise WheelPickError(
+            f"remote branch origin/{target_branch} does not exist or could "
+            f"not be fetched in {repo}: {err.strip()}")
 
-    rc, _, _ = run(["git", "rev-parse", "--verify", f"origin/{target_branch}"],
+    rc, _, _ = run(["git", "rev-parse", "--verify", f"{remote_ref}^{{commit}}"],
                    cwd=repo)
     if rc != 0:
         raise WheelPickError(
             f"remote branch origin/{target_branch} does not exist in {repo}; "
             "check the configured target branch")
 
+    # A resumed run's scratch can carry build artifacts from an interrupted
+    # wheel install (an editable install builds in-tree and drops untracked
+    # files, e.g. rust parser benches); untracked files then block the branch
+    # reset with "would be removed by checkout". The scratch is disposable by
+    # contract (Rev 8 §4) — clean it instead of asking a human to.
+    run(["git", "clean", "-ffd"], cwd=repo)
     log(f"Checking out {target_branch} (resetting to origin/{target_branch})...")
-    rc, _, err = run(["git", "checkout", "-B", target_branch,
+    rc, _, err = run(["git", "checkout", "-f", "-B", target_branch,
                       f"origin/{target_branch}"], cwd=repo)
     if rc != 0:
         raise WheelPickError(
             f"failed to reset {target_branch} to origin/{target_branch}: "
             f"{err.strip()} — working tree may be dirty; clean {repo} and retry")
 
+    if baseline:
+        # The walk compares `rev == baseline` against `git log --format=%H`
+        # output (always full SHAs). An un-resolved baseline (short SHA, tag,
+        # branch name, typo) would never match, silently walking BELOW the
+        # last-known-good commit and possibly pin an older wheel — a backward
+        # rebase. Resolve first; anything that does not resolve is a
+        # configuration error, not a search hint.
+        rc, out, _ = run(["git", "rev-parse", "--verify", "--end-of-options",
+                          f"{baseline}^{{commit}}"], cwd=repo)
+        if rc != 0 or not out.strip():
+            raise WheelPickError(
+                f"last-rebase baseline '{baseline}' does not resolve to a "
+                f"commit in {repo}; pass --task-param last_rebase_commit=<sha "
+                "or tag> that exists in the upstream checkout")
+        baseline = out.strip()
+
     found = ""
     if force_commit:
         log(f"Using forced commit override: {force_commit}")
-        rc, out, _ = run(["git", "rev-parse", f"{force_commit}^{{commit}}"],
+        rc, out, _ = run(["git", "rev-parse", "--verify", "--end-of-options",
+                          f"{force_commit}^{{commit}}"],
                          cwd=repo)
         if rc != 0 or not out.strip():
             raise WheelPickError(
                 f"forced commit '{force_commit}' could not be resolved in {repo}")
         found = out.strip()
+        rc, _, err = run(["git", "merge-base", "--is-ancestor", found,
+                          remote_ref], cwd=repo)
+        if rc != 0:
+            raise WheelPickError(
+                f"forced commit {found} is not proven to belong to "
+                f"origin/{target_branch}; choose a commit from the target "
+                f"branch: {err.strip()}")
         if release_mode:
             log(f"Release mode: skipping wheel check for forced commit {found[:12]}")
         elif probe(found):
@@ -295,6 +353,33 @@ def read_installed_version(spec: WheelSpec, *, python: str,
     return out.strip() if rc == 0 else ""
 
 
+def installed_wheel_matches(spec: WheelSpec, commit: str, version: str, *,
+                            python: str, run: RunFn = _run) -> bool:
+    """Release versions omit git hashes: verify the wheel URL and checksum."""
+    selected = spec.install_url_template.format(
+        commit=commit, variant=spec.variant, arch=spec.arch,
+        package=spec.package)
+    url, fragment = urldefrag(selected)
+    snippet = ("import importlib.metadata, sys; "
+               "print(importlib.metadata.distribution(sys.argv[1])"
+               ".read_text('direct_url.json') or '{}')")
+    rc, out, _ = run([python, "-c", snippet, spec.package])
+    if rc != 0:
+        return False
+    try:
+        provenance = json.loads(out)
+        _, expected_version, _, _ = parse_wheel_filename(
+            unquote(urlsplit(url).path.rsplit("/", 1)[-1]))
+        checksum = re.fullmatch(r"sha256=([0-9a-f]{64})", fragment)
+        return (Version(version) == expected_version
+                and provenance.get("url") == url
+                and checksum is not None
+                and provenance.get("archive_info", {}).get("hashes", {})
+                .get("sha256") == checksum.group(1))
+    except (ValueError, TypeError, AttributeError):
+        return False
+
+
 def _append(path: Path, text: str) -> None:
     with open(path, "a", encoding="utf-8", errors="replace") as f:
         f.write(text)
@@ -334,6 +419,138 @@ def release_editable_install_locks(
     return matches
 
 
+# uv/pip surface a busy install target as EBUSY ("Device or resource busy",
+# "os error 16") or ETXTBSY ("Text file busy") — e.g. renaming
+# site-packages/cv2/.tmp*/cv2.abi3.so over a file a leftover test python
+# still has mapped (run-202601012-181847). Everything else is a real failure.
+_BUSY_INSTALL_RE = re.compile(
+    r"device or resource busy|text file busy|os error 16\b|os error 26\b",
+    re.IGNORECASE)
+
+
+def derive_venv_root(python: str, venv_root: Path = Path("")) -> Path:
+    """The venv owning `python` — the LOGICAL parent dir, never resolved.
+
+    `Path("")` is truthy, so a naive falsy-guard silently keeps it and a
+    later resolve() turns it into the PROCESS CWD — the wrong root then
+    scopes the holder scan (and its kills) to whatever directory the copilot
+    happens to run in (run-202601012's third resume killed its own launcher
+    this way). The interpreter itself is typically a SYMLINK to a system
+    python, so resolving it escapes the venv entirely (`/usr` matches half
+    the machine); the un-resolved `<venv>/bin/python` spelling is the root
+    that owns the site-packages uv renames into. NOTE `str(Path(""))` is
+    "." — truthy! — so the empty default needs an explicit string check."""
+    if str(venv_root).strip() not in ("", "."):
+        return Path(venv_root)
+    return Path(os.path.abspath(python)).parent.parent
+
+
+def venv_root_is_plausible(root: Path) -> bool:
+    """A root we are willing to kill processes over. Wrong roots are far
+    worse than no scan: require venv anatomy (pyvenv.cfg, or a lib/ with
+    site-packages) before believing it."""
+    root = Path(root)
+    if (root / "pyvenv.cfg").is_file():
+        return True
+    lib = root / "lib"
+    return lib.is_dir() and any(lib.glob("python*/site-packages"))
+
+
+def _read_status_ppid(path: str) -> str:
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            if line.startswith("PPid:"):
+                return line.split()[1]
+    return "0"
+
+
+def _proc_ancestors(pid: int, *, proc_root: str = "/proc",
+                    read: Callable[[str], str] = _read_status_ppid) -> set[int]:
+    """The pid's ancestor chain (its launcher/supervisor lineage). The wheel
+    step must never be able to kill the very processes that supervise it,
+    whatever the scan matched."""
+    chain: set[int] = set()
+    while pid and pid > 1 and pid not in chain:
+        chain.add(pid)
+        try:
+            pid = int(read(f"{proc_root}/{pid}/status") or 0)
+        except (OSError, ValueError):
+            break
+    return chain
+
+
+def scan_venv_holders(
+        venv: Path, *,
+        listdir: Callable[[str], list[str]] = os.listdir,
+        readlink: Callable[[str], str] = os.readlink,
+        self_pid: int = 0,
+        skip_pids: frozenset[int] = frozenset(),
+        proc_root: str = "/proc") -> dict[int, str]:
+    """Processes with an open fd or cwd under `venv` — best-effort /proc scan.
+
+    Unreadable entries (other users' processes, exited races) are skipped,
+    never fatal: the goal is releasing THIS campaign's leftover holders, not
+    an exhaustive audit. Returns {pid: first matching path}."""
+    venv = str(Path(venv).resolve())
+    holders: dict[int, str] = {}
+    try:
+        entries = listdir(proc_root)
+    except OSError:
+        return holders
+    for name in entries:
+        if not name.isdigit():
+            continue
+        pid = int(name)
+        if pid == self_pid or pid in skip_pids:
+            continue
+        for kind in ("cwd", "fd"):
+            base = f"{proc_root}/{name}/{kind}"
+            try:
+                if kind == "cwd":
+                    targets = [readlink(base)]
+                else:
+                    targets = [readlink(f"{base}/{fd}")
+                               for fd in listdir(base)]
+            except OSError:
+                continue
+            for target in targets:
+                if target == venv or target.startswith(venv + "/"):
+                    holders.setdefault(pid, target)
+                    break
+    return holders
+
+
+def release_venv_holders(
+        venv: Path, *,
+        scan: Callable[..., dict[int, str]] = scan_venv_holders,
+        kill: Callable[[list[int]], list[int]] = kill_tree,
+        log: Callable[[str], None] = _log) -> list[int]:
+    """Terminate processes still holding files under the TARGET venv open.
+
+    The venv belongs to this campaign alone: any holder at wheel-install
+    time is a leftover from a crashed prior run (test pythons, stray
+    import checks) — exactly the processes whose mapped .so files make uv's
+    atomic renames fail EBUSY. Returns the pids killed. The caller's own
+    ancestor chain (launcher, gpu wrapper, the copilot itself) is exempt no
+    matter what the scan matched."""
+    if not venv_root_is_plausible(venv):
+        log(f"Refusing venv-holder release: {venv} does not look like a "
+            "virtualenv (no pyvenv.cfg / site-packages) — check "
+            "the adapter's declared venv variable; a wrong root here kills "
+            "bystanders.")
+        return []
+    exempt = _proc_ancestors(os.getpid()) | {os.getpid()}
+    holders = scan(venv, self_pid=os.getpid(), skip_pids=frozenset(exempt))
+    # belt and suspenders: filter here too, so even a scan that ignores
+    # skip_pids can never route a supervisor into the kill list
+    pids = sorted(p for p in holders if p not in exempt)
+    if pids:
+        detail = ", ".join(f"{pid} ({holders[pid]})" for pid in pids[:8])
+        log(f"Releasing {len(pids)} process(es) holding the target venv: {detail}")
+        kill(pids)
+    return pids
+
+
 def _clean_stale_artifacts(repo: Path, spec: WheelSpec,
                            log: Callable[[str], None]) -> None:
     """Remove stale compiled extensions so a clean reinstall can place a single
@@ -359,6 +576,7 @@ def ensure_wheel_installed(repo: Path, commit: str, spec: WheelSpec, *,
                            import_check_log: Path,
                            pre_checkout_head: str = "",
                            release_mode: bool = False,
+                           venv_root: Path = Path(""),
                            run: RunFn = _run,
                            sleep: Callable[[float], None] = time.sleep,
                            log: Callable[[str], None] = _log) -> bool:
@@ -368,17 +586,27 @@ def ensure_wheel_installed(repo: Path, commit: str, spec: WheelSpec, *,
 
     Skip requires all three: the checkout was already at `commit` before the
     pick, the import check passes, and the installed version embeds the commit
-    hash (checkout alone lies when the package was never reinstalled)."""
+    hash (checkout alone lies when the package was never reinstalled).
+
+    `venv_root` defaults to the interpreter's LOGICAL grandparent
+    (`<venv>/bin/python` → `<venv>`); holders of files under it are released
+    before each install attempt, and a busy (EBUSY/ETXTBSY) install failure
+    retries within the same bounded attempts after releasing them again."""
     repo = Path(repo)
+    venv_root = derive_venv_root(python, venv_root)
     check_snippet = build_import_check_snippet(spec)
 
     def import_ok() -> bool:
-        rc, out, err = run([python, "-c", check_snippet], cwd=repo)
+        rc, out, err = run([python, "-c", check_snippet],
+                           cwd=None if spec.install_url_template else repo)
         import_check_log.write_text(out + err, encoding="utf-8")
         return rc == 0
 
     installed_version = read_installed_version(spec, python=python, run=run)
-    matches = version_matches_commit(installed_version, commit)
+    matches = (installed_wheel_matches(
+        spec, commit, installed_version, python=python, run=run)
+        if spec.install_url_template
+        else version_matches_commit(installed_version, commit))
     healthy = import_ok()
 
     if pre_checkout_head == commit and healthy and matches:
@@ -419,6 +647,10 @@ def ensure_wheel_installed(repo: Path, commit: str, spec: WheelSpec, *,
         # A concurrent editable install holds the project lock forever if its
         # parent died; release it before uninstalling — scoped to THIS repo
         release_editable_install_locks(repo)
+        # Leftover processes from a crashed run keep venv files mapped, which
+        # makes uv's atomic site-packages renames fail EBUSY — release them
+        # too (scoped to THIS venv) before every install attempt.
+        release_venv_holders(venv_root, log=log)
 
         # Every uv call must name the TARGET venv explicitly: without
         # --python, uv resolves the environment from VIRTUAL_ENV / a .venv in
@@ -431,13 +663,46 @@ def ensure_wheel_installed(repo: Path, commit: str, spec: WheelSpec, *,
         _append(install_log, f"--- uv pip uninstall {spec.package} ---\n{out}{err}")
 
         env = dict(os.environ)
-        env.update(spec.install_env)
-        rc, out, err = run([uv, "pip", "install", "--python", python,
-                            "-e", "."], cwd=repo, env=env,
-                           timeout=3600)
-        _append(install_log, "--- uv pip install -e . (precompiled) ---\n"
+        # The upstream installer otherwise resolves a base commit on main,
+        # which can differ from the selected release-branch commit. Carry
+        # both selection inputs through to the precompiled extension install.
+        env.update({key: value.replace("{commit}", commit)
+                    .replace("{variant}", spec.variant)
+                    for key, value in spec.install_env.items()})
+        install_args = ([spec.install_url_template.format(
+            commit=commit, variant=spec.variant, arch=spec.arch,
+            package=spec.package)] if spec.install_url_template else ["-e", "."])
+        if spec.install_url_template:
+            # uv omits archive hashes from direct_url.json in some versions.
+            # pip enforces the URL's sha256 and records PEP 610 provenance.
+            rc, _, _ = run([python, "-m", "pip", "--version"])
+            if rc != 0:
+                rc, out, err = run([uv, "pip", "install", "--python",
+                                    python, "pip"], timeout=600)
+                _append(install_log, "--- seed target pip ---\n" + out + err)
+                if rc != 0:
+                    raise WheelInstallError("target pip setup failed; "
+                                            f"see {install_log}")
+            install_cmd = [python, "-m", "pip", "install", *install_args]
+        else:
+            install_cmd = [uv, "pip", "install", "--python", python,
+                           *install_args]
+        rc, out, err = run(install_cmd, cwd=repo, env=env, timeout=3600)
+        _append(install_log, "--- install selected precompiled artifact ---\n"
                              f"{out}{err}")
         if rc != 0:
+            if _BUSY_INSTALL_RE.search(out + err):
+                # A leftover holder raced our release (or mapped the file
+                # between the scan and the rename). Release again and use
+                # the loop's bounded attempts; a busy target is transient,
+                # every other failure class stays fail-fast.
+                holders = release_venv_holders(venv_root, log=log)
+                log(f"Install attempt {attempt}/{retries} hit a busy target "
+                    f"({len(holders)} holder(s) released); "
+                    + ("retrying..." if attempt < retries
+                       else "no attempts left."))
+                if attempt < retries:
+                    continue
             if release_mode:
                 # The release-branch tip may have no precompiled wheel: fall
                 # back to a source build (only path where that is expected).
@@ -457,6 +722,13 @@ def ensure_wheel_installed(repo: Path, commit: str, spec: WheelSpec, *,
                     f"see {install_log}")
 
         if import_ok():
+            if spec.install_url_template and not installed_wheel_matches(
+                    spec, commit, read_installed_version(spec, python=python,
+                                                        run=run),
+                    python=python, run=run):
+                raise WheelInstallError(
+                    f"installed wheel provenance does not match {commit[:12]}; "
+                    f"see {install_log}")
             log(f"{spec.package} install completed and import validation passed.")
             return True
         log(f"Import validation failed (attempt {attempt}/{retries}); "
@@ -473,6 +745,95 @@ def ensure_wheel_installed(repo: Path, commit: str, spec: WheelSpec, *,
     raise WheelInstallError(
         f"import validation still fails after {retries} reinstall attempt(s) "
         f"for {commit[:12]}{hint}; see {import_check_log}")
+
+
+# -- baseline runtime ----------------------------------------------------------
+
+def _clone_tree_hardlinked(src: Path, dst: Path) -> bool:
+    """Hardlink clone (near-zero disk, same filesystem). uv replaces files
+    by rename, which breaks the links — the campaign venv is never modified
+    through the clone."""
+    rc, _, err = _run(["cp", "-al", str(src), str(dst)], timeout=1800)
+    if rc != 0:
+        _log(f"baseline-venv clone failed: {err.strip()}")
+        return False
+    return True
+
+
+def ensure_baseline_venv(
+        target_venv: Path, spec: WheelSpec, upstream: Path,
+        baseline_commit: str, *,
+        uv: str = "uv",
+        run: RunFn = _run,
+        clone: Callable[[Path, Path], bool] = _clone_tree_hardlinked,
+        log: Callable[[str], None] = _log) -> Path | None:
+    """A runtime clone of the TARGET venv carrying the BASELINE commit's
+    wheel, for main-worktree baseline runs.
+
+    A main-tracking campaign's wheel routinely removes symbols the target
+    repo's main still imports, so a baseline sharing the campaign venv dies at conftest
+    import — and every pre-existing failure then reads as a regression
+    (run-202601012: tiny_model_tests' gated-model setup errors). The
+    baseline question has always been "does the target repo's main fail this test
+    against the wheel main was LAST aligned to"; this builds exactly that
+    runtime: hardlink-clone the campaign venv (identical deps), swap in
+    the baseline wheel from a throwaway worktree of the upstream at the
+    baseline commit. Returns None on any failure — a missing baseline
+    runtime keeps the loop's regression-preserving default and must never
+    read as pre-existing."""
+    import shutil
+
+    target_venv = Path(target_venv)
+    if not baseline_commit:
+        return None
+    bv = target_venv.with_name(
+        f"{target_venv.name}-baseline-{baseline_commit[:12]}")
+    python = str(bv / "bin" / "python")
+    if (bv / "pyvenv.cfg").is_file():
+        installed = read_installed_version(spec, python=python, run=run)
+        if installed and version_matches_commit(installed, baseline_commit):
+            log(f"baseline venv already healthy at {bv}")
+            return bv
+    if not (Path(upstream) / ".git").exists():
+        log(f"baseline venv: upstream {upstream} is not a git checkout")
+        return None
+    if bv.exists():
+        shutil.rmtree(bv, ignore_errors=True)
+    if not clone(target_venv, bv):
+        return None
+    # the editable install builds metadata from the tree it installs, so
+    # give it a worktree of the upstream AT the baseline commit
+    wt = bv.parent / (bv.name + "-src")
+    rc, _, err = run(["git", "-C", str(upstream), "worktree", "add",
+                      "--detach", str(wt), baseline_commit], timeout=600)
+    if rc != 0:
+        log(f"baseline worktree add failed: {err.strip()}")
+        shutil.rmtree(bv, ignore_errors=True)
+        return None
+    try:
+        run([uv, "pip", "uninstall", "--python", python, spec.package],
+            cwd=wt)
+        env = dict(os.environ)
+        env.update({key: value.replace("{commit}", baseline_commit)
+                          .replace("{variant}", spec.variant)
+                    for key, value in spec.install_env.items()})
+        rc, _, err = run([uv, "pip", "install", "--python", python,
+                          "-e", "."], cwd=wt, env=env, timeout=3600)
+        if rc != 0:
+            log(f"baseline wheel install failed: {err.strip()[-300:]}")
+            shutil.rmtree(bv, ignore_errors=True)
+            return None
+        rc, _, err = run([python, "-c", build_import_check_snippet(spec)],
+                         cwd=wt)
+        if rc != 0:
+            log(f"baseline venv import check failed: {err.strip()[-200:]}")
+            shutil.rmtree(bv, ignore_errors=True)
+            return None
+    finally:
+        run(["git", "-C", str(upstream), "worktree", "remove",
+             "--force", str(wt)], timeout=600)
+    log(f"baseline venv ready at {bv} (wheel {baseline_commit[:12]})")
+    return bv
 
 
 # -- Dockerfile pin -----------------------------------------------------------

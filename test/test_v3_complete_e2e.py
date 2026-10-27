@@ -195,7 +195,9 @@ def test_full_mode_complete_run_to_current_terminal(complete_env,
     tests + precommit + push gate — then the CI step BLOCKS on the
     declared provider-token capability gap (offline: no CI token). Pins
     §3.1 row 3: RUN_REPORT via the terminal-report finalizer, lock
-    release, scratch teardown."""
+    release, scratch KEPT (a blocked run is resumable and the venv's
+    editable vllm resolves into the scratch — run-202601012's wholesale
+    "No module named 'vllm'" on resume)."""
     env = complete_env
     from infermatrix_copilot.engine.steps import rebase_v3
     from infermatrix_copilot.rebase_engine import module_rebase as mr
@@ -252,7 +254,8 @@ def test_full_mode_complete_run_to_current_terminal(complete_env,
     assert data["tests"]["precommit"]["result"] == "passed"
     assert data["upstream_commit"] == env.head
     # §3.1 row 3: blocked BEFORE the report step — the terminal-report
-    # finalizer supplies RUN_REPORT; locks release; the scratch tears down
+    # finalizer supplies RUN_REPORT; locks release; the scratch STAYS (the
+    # run is resumable; only a clean "done" discards it)
     assert not (run_dir / "RUN_REPORT.md").exists()
     asyncio.run(lifecycle.finalize(run_dir, outcome))
     report = (run_dir / "RUN_REPORT.md").read_text()
@@ -261,7 +264,17 @@ def test_full_mode_complete_run_to_current_terminal(complete_env,
         probe = CheckoutLock(checkout, name)
         assert probe.acquire(blocking=False) is True, name
         probe.release()
-    assert not (run_dir / "upstream_scratch").exists()
+    assert (run_dir / "upstream_scratch").is_dir()
+    asyncio.run(lifecycle.finalize(run_dir, done)) if False else None
+    # (re-register teardown for the done path via the module helper)
+    async def _done_finalize():
+        from infermatrix_copilot.engine.steps.rebase_v3 import (
+            _SCRATCH_REGISTERED,
+        )
+        _SCRATCH_REGISTERED.discard(str(run_dir))
+        for fn in list(lifecycle._finalizers.get(str(run_dir), [])):
+            await fn(done)
+    asyncio.run(_done_finalize())
 
 
 # ── remote_ci: the wired phase 4 ─────────────────────────────────────────────
@@ -381,7 +394,8 @@ def test_remote_ci_complete_run_green(complete_env, settings, tmp_path,
     # client first, then the baseline-pipeline client)
     assert [(c[1], c[2]) for c in clients] == \
         [("vllm", "vllm-omni-release"), ("vllm", "vllm-omni-rebase")]
-    assert clients[0][3] == {"NIGHTLY": "1", "RUN_HUNYUAN_IMAGE3_PERF": "1"}
+    assert clients[0][3] == {"NIGHTLY": "1", "RUN_HUNYUAN_IMAGE3_PERF": "1",
+                             "EMAIL_DISTRIBUTION": "0"}
     assert (run_dir / "RUN_REPORT.md").exists()
     asyncio.run(lifecycle.finalize(run_dir, outcome))
     probe = CheckoutLock(env.repo, "omni")
@@ -466,3 +480,30 @@ def test_remote_ci_failure_rules_needs_human(complete_env, settings,
     # row 2 ordering: the report step ran BEFORE the terminal ruling
     assert (run_dir / "RUN_REPORT.md").exists()
     asyncio.run(lifecycle.finalize(run_dir, outcome))
+
+
+def test_scratch_teardown_discards_only_on_clean_done(tmp_path):
+    """Blocked/crashed runs keep their upstream scratch: they are resumable
+    and the venv's editable vllm resolves into it (run-202601012's resumed
+    test loop died wholesale on `No module named 'vllm'` otherwise)."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from infermatrix_copilot.engine import lifecycle
+    from infermatrix_copilot.engine.steps.rebase_v3 import (
+        _SCRATCH_REGISTERED, _register_scratch_teardown,
+    )
+    run_dir = tmp_path / "run"
+    scratch = tmp_path / "run" / "upstream_scratch"
+    scratch.mkdir(parents=True)
+    ctx = SimpleNamespace(run_dir=run_dir)
+    _SCRATCH_REGISTERED.discard(str(run_dir))
+    _register_scratch_teardown(ctx, scratch)
+
+    asyncio.run(lifecycle.finalize(run_dir, SimpleNamespace(status="blocked")))
+    assert scratch.is_dir(), "blocked run must keep its scratch"
+
+    _SCRATCH_REGISTERED.discard(str(run_dir))
+    _register_scratch_teardown(ctx, scratch)
+    asyncio.run(lifecycle.finalize(run_dir, SimpleNamespace(status="done")))
+    assert not scratch.exists(), "clean done discards the scratch"

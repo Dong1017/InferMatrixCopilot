@@ -197,6 +197,37 @@ def test_tier1_fatal_does_not_match_nonfatal_prose(patterns):
     assert patterns.last_match(["fatal NCCL watchdog error"], "critical")
 
 
+@pytest.mark.parametrize("line", [
+    '  File "/repo/omni_base.py", line 547, in _raise_nonfatal_error_message',
+    "    self._raise_nonfatal_error_message(result)",
+    "nonfatal client input validation error",
+    "non-fatal RPC error request_id=other",
+    "tests/x.py::test_non_fatal_client_error",
+])
+def test_tier1_fatal_does_not_kill_expected_error_identifiers(patterns,
+                                                            tmp_path, line):
+    log = tmp_path / "test.log"
+    log.write_text(line + "\n--- Running test: invalid_field_values\nPASSED\n")
+    killed = []
+    wd = LogWatchdog(patterns, log, 123, "tests", kill_fn=killed.append)
+    assert not wd.check_once()
+    assert killed == []
+
+
+@pytest.mark.parametrize("line", [
+    "FATAL: engine core died", "[FATAL] engine core died",
+    "fatal NCCL watchdog error", "FATAL ERROR: process terminated",
+])
+def test_tier1_fatal_still_kills_real_messages(patterns, tmp_path, line):
+    log = tmp_path / "test.log"
+    log.write_text(line + "\n")
+    killed = []
+    wd = LogWatchdog(patterns, log, 123, "tests", kill_fn=killed.append)
+    assert wd.check_once()
+    assert killed == [123]
+    assert wd.result.tier == 1
+
+
 def test_learn_promote_is_idempotent(tmp_path):
     import json
     logf = tmp_path / "d.jsonl"
@@ -568,7 +599,7 @@ def test_dry_run_returns_exact_plan(runner):
     job = TestJob(key="k", command="pytest tests/x", timeout_sec=60,
                   min_gpus=2, env={"A": "1"}, index=3)
     out = runner.run(job, {}, dry_run=True)
-    assert out.plan.argv == ["bash", "-c", "set -e\npytest tests/x"]
+    assert out.plan.argv == ["bash", "--norc", "-c", "set -e\npytest tests/x"]
     assert out.plan.env_overlay == {"A": "1"}
     assert out.plan.timeout_sec == 60 and out.plan.needs_gpu_lock
     assert out.plan.log_file.endswith("03_k.log")
@@ -1206,3 +1237,33 @@ def test_failure_and_skip_clear_stale_pass_marker(runner, tmp_path):
     runner.run(TestJob(key="flip", command="true", timeout_sec=10,
                        min_gpus=9, index=11), dict(os.environ))  # hw skip
     assert not marker.exists()  # a skip must not retain a misleading marker
+
+
+def test_ssh_bash_startup_cannot_override_target_cli_for_setup_or_tests(tmp_path):
+    import subprocess
+
+    home = tmp_path / "home"
+    target = tmp_path / "runtime" / "bin"
+    foreign = home / ".local" / "bin"
+    target.mkdir(parents=True)
+    foreign.mkdir(parents=True)
+    for directory, result in [(target, "target"), (foreign, "foreign")]:
+        cli = directory / "probe-cli"
+        cli.write_text(f"#!/bin/sh\nprintf '%s\\n' '{result}'\n")
+        cli.chmod(0o755)
+    (home / ".bashrc").write_text('export PATH="$HOME/.local/bin:$PATH"\n')
+    env = dict(os.environ, HOME=str(home), PATH=str(target) + os.pathsep + os.environ["PATH"],
+               SSH_CLIENT="127.0.0.1 12345 22", SHLVL="0", CUDA_VISIBLE_DEVICES="")
+    env.pop("BASH_ENV", None)
+    # Reproduce the original failure through Bash's real SSH startup behavior.
+    control = subprocess.run(["bash", "-c", "probe-cli"], env=env,
+                             capture_output=True, text=True, check=True)
+    assert control.stdout.strip() == "foreign"
+    runner = TestRunner(repo_root=tmp_path, tests_dir=tmp_path / "logs")
+    job = TestJob(key="cli", setup="probe-cli > setup-cli.txt",
+                  command="probe-cli > test-cli.txt", timeout_sec=10,
+                  min_gpus=0, gpu_lock=False)
+    outcome = runner.run(job, env)
+    assert outcome.rc == 0
+    assert (tmp_path / "setup-cli.txt").read_text().strip() == "target"
+    assert (tmp_path / "test-cli.txt").read_text().strip() == "target"

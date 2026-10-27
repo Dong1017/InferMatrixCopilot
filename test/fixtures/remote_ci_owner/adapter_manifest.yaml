@@ -1,0 +1,430 @@
+# Adapter zero — vllm-omni repo knowledge extracted to the edge.
+name: vllm_omni
+status: active
+created_by: human
+schema_version: 1
+# explicit capabilities beyond the derived ones (repo.path, ci.provider, ...)
+capabilities: []
+
+repo:
+  # Portable: expanded via ${VAR}/~ at read time. REPO_PATHS in .env (gitignored)
+  # takes precedence; this is only the fallback when no .env is in reach. Never
+  # hardcode a machine-specific absolute path in this committed file.
+  path: ${VLLM_OMNI_REPO}
+  full_name: vllm-project/vllm-omni
+  aliases: [vllm-omni, vllm_omni]
+  default_branch: main
+  rebase_branch: dev/vllm-align
+  language: python
+  # the TARGET repo's virtualenv — test jobs and wheel installs run in it,
+  # never in the copilot's own venv (env-expanded; empty = not configured,
+  # which BLOCKS the modes that need it rather than silently using ours)
+  venv: ${VLLM_OMNI_VENV}
+
+upstream:
+  kind: fork_tracking
+  repo_path: ${VLLM_UPSTREAM_REPO}
+  remote: origin
+  # v0.31.0 alignment targets this release branch. Wheel selection and
+  # module assignment must use its commits, including release-only fixes.
+  target_branch: releases/v0.31.0
+
+# Repo-specific slice of the SHARED, human-curated knowledge base (the vendored
+# community docs at the repo-root `knowledge/` = settings.knowledge_dir;
+# cross-repo general/ knowledge is shared, NOT nested here). Replaces the
+# retired AI profile/. Layout and consumption rules are in
+# doc/architecture/KNOWLEDGE.md. Paths below are relative to settings.knowledge_dir.
+knowledge:
+  source: zuiho-kai/claude-workflow-starter
+  repo_subdir: repos/vllm-omni    # this repo's slice within the shared base
+  briefing_docs:                  # always-on repo-specific slice: rules + nav
+  - repos/vllm-omni/rules.md
+  - repos/vllm-omni/_index.md
+  # Extended slice for ALL tiers (plan v2: the eco/performance boundary is
+  # model-only): a compact owner router; deep component/model pages remain
+  # on-demand through doc_read/doc_search.
+  briefing_docs_extra:
+  - repos/vllm-omni/review/guides/maintainer-pattern-routing.md
+  # repo-specific review checklist injected (first 4k chars) into the Strict
+  # reviewer's system prompt — triggered checks distilled from maintainer
+  # review patterns; the page lives in the shared knowledge tree so Direct
+  # and knowledge maintenance see the same source
+  review_checklist: repos/vllm-omni/review/guides/strict-review-checklist.md
+
+# upstream_paths/test_paths are the parent orchestrator's authoritative module
+# maps (config.sh §11 MODULE_VLLM_PATHS / MODULE_TEST_MAP, verbatim — shell
+# test selection). Job→module ROUTING deliberately uses a SEPARATE map (the
+# parent test_manifest.py inline flavor, rebase.test_manifest
+# .assignment_paths below): scoring over a different pattern set produces
+# different winners, so the two flavors must not be merged (DRIFT_TRIAGE #6).
+# The rebase path-sync step retargets the *_paths lists against the live
+# tree each run.
+# local_paths is the UNION of the original coarse scoping prefixes and every
+# parent MODULE_OMNI_FILES entry not already covered by them — module rebases
+# must see the parent's full scope, and prefix-matching consumers (review
+# scoping) may only ever gain coverage here, never lose it.
+modules:
+  worker_runner:
+    local_paths: [vllm_omni/worker/, vllm_omni/worker_v2/]
+    upstream_paths: [vllm/v1/worker/]
+    test_paths: [tests/worker/, tests/worker_v2/, tests/diffusion/test_diffusion_worker.py, tests/e2e/features/custom_pipeline/, tests/e2e/online_serving/test_qwen3_tts_base.py, tests/entrypoints/test_omni_sleep_mode.py]
+    import_check: "from vllm_omni.worker.gpu_model_runner import *; from vllm_omni.worker.gpu_generation_model_runner import *; from vllm_omni.worker.gpu_ar_model_runner import *; from vllm_omni.worker.gpu_ar_worker import *; from vllm_omni.worker_v2.omni_ar_model_runner import *; from vllm_omni.worker_v2.omni_generation_model_runner import *; print('Worker/Runner imports OK')"
+    wave: 1
+    risk: high
+  model_executor:
+    local_paths: [vllm_omni/model_executor/, vllm_omni/experimental/, vllm_omni/model_extras/, vllm_omni/transformers_utils/]
+    upstream_paths: [vllm/model_executor/]
+    test_paths: [tests/model_executor/, tests/diffusion/, tests/e2e/offline_inference/]
+    import_check: "from vllm_omni.model_executor.models.registry import *; print('Model Executor imports OK')"
+    wave: 1
+    risk: high
+  input_output:
+    local_paths: [vllm_omni/inputs/, vllm_omni/outputs/, vllm_omni/utils/mm_outputs.py, vllm_omni/data_entry_keys.py, vllm_omni/engine/async_omni_engine.py, vllm_omni/engine/orchestrator.py, vllm_omni/engine/serialization.py, vllm_omni/engine/stage_init_utils.py, vllm_omni/engine/stage_engine_core_client.py, vllm_omni/engine/output_processor.py, vllm_omni/request.py]
+    upstream_paths: [vllm/inputs/, vllm/renderers/, vllm/v1/engine/input_processor.py, vllm/v1/engine/output_processor.py, vllm/v1/request.py]
+    test_paths: [tests/inputs/, tests/entrypoints/test_omni_new_request_data.py, tests/engine/test_async_omni_engine_input.py, tests/test_outputs.py]
+    import_check: "from vllm_omni.inputs.data import *; from vllm_omni.inputs.preprocess import *; from vllm_omni.engine.async_omni_engine import AsyncOmniEngine; from vllm_omni.engine.orchestrator import Orchestrator; from vllm_omni.engine.serialization import serialize_additional_information; print('Input/Output imports OK')"
+    wave: 1
+  scheduler:
+    local_paths: [vllm_omni/core/]
+    upstream_paths: [vllm/v1/core/sched/]
+    test_paths: [tests/core/sched/, tests/distributed/, tests/model_executor/test_cfg_pairing.py, tests/diffusion/distributed/test_ulysses_uaa_perf.py]
+    import_check: "from vllm_omni.core.sched.omni_ar_scheduler import *; from vllm_omni.core.sched.omni_generation_scheduler import *; print('Scheduler imports OK')"
+    wave: 1
+    risk: high
+  online_serving:
+    local_paths: [vllm_omni/entrypoints/, vllm_omni/engine/]
+    upstream_paths: [vllm/entrypoints/]
+    test_paths: [tests/entrypoints/test_async_omni.py, tests/entrypoints/test_async_omni_diffusion_config.py, tests/entrypoints/openai_api/]
+    import_check: "from vllm_omni.entrypoints.omni import Omni; from vllm_omni.entrypoints.async_omni import AsyncOmni; from vllm_omni.entrypoints.openai.api_server import omni_run_server; from vllm_omni.entrypoints.openai.serving_speech import ServingSpeech; from vllm_omni.entrypoints.cli.serve import OmniServeCommand; print('Online Serving imports OK')"
+    wave: 1
+  model_config:
+    local_paths: [vllm_omni/config/, vllm_omni/deploy/, vllm_omni/engine/arg_utils.py]
+    upstream_paths: [vllm/config/, vllm/engine/arg_utils.py]
+    test_paths: [tests/entrypoints/test_stage_utils.py, tests/metrics/test_stats.py]
+    import_check: "from vllm_omni.config.model import OmniModelConfig; from vllm_omni.engine.arg_utils import OmniEngineArgs; print('Model Config imports OK')"
+    wave: 1
+  # risk high: platform code sets process-wide defaults (op priorities,
+  # capability gates) inherited by EVERY model on that platform — a 3-file
+  # 61-line default flip here is a repo-wide behavior change (PR 4964/5009
+  # class), so small diffs must still get the full review ensemble
+  platform:
+    local_paths: [vllm_omni/platforms/]
+    upstream_paths: [vllm/platforms/]
+    test_paths: [tests/]
+    import_check: "from vllm_omni.platforms.interface import OmniPlatform; from vllm_omni.platforms.cuda.platform import CudaOmniPlatform; print('Platform imports OK')"
+    wave: 1
+    risk: high
+  # shared diffusion pipeline: denoise loop, attention backends, DiT/VAE —
+  # multi-model shared code where one-model-validated changes have cross-model
+  # blast radius (kernel-provider and hub-loading changes live here)
+  diffusion:
+    local_paths: [vllm_omni/diffusion/]
+    wave: 1
+    risk: high
+  # deploy YAMLs are the serving registry: defaults and per-platform blocks
+  # (cudagraph modes, capacity) that decide runtime behavior for CLI and yaml
+  # launches alike. NOT risk-tagged: a 2-line deploy deletion measured as a
+  # precision WIN at light depth (pr4970), so tiny deploy diffs keep the
+  # cheap tier; deploy changes bundled with code still escalate via the
+  # code-side signals
+  deploy:
+    local_paths: [vllm_omni/deploy/]
+    wave: 1
+  distributed:
+    local_paths: [vllm_omni/distributed/]
+    wave: 1
+    risk: high
+  engine:
+    local_paths: [vllm_omni/engine/]
+    wave: 1
+  attention:
+    local_paths: [vllm_omni/attention/]
+    wave: 1
+  quantization:
+    local_paths: [vllm_omni/quantization/]
+    wave: 1
+  runtime_patch:
+    local_paths: [vllm_omni/patch.py]
+    test_paths: [tests/diffusion/test_inductor_divisibility_patch.py]
+    wave: 1
+    risk: high
+  # Filesystem-backed immutable host artifacts have process-wide lock, lease,
+  # durability, and fallback contracts; keep this owner explicit rather than
+  # letting generic runtime scopes silently omit it.
+  host_weight_runtime:
+    local_paths: [vllm_omni/host_weight_runtime/]
+    test_paths: [tests/host_weight_runtime/]
+    wave: 1
+    risk: high
+  sampling:
+    local_paths: [vllm_omni/sample/]
+    wave: 1
+  tokenizers:
+    local_paths: [vllm_omni/tokenizers/]
+    wave: 1
+  metrics:
+    local_paths: [vllm_omni/metrics/]
+    wave: 2
+  benchmarks:
+    local_paths: [benchmarks/, vllm_omni/benchmarks/, vllm_omni/entrypoints/cli/benchmark/]
+    upstream_paths: [vllm/benchmarks/, vllm/entrypoints/cli/benchmark/]
+    test_paths: [tests/benchmarks/test_serve_cli.py]
+    import_check: "from vllm_omni.benchmarks.serve import main; from vllm_omni.entrypoints.cli.benchmark.serve import OmniBenchmarkServingSubcommand; print('Benchmarks imports OK')"
+    wave: 2
+  fullduplex:
+    local_paths: [vllm_omni/clients/, vllm_omni/experimental/fullduplex/]
+    test_paths: [tests/clients/, tests/benchmarks/duplex/, tests/e2e/features/fullduplex/]
+    import_check: "from vllm_omni.clients.duplex import DuplexClient; print('Full-duplex client imports OK')"
+    wave: 2
+
+review_routes:
+- prefix: vllm_omni/patch.py
+  owner: tooling
+  doc: repos/vllm-omni/tooling/rules.md
+- prefix: vllm_omni/config/
+  owner: config
+  doc: repos/vllm-omni/components/configuration/rules.md
+- prefix: vllm_omni/core/
+  owner: scheduler
+  doc: repos/vllm-omni/components/scheduler/rules.md
+- prefix: vllm_omni/clients/
+  owner: serving
+  doc: repos/vllm-omni/components/serving/rules.md
+- prefix: vllm_omni/entrypoints/
+  owner: serving
+  doc: repos/vllm-omni/components/serving/rules.md
+- prefix: vllm_omni/model_executor/
+  owner: model-executor
+  doc: repos/vllm-omni/components/model-executor/rules.md
+- prefix: vllm_omni/models/
+  owner: models
+  doc: repos/vllm-omni/models/_index.md
+- prefix: vllm_omni/diffusion/
+  owner: diffusion
+  doc: repos/vllm-omni/components/diffusion/rules.md
+
+# Phase-1 rebase machinery data (consumed by rebase_engine — repo specifics
+# live here so the engine stays neutral). Sourced from the parent's config.sh
+# + tasks 10/20/01/40/35.
+rebase:
+  # behavioral hooks (plan §1.2): declared explicitly, loaded only while the
+  # adapter is active; this whole `rebase:` section is HIGH-RISK (human-only
+  # writes) so an agent can never self-install hooks
+  hooks: rebase/hooks.py
+  # The READ-ONLY parent-store read-compat `knowledge:` block (Rev 8 §9
+  # PR4c) is removed (owner decision 2026-10-01): the parent rebase-agent
+  # checkout no longer exists, so v3 runs on its own runtime + adapter seed
+  # knowledge only. An absent declaration attests nothing and blocks nothing.
+  # the shared checkout flock name: v3, the v1 backend, EXT1's external
+  # startup guard, and PR7 archival ALL take locks/<lock_name>.lock inside
+  # the checkout, so exclusion is mutual (repo data — the core stays neutral)
+  lock_name: omni
+  # phase-3.2 precommit workflow (parent config.sh §10 __precommit__ entry:
+  # command, 600s timeout, 0 GPUs; one retry — auto-fix hooks often pass on
+  # the second run)
+  precommit:
+    command: pre-commit run --all-files
+    timeout_sec: 600
+    retry_once: true
+  wheel:
+    package: vllm
+    index_url_template: "https://wheels.vllm.ai/{commit}/{variant}/{package}/"
+    variant: cu130
+    arch: x86_64
+    install_url_template: "https://wheels.vllm.ai/{commit}/vllm-0.31.0rc3-cp38-abi3-manylinux_2_28_{arch}.whl#sha256=c6d27b7da5cc6642c3f50eb1c9e93009fcf56fedd582e09a8181ed5e7d137843"
+    import_check_modules: [vllm._C_stable_libtorch, vllm._C]
+    ops_namespace: _C
+    stale_artifact_globs: ["_C*.so", "*.abi3.so", "_moe_C*.so"]
+    install_env:
+      VLLM_USE_PRECOMPILED: "1"
+      VLLM_PRECOMPILED_WHEEL_COMMIT: "{commit}"
+      VLLM_PRECOMPILED_WHEEL_VARIANT: "{variant}"
+      # Release wheels have an HTML index but no nightly metadata.json.
+      VLLM_PRECOMPILED_WHEEL_LOCATION: "https://wheels.vllm.ai/{commit}/vllm-0.31.0rc3-cp38-abi3-manylinux_2_28_x86_64.whl"
+    reinstall_retries: 3
+    pin:
+      dockerfile: docker/Dockerfile.ci
+      url_pattern: 'wheels\.vllm\.ai/[0-9a-f]{40}'
+      url_template: "wheels.vllm.ai/{commit}"
+      commit_env_var: VLLM_PRECOMPILED_WHEEL_COMMIT
+  ci:
+    # remote-CI pipeline identities (parent config: BUILDKITE_CI_PIPELINE
+    # for the build-under-test; the rebase pipeline is where the nightly /
+    # gate baseline of pre-existing main failures lives)
+    pipeline: vllm-omni-release
+    baseline_pipeline: vllm-omni-rebase
+    # trigger env (parent create_build env + trigger_and_monitor extra_env,
+    # verbatim): opts the FULL suite in — a webhook build without these
+    # runs fewer tests, which is why pushed rounds create their own build
+    build_env: {NIGHTLY: "1", RUN_HUNYUAN_IMAGE3_PERF: "1", EMAIL_DISTRIBUTION: "0"}
+    # monitor classification data (parent monitor.py constants — EXCEPT
+    # the pipeline upload/load lanes, moved to structural: their failure
+    # suppresses every dynamic test job, so ignoring it was a false-green
+    # vector in the parent; deliberate divergence, 2026-08-01 review)
+    # the org runs this pipeline SCHEDULE-ONLY (provider branch builds
+    # disabled, 2026-08); API creates need the documented
+    # ignore_pipeline_branch_filters override (write_builds scope only)
+    ignore_branch_filters: true
+    ignorable_name_patterns: ["(?i)testcase statistics",
+                              "(?i)collection & email"]
+    structural_name_patterns: ["(?i):pipeline:\\s*(upload|load)",
+                               "(?i)(upload|load).*pipeline"]
+    ignorable_log_patterns: ["401 Unauthorized", "gated model",
+                             "HFValidationError", "RepositoryNotFoundError"]
+    extra_exception_names: [ChatTemplateResolutionError, OmniEngineDeadError]
+  test_manifest:
+    # dynamic manifest building (parent test_manifest.py constants — EXCEPT
+    # yaml_dir: the live tree moved the pipelines under .buildkite/cuda/;
+    # the parent's hardcoded `.buildkite` is stale against it and would
+    # find ZERO jobs today (recorded in DRIFT_TRIAGE)
+    yaml_dir: .buildkite/cuda
+    pipelines: {test-merge.yml: merge, test-ready.yml: ready, test-nightly.yml: nightly}
+    priority_source: ready
+    # tree roots whose baseline diffs count as TEST changes
+    test_change_roots: [tests/]
+    default_queue: gpu_1_queue
+    queue_map:
+      gpu_1_queue: [1, any]
+      gpu_4_queue: [4, any]
+      mithril-h100-pool: [2, h100]
+    skip_patterns: ["(?i)perf", "(?i)accuracy", "(?i)testcase statistics",
+                    "(?i)collection & email", "(?i)benchmark.*nightly"]
+    # upstream test-layout refactor rename families (longest-first)
+    rename_suffixes: [_tts_expansion, _expansion, _tts]
+    file_ref_prefixes: [tests, vllm_omni]
+    file_tree_roots: [tests, vllm_omni]
+    # slug -> pre-run setup command (parent CI_TEST_SETUP verbatim; feeds the
+    # runner's model-download notification hook). The parent's LIVE map is
+    # currently empty — its only entries are commented STALE — so this stays
+    # {} until a job declares one.
+    setup_map: {}
+    # job→module ROUTING patterns — the parent test_manifest.py inline map
+    # VERBATIM (a third flavor, distinct from §11 MODULE_TEST_MAP above):
+    # `_assign_modules` scores file refs against these (dir prefix = 2,
+    # file = 1, best>0 wins) and the winner feeds module test plans, prompts,
+    # and debug scoping. Golden-pinned (shell_golden.json assignment_map +
+    # behavioral routing replay).
+    assignment_paths:
+      model_config: [tests/entrypoints/test_stage_utils.py, tests/metrics/test_stats.py]
+      input_output: [tests/entrypoints/test_omni_new_request_data.py, tests/engine/, tests/test_outputs.py]
+      scheduler: [tests/distributed/]
+      worker_runner: [tests/worker/, tests/worker_v2/, tests/diffusion/test_diffusion_worker.py, tests/e2e/offline_inference/custom_pipeline/, tests/e2e/features/custom_pipeline/]
+      model_executor: [tests/model_executor/, tests/diffusion/, tests/e2e/offline_inference/]
+      online_serving: [tests/entrypoints/, tests/e2e/online_serving/]
+      benchmarks: [tests/benchmarks/test_serve_cli.py]
+      platform: [tests/]
+    # ordered change-path -> module classification (parent heuristic order:
+    # entrypoints beats engine)
+    change_path_rules:
+      - [/entrypoints/, online_serving]
+      - [/engine/, input_output]
+      - [/model_executor/, model_executor]
+      - [/diffusion/, model_executor]
+      - [/worker/, worker_runner]
+      - [/distributed/, scheduler]
+      - [/benchmarks/, benchmarks]
+  testing:
+    module_max_timeout_sec: 7200
+    # root-level artifacts tests leak between runs (test_artifact_cleanup.sh
+    # TEST_ARTIFACT_GLOBS, verbatim) — gitignored upstream but pile up on disk
+    artifact_globs: ["audio_chatcmpl-*.wav", "audio_[0-9]*ch_*.wav",
+                     "test_*.wav", "output.wav", "output_*.wav",
+                     "diffusion_result_test_*.json",
+                     "diffusion_result_qwen_*.json"]
+  guard:
+    # untracked pytest-copied stage configs are auto-discarded before the
+    # dirty-tree verdict (regexes over the repo-relative path)
+    discard_untracked_patterns:
+      - '^tests/e2e/stage_configs/.*_[0-9]{6,}\.yaml$'
+      - '^tests/dfx/[^/]+/stage_configs/.*_[0-9]{6,}\.yaml$'
+  push:
+    commit_message_template: "rebase: align vllm-omni with vLLM {short}"
+    # generated outputs never reach a rebase commit (git_helpers.sh
+    # unstage_generated_outputs case patterns, fnmatch form)
+    unstage_globs: [".pytest_cache/*", ".ruff_cache/*", "__pycache__/*",
+                    "*/__pycache__/*", "htmlcov/*", "coverage.xml",
+                    ".coverage", ".coverage.*", "pytest.xml", "junit.xml",
+                    "junit-*.xml", "rebase_logs/*", "logs/*", "*.log",
+                    "*.out", "*.tmp", "*.pid", "tests/*/artifacts/*",
+                    "tests/*/outputs/*", "tests/*/tmp/*", "tests/*/.tmp/*"]
+  # upstream files whose changes signal base-class inheritance churn
+  base_class_watch_paths: [vllm/entrypoints/llm.py, vllm/v1/engine/core_client.py, vllm/engine/protocol.py, vllm/inputs/preprocess.py, vllm/v1/core/sched/scheduler.py, vllm/v1/worker/gpu_model_runner.py]
+  path_sync:
+    # curated candidate overlays (task 35): candidates are filtered against
+    # the live tree; fallback survives when none exist
+    curated:
+      local_paths:
+        input_output:
+          candidates: [vllm_omni/inputs/data.py, vllm_omni/inputs/preprocess.py, vllm_omni/engine/async_omni_engine.py, vllm_omni/engine/orchestrator.py, vllm_omni/engine/serialization.py, vllm_omni/engine/stage_init_utils.py, vllm_omni/engine/stage_engine_core_client.py, vllm_omni/engine/input_processor.py, vllm_omni/engine/output_processor.py, vllm_omni/request.py]
+          fallback: vllm_omni/inputs/data.py
+        online_serving:
+          candidates: [vllm_omni/entrypoints/omni_base.py, vllm_omni/entrypoints/omni.py, vllm_omni/entrypoints/async_omni.py, vllm_omni/entrypoints/async_omni_diffusion.py, vllm_omni/entrypoints/openai/api_server.py, vllm_omni/entrypoints/openai/serving_chat.py, vllm_omni/entrypoints/openai/serving_speech.py, vllm_omni/entrypoints/openai/utils.py]
+          fallback: vllm_omni/entrypoints/openai/api_server.py
+      test_paths:
+        model_config:
+          candidates: [tests/entrypoints/test_stage_utils.py, tests/metrics/test_stats.py, tests/entrypoints/test_omni_llm.py]
+          fallback: tests/entrypoints/test_stage_utils.py
+        input_output:
+          candidates: [tests/entrypoints/test_omni_new_request_data.py, tests/engine/test_async_omni_engine_input.py, tests/entrypoints/test_omni_input_preprocessor.py, tests/test_outputs.py]
+          fallback: tests/entrypoints/test_omni_new_request_data.py
+        online_serving:
+          candidates: [tests/entrypoints/test_async_omni.py, tests/entrypoints/test_async_omni_diffusion_config.py, tests/entrypoints/test_omni_diffusion.py, tests/entrypoints/test_omni_stage_diffusion_config.py, tests/entrypoints/openai_api/]
+          fallback: tests/entrypoints/openai_api/
+
+validation:
+  test_manifest_sources: [.buildkite/]
+  precommit: true
+  # gated-model tests (TTS/omni checkpoints) need the HF token inside agent
+  # shells — the Rev 8 §4 EXPLICIT opt-in; without it the credential scrub
+  # strips HF_TOKEN and gated-model verification fails
+  requires_hf_token: true
+
+ci:
+  provider: buildkite
+  org: vllm
+
+push:
+  default_remote: origin
+  protected_branches: [main]
+  allowed: false   # deliver via PR; never direct-push main
+  # plan §5.3 (human-gated HIGH-RISK edit): the v3 rebase pipeline may push
+  # to the REBASE BRANCH only; main stays protected regardless, guard_push
+  # remains the choke point, and ALLOW_PUSH=1 is still required at execution
+  rebase_branch_allowed: true
+  # the ONE branch the rebase pipeline may push (parent REBASE_BRANCH) —
+  # the push scope is data; v3_ci refuses any other checkout branch
+  rebase_branch: dev/vllm-align
+  # rebase-commit author identity (parent config SIGNOFF_NAME/EMAIL)
+  signoff: {name: tzhouam, email: tzhouam@connect.ust.hk}
+
+# Knowledge service (doc/features/knowledge-service.md). Human-only section:
+# switching `mode` to auto_merge is a reviewed code change, never an agent write.
+knowledge_lifecycle:
+  enabled: true
+  mode: shadow                     # shadow | auto_merge
+  knowledge_dir: repos/vllm-omni
+  intake:
+    merged_prs: true
+    copilot_runs: true
+    human_prs: true
+    daily_model_budget_usd: 50
+  release:
+    trigger: github_release
+    auditor: release_audit.py      # adapters/vllm_omni/release_audit.py
+  sweep:
+    fallback_interval_days: 30
+  upstream_visibility: public
+  circuit_breaker:
+    retire_ratio: 0.10
+    max_files: 50
+  protected_rules: []
+  calibration_set: kb-calibration   # adapters/vllm_omni/kb-calibration/cases/*.json
+  model_dir: repos/vllm-omni/models
+
+# Unit-test coverage candidates for new public functions (#164). Sources are
+# the package; tests live under tests/. Entry points and generated/registry
+# files are skipped: their coverage is end-to-end by design.
+ut_coverage:
+  source_roots: [vllm_omni/]
+  test_globs: ["tests/*", "*/test_*.py", "*/conftest.py"]
+  exclude: ["*/__init__.py", "vllm_omni/entrypoints/cli/*", "vllm_omni/version.py"]

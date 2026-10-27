@@ -145,7 +145,20 @@ class PlanGate:
         self.plan_prefix = plan_prefix
         self.gated = tuple(gated)
         self.trace = trace
-        self.open = False
+        # A harness may restart its stdio MCP process while preserving the
+        # model session. The decision file is the durable gate state; starting
+        # every replacement bridge closed forces the agent to rewrite an
+        # already-reviewed decision before it can finish or emit its signal.
+        try:
+            restored = next(
+                (path for path in Path(plan_prefix).rglob("*.decision.md")
+                 if path.is_file()), None)
+        except OSError:
+            restored = None
+        self.open = restored is not None
+        if restored is not None and self.trace is not None:
+            self.trace.record("plan_gate_opened", decision=str(restored),
+                              restored=True)
 
     def refusal(self, name: str, args: dict) -> str | None:
         """The refusal text for a call that must not run yet, else None."""
@@ -184,27 +197,42 @@ def _rebase_extra(spec: dict, trace: RunTrace, scope: ToolScope) -> dict:
     """Rebuild the adapter's rebase tool pack in the bridge process.
 
     Credentials are NOT in the spec: `api_key` comes from this process's
-    settings, and the child env for shell/pytest handlers is this process's
-    own environment (inherited from the harness), so no secret is written to
-    `run_dir/bridge/`.
+    settings. Shell handlers reconstruct the same scrubbed target env as the
+    API agent; the spec carries only the resolved venv path, not credentials
+    or a full child environment.
     """
+    from types import SimpleNamespace
+
     from .config import Settings
-    from .engine.steps.rebase_v3 import build_backends
-    from .rebase_engine.rebase_tools import (RebasePaths, build_rebase_tools,
-                                             load_tool_schemas)
+    from .engine.steps.rebase_v3 import _agent_shell_env, build_backends
+    from .rebase_engine.rebase_tools import (
+        RebasePaths,
+        build_rebase_tools,
+        load_tool_schemas,
+    )
     rb = spec["rebase"]
-    settings = Settings()
+    settings = Settings(**{
+        key: rb[field] for key, field in (
+            ("rebase_backend", "backend"),
+            ("rebase_backend_model", "backend_model")) if field in rb})
     # generic reconstruction: the spec's payload IS the dataclass's fields,
     # so naming them here would put repo vocabulary in a neutral module
     payload = dict(rb.get("paths") or {})
     if "test_roots" in payload:
         payload["test_roots"] = tuple(payload["test_roots"])
-    paths = RebasePaths(env=dict(os.environ), **payload)
     manifest: dict = {}
     mpath = rb.get("manifest_path", "")
     if mpath and Path(mpath).is_file():
         import yaml
         manifest = yaml.safe_load(Path(mpath).read_text(encoding="utf-8")) or {}
+    # The harness may not inherit a launcher-only ${VAR} override. Preserve
+    # the parent's resolved runtime without serializing its environment.
+    target_venv = rb.get("target_venv", "")
+    if not isinstance(target_venv, str):
+        raise TypeError("bridge target_venv must be a path string")
+    if target_venv:
+        manifest = {**manifest, "repo": {**(manifest.get("repo") or {}),
+                                        "venv": target_venv}}
     # `repo` here is the repo ROOT PATH — build_backends feeds it to
     # TestRunner(repo_root=...). The spec's "repo" is the repo NAME and
     # belongs in `state.task_spec.repo`; passing the name here made every
@@ -212,6 +240,25 @@ def _rebase_extra(spec: dict, trace: RunTrace, scope: ToolScope) -> dict:
     # FileNotFoundError on a relative path.
     state = dict(rb.get("state") or {})
     state.setdefault("task_spec", {"repo": spec.get("repo", "")})
+    # The harness spawned this process with an allowlisted env, so the GPU
+    # selection and model cache the parent run was granted are not here;
+    # the spec carries those two non-secret facts, handed EXPLICITLY to the
+    # env builders (agent shells and run_pytest/reproduce alike) — the
+    # process env itself is never mutated (env guardrail census).
+    host_env = rb.get("host_env") or {}
+    if not isinstance(host_env, dict) or not all(
+            isinstance(k, str) and isinstance(v, str)
+            for k, v in host_env.items()):
+        raise TypeError("bridge host_env must map str to str")
+    host_env = {k: host_env[k] for k in ("CUDA_VISIBLE_DEVICES", "HF_HOME")
+                if k in host_env}
+    ctx = SimpleNamespace(settings=settings, state=state,
+                          run_dir=Path(spec["run_dir"]))
+    adapter_dir = (Path(mpath).parent if mpath else
+                   Path(rb["tool_schemas"]).parent.parent)
+    paths = RebasePaths(
+        env=_agent_shell_env(ctx, manifest, scope.root, adapter_dir,
+                             host_env=host_env), **payload)
     backends = build_backends(
         settings=settings, state=state,
         run_dir=Path(spec["run_dir"]), trace=trace, manifest=manifest,
@@ -221,6 +268,7 @@ def _rebase_extra(spec: dict, trace: RunTrace, scope: ToolScope) -> dict:
         model=rb.get("model", ""),
         base_url=rb.get("base_url", ""),
         api_key=getattr(settings, "anthropic_api_key", "") or "",
+        host_env=host_env,
     )
     defs = load_tool_schemas(Path(rb["tool_schemas"]))
     return build_rebase_tools(defs, paths, backends), defs

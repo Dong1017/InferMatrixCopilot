@@ -86,3 +86,56 @@ def test_bridged_write_refused_in_read_only_scope(tmp_path):
     with pytest.raises(RuntimeError, match="read-only"):
         call("write_file", {"path": str(worktree / "a.txt"), "content": "x"})
     assert not (worktree / "a.txt").exists()
+
+
+def test_bridge_applies_spec_host_env_before_building_backends(tmp_path, monkeypatch):
+    """The parent's GPU grant and model cache reach the bridge through the
+    spec, not the (allowlisted) inherited environment."""
+    import os
+
+    from infermatrix_copilot import tool_bridge
+    from infermatrix_copilot.scopes import PathScope, ToolScope
+
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    monkeypatch.delenv("HF_HOME", raising=False)
+    captured: dict = {}
+
+    def fake_agent_shell_env(ctx, manifest, repo_root, adapter_dir, **kw):
+        captured["shell"] = dict(kw.get("host_env") or {})
+        return {}
+
+    def fake_build_backends(**kw):
+        captured["backends"] = dict(kw.get("host_env") or {})
+        return object()
+
+    def fake_build_rebase_tools(defs, paths, backends):
+        return {}
+
+    import infermatrix_copilot.engine.steps.rebase_v3 as rv3
+    import infermatrix_copilot.rebase_engine.rebase_tools as rt
+    monkeypatch.setattr(rv3, "_agent_shell_env", fake_agent_shell_env)
+    monkeypatch.setattr(rv3, "build_backends", fake_build_backends)
+    monkeypatch.setattr(rt, "build_rebase_tools", fake_build_rebase_tools)
+    monkeypatch.setattr(rt, "load_tool_schemas", lambda p: [])
+    schemas = tmp_path / "adapter" / "rebase" / "tool_schemas.json"
+    schemas.parent.mkdir(parents=True)
+    schemas.write_text("[]", encoding="utf-8")
+    scope = ToolScope(name="rebase-module:x", allowed_tools=frozenset(),
+                      path_scope=PathScope(writable=(), primary=()),
+                      read_only=False, root=str(tmp_path))
+    spec = {"run_dir": str(tmp_path), "repo": "vllm-omni",
+            "rebase": {"tool_schemas": str(schemas),
+                       "paths": {"omni_path": str(tmp_path),
+                                 "vllm_path": str(tmp_path)},
+                       "host_env": {"CUDA_VISIBLE_DEVICES": "1,3,4,7",
+                                    "HF_HOME": "/models"}}}
+    tool_bridge._rebase_extra(spec, trace=None, scope=scope)
+    expected = {"CUDA_VISIBLE_DEVICES": "1,3,4,7", "HF_HOME": "/models"}
+    assert captured == {"shell": expected, "backends": expected}
+    # handed over explicitly: the bridge never mutates its own process env
+    assert "CUDA_VISIBLE_DEVICES" not in os.environ and "HF_HOME" not in os.environ
+
+    bad = dict(spec, rebase={**spec["rebase"], "host_env": {"CUDA_VISIBLE_DEVICES": 7}})
+    import pytest
+    with pytest.raises(TypeError):
+        tool_bridge._rebase_extra(bad, trace=None, scope=scope)

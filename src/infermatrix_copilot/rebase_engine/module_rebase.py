@@ -67,16 +67,24 @@ class ModuleRunConfig:
     # adapter baseline ref (repo.remote/default_branch) — reaches the
     # LIVE prompt's test-plan prose (2026-08-01 neutrality audit)
     baseline_ref: str = "origin/main"
+    target_venv: str = ""         # resolved runtime path, never the full child env
 
 
-def _plan_gate_opened(run_dir: Path) -> bool:
+def _plan_gate_opened(run_dir: Path, *, plan_prefix: str = "",
+                      since_ts: float | None = None) -> bool:
     """Read `plan_done` back out of the bridge trace.
 
     The gate runs in the bridge process, so the parent cannot observe it
     directly; `PlanGate` records `plan_gate_opened` when a decision file is
-    successfully written. Absent/unreadable trace ⇒ NOT opened (the same
-    fail-closed default the in-process loop starts from)."""
+    successfully written. Production callers restrict observations to this
+    module's plan directory and this attempt's start time: another module's
+    decision or an older attempt proves nothing about the current session.
+    Bridge restarts may restore the same module's durable decision, recording
+    a new event during this attempt. Absent/unreadable trace ⇒ NOT opened."""
     import json as _json
+    import math as _math
+
+    from .agent_loop import _under_plan_dir
     tp = Path(run_dir) / "bridge_trace.jsonl"
     try:
         for line in tp.read_text(encoding="utf-8").splitlines():
@@ -84,11 +92,23 @@ def _plan_gate_opened(run_dir: Path) -> bool:
             if not line:
                 continue
             try:
-                if _json.loads(line).get("kind") == "plan_gate_opened":
-                    return True
+                event = _json.loads(line)
             except ValueError:
                 continue
-    except OSError:
+            if not isinstance(event, dict) or event.get("kind") != "plan_gate_opened":
+                continue
+            if since_ts is not None:
+                ts = event.get("ts")
+                if (not isinstance(ts, (int, float)) or not _math.isfinite(ts)
+                        or ts < since_ts):
+                    continue
+            if plan_prefix:
+                decision = event.get("decision")
+                if (not isinstance(decision, str) or ".decision.md" not in decision
+                        or not _under_plan_dir(decision, plan_prefix)):
+                    continue
+            return True
+    except (OSError, UnicodeError):
         return False
     return False
 
@@ -130,6 +150,7 @@ def _native_writes(root: str, run_dir: Path, before: dict[str, int],
     contract rather than merely bypassing the bookkeeping.
     """
     import json as _json
+    import math as _math
 
     bridged: set[str] = set()
     gate_ts: float | None = None
@@ -143,13 +164,17 @@ def _native_writes(root: str, run_dir: Path, before: dict[str, int],
                 d = _json.loads(line)
             except ValueError:
                 continue
-            if d.get("ts", 0) < since_ts:
+            if not isinstance(d, dict):
+                continue
+            ts = d.get("ts")
+            if (not isinstance(ts, (int, float)) or not _math.isfinite(ts)
+                    or ts < since_ts):
                 continue
             if d.get("kind") == "plan_gate_opened" and gate_ts is None:
-                gate_ts = float(d.get("ts") or 0) or None
+                gate_ts = float(ts)
             if d.get("kind") == "tool_call" and d.get("path"):
                 bridged.add(str(d["path"]))
-    except OSError:
+    except (OSError, UnicodeError):
         pass
 
     native, pre_gate = [], []
@@ -160,6 +185,23 @@ def _native_writes(root: str, run_dir: Path, before: dict[str, int],
         if gate_ts is not None and mtime_ns / 1e9 < gate_ts:
             pre_gate.append(path)
     return sorted(native), sorted(pre_gate)
+
+
+def _host_env(config) -> dict[str, str]:
+    """The non-secret host facts a bridge process must inherit from the
+    parent: the scheduler's GPU selection and the model cache location."""
+    out: dict[str, str] = {}
+    for key, value in (("CUDA_VISIBLE_DEVICES", getattr(config, "cuda_devices", "")),
+                       ("HF_HOME", getattr(config, "hf_home", ""))):
+        if value:
+            out[key] = str(value)
+    return out
+
+
+def _is_read_audit_note(refusal: str) -> bool:
+    """A session-audit read-containment note (`audit: read outside session
+    roots: ...`), as opposed to a write audit or a session failure."""
+    return refusal.startswith("audit: ") and "outside session roots" in refusal
 
 
 async def _harness_attempt(prompt: str, *, module: str, config,
@@ -196,23 +238,70 @@ async def _harness_attempt(prompt: str, *, module: str, config,
             "tool_schemas": str(Path(config.script_dir) / "tool_schemas.json"),
             "manifest_path": config.manifest_path,
             "model": config.model,
+            "backend": config.backend,
+            "backend_model": config.backend_model,
             # prebuilt upstream: serializing the checkout paths HERE would
             # add repo-specific vocabulary to a neutral core module
             "paths": dict(config.paths_spec or {}),
+            "target_venv": getattr(config, "target_venv", ""),
+            # Host facts the bridge cannot recover from its own environment:
+            # the harness CLI is spawned with an allowlisted env, so the
+            # bridge's `os.environ` carries neither the GPU selection the
+            # scheduler granted this run nor the model cache. Without them
+            # bridge-run tests see every GPU on the host.
+            "host_env": _host_env(config),
             "state": dict(config.state_slice or {}),
             "plan_write_prefix": plan_prefix if require_plan_review else "",
             "gated_tools": list(GATED_TOOL_NAMES),
         })
+    signal_dir = getattr(config, "signal_dir", "")
+    done_path = (Path(signal_dir) / f"module.{module}.done"
+                 if signal_dir else None)
+    fail_path = (Path(signal_dir) / f"module.{module}.fail"
+                 if signal_dir else None)
+    if done_path is not None:
+        # Debug templates may retain an older signal location. Supply the
+        # same authoritative path on every attempt, including retries.
+        prompt += ("\n\nAuthoritative completion signal for this attempt: "
+                   f"write exactly `MODULE_DONE {module}` as the first line "
+                   f"of `{done_path}` only after verification succeeds. "
+                   "Rewrite it during this attempt; an older file does not "
+                   "count. This path overrides other signal locations.")
     # NEVER forward the tier model: it names a raw-API model the harness
     # does not have. Empty lets the transport fall back to its own setting.
+    # The module contract rides the USER channel (stdin for claude-code):
+    # evidence packs (broken imports + test plans) exceed the 128KiB argv
+    # limit a --system-prompt element is bound by, and every other harness
+    # transport already folds the contract into the user turn.
     req = AgentSessionRequest(
-        system=prompt, prompt="", scope=scope,
+        system="", prompt=prompt, scope=scope,
         model=config.backend_model or "",
         max_iters=config.max_turns, timeout_s=config.harness_timeout_s,
         run_dir=run_dir, step_name=f"rebase.module.{module}",
-        bridge_spec_path=spec_path, trace=trace)
+        bridge_spec_path=spec_path, trace=trace,
+        # a module agent must read the upstream checkout and the installed
+        # target runtime; a session audit that only knows the edit root and
+        # the run dir would flag every one of those reads
+        read_roots=tuple(p for p in (
+            getattr(config, "vllm_path", ""),
+            getattr(config, "target_venv", "")) if p))
     import time as _time
 
+    # A normal harness exit is only transport success. The prompt requires
+    # an explicit completion file, rewritten by THIS attempt; older attempts
+    # may have left a signal even when the write audit rejected their work.
+    def signal_snapshot(path):
+        if path is None:
+            return None
+        try:
+            stat = path.stat()
+            return (stat.st_ino, stat.st_mtime_ns, stat.st_ctime_ns,
+                    path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError):
+            return None
+
+    prior_done = signal_snapshot(done_path)
+    prior_fail = signal_snapshot(fail_path)
     before = _changed_files(scope.root)
     started = _time.time()
     outcome = await asyncio.to_thread(transport.run_session, req)
@@ -231,11 +320,57 @@ async def _harness_attempt(prompt: str, *, module: str, config,
                 "text": ("harness wrote product files BEFORE the plan-review "
                          "decision, bypassing the bridge: "
                          + ", ".join(pre_gate[:10]))}
-    return {"done": not getattr(outcome, "truncated", False),
-            "text": getattr(outcome, "text", "") or "",
+    current_done = signal_snapshot(done_path)
+    current_fail = signal_snapshot(fail_path)
+    signaled = (current_done is not None and current_done != prior_done
+                and current_done[3].splitlines()[:1]
+                == [f"MODULE_DONE {module}"])
+    failed = current_fail is not None and current_fail != prior_fail
+    truncated = bool(getattr(outcome, "truncated", False))
+    # Refusals are typed provider outcomes (session failures, write audits),
+    # not words in the final prose. A marker cannot override them. Read-
+    # containment audit notes are different: they are the detective record
+    # of a harness whose native read tools cannot be disabled, and a read
+    # of, say, the stdlib must not void twelve hours of verified work. They
+    # stay disclosed (trace + result text) without vetoing completion.
+    all_refusals = [str(r) for r in (getattr(outcome, "refusals", ()) or ())]
+    audit_reads = [r for r in all_refusals if _is_read_audit_note(r)]
+    refusals = [r for r in all_refusals if not _is_read_audit_note(r)]
+    plan_done = (not require_plan_review or bool(plan_prefix) and
+                 _plan_gate_opened(run_dir, plan_prefix=plan_prefix,
+                                   since_ts=started))
+    done = signaled and not failed and not truncated and not refusals and plan_done
+    result_text = getattr(outcome, "text", "") or ""
+    if audit_reads:
+        if trace is not None:
+            trace.record("harness_read_audit", step=f"rebase.module.{module}",
+                         count=len(audit_reads), notes=audit_reads[:10])
+        result_text += ("\nSession read audit (not a completion veto): "
+                        + "; ".join(audit_reads[:3]))
+    if not done:
+        reasons = []
+        if not signaled:
+            reasons.append(f"a fresh exact MODULE_DONE {module} signal is required")
+        if failed:
+            reasons.append("a fresh failure signal was written")
+        if truncated:
+            reasons.append("the session was truncated")
+        if refusals:
+            reasons.append("provider refusal(s): " + "; ".join(
+                str(refusal) for refusal in refusals[:3]))
+        if not plan_done:
+            reasons.append("this attempt did not open its module's plan-review gate")
+        result_text += "\nHarness completion rejected: " + "; ".join(reasons) + "."
+    return {"done": done,
+            "session_completed": not truncated,
+            "text": result_text,
             "turns": int(getattr(outcome, "iterations", 0) or 0),
-            "plan_done": (not require_plan_review
-                          or _plan_gate_opened(run_dir))}
+            "plan_done": plan_done}
+
+
+def _append_agent_log(path: str, text: str) -> None:
+    with Path(path).open("a", encoding="utf-8") as log:
+        log.write(text)
 
 
 async def rebase_module(
@@ -262,11 +397,21 @@ async def rebase_module(
     except Exception:  # noqa: BLE001 - knowledge layer never blocks a rebase
         guidance = ""
 
+    state = config.state_slice or {}
+    params = (state.get("task_spec") or {}).get("params") or {}
+    assignment_baseline = (config.last_rebase_vllm_commit
+                           or state.get("last_rebase_upstream_commit", "")
+                           or params.get("last_rebase_commit", ""))
+    target_branch = (state.get("target_branch", "")
+                     or params.get("target_branch", ""))
+    upstream_commit = (state.get("upstream_commit", "")
+                       or params.get("upstream_commit", "")
+                       or params.get("force_upstream_commit", ""))
     prompt = build_module_prompt(
         module, prompt_data,
         vllm_path=config.vllm_path, omni_path=config.omni_path,
         script_dir=config.script_dir,
-        last_rebase_vllm_commit=config.last_rebase_vllm_commit,
+        last_rebase_vllm_commit=assignment_baseline,
         cuda_devices=config.cuda_devices, hf_home=config.hf_home,
         log_dir=config.log_dir, signal_dir=config.signal_dir,
         rebase_run_id=substate.run_id,
@@ -275,7 +420,8 @@ async def rebase_module(
         broken_imports=broken_imports, module_test_plan=module_test_plan,
         adaptive_guidance=guidance, live=True,
         baseline_ref=config.baseline_ref,
-        test_timeout_sec=config.test_timeout_sec)
+        test_timeout_sec=config.test_timeout_sec,
+        target_branch=target_branch, upstream_commit=upstream_commit)
 
     substate.update({"modules": {module: {"status": "running"}}})
     agent_log = str(Path(config.log_dir) / "agents" / f"module-{module}.log")
@@ -285,10 +431,17 @@ async def rebase_module(
     async def _attempt(p: str, *, require_plan_review: bool = True) -> dict:
         try:
             if config.backend and config.backend != "api":
-                return await _harness_attempt(
+                _append_agent_log(
+                    agent_log, f"\nHarness agent started (provider={config.backend}, "
+                    f"requested_model={config.backend_model})\n")
+                outcome = await _harness_attempt(
                     p, module=module, config=config, scope=scope, trace=trace,
                     tool_defs=tool_defs, plan_prefix=plan_prefix,
                     require_plan_review=require_plan_review)
+                _append_agent_log(
+                    agent_log, f"Harness result (done={outcome.get('done')}):\n"
+                    f"{outcome.get('text', '')}\n")
+                return outcome
             return await run_agent_loop(
                 client, p, model=config.model, tool_defs=tool_defs,
                 extra_tools=extra_tools, scope=scope, trace=trace,

@@ -103,17 +103,13 @@ def test_templates_are_parent_verbatim():
             continue
         assert tmpl.read_bytes() == (parent / tmpl.name).read_bytes(), tmpl.name
     live = (REBASE_DATA / "templates" / "module_rebase.live.prompt.tmpl")
-    parity = (REBASE_DATA / "templates" / "module_rebase.prompt.tmpl")
     live_text = live.read_text()
     start = live_text.index("## Release transition and adjacent API checks")
     end = live_text.index("**Engine / unpack:**", start)
     assert "real upstream constructor" in live_text[start:end]
-    without_live_guidance = live_text[:start] + live_text[end:]
-    diff = [(a, b) for a, b in zip(parity.read_text().splitlines(),
-                                   without_live_guidance.splitlines()) if a != b]
-    assert len(diff) == 2
-    assert all("imx-omni-pytest" in b and "run_module_pytest" in a
-               for a, b in diff)
+    assert "{SCRIPT_DIR}/api_drift_guard.py" in live_text
+    assert "Do not search the shared filesystem" in live_text
+    assert "run_import_check" in live_text
 
 
 # -- request-shape golden ------------------------------------------------------
@@ -143,6 +139,7 @@ def test_live_prompt_uses_shipped_wrapper_with_sound_quoting(prompt_data):
     not exist here) and quote the import-check payload so bash preserves the
     inner quotes — both recorded divergences from the parent bytes."""
     import shlex
+    import sys
     live = build_module_prompt("model_config", prompt_data, live=True,
                                **GOLDEN_KWARGS)
     assert "run_module_pytest.sh" not in live
@@ -153,9 +150,97 @@ def test_live_prompt_uses_shipped_wrapper_with_sound_quoting(prompt_data):
     parts = shlex.split(line)
     assert parts[:3] == ["imx-omni-pytest", "python", "-c"]
     assert "print('OK')" in parts[3]      # inner quotes SURVIVE
+    cleanup = next(ln.strip() for ln in live.splitlines()
+                   if "kill_tree([pid], identity=" in ln)
+    cleanup_parts = shlex.split(cleanup)
+    assert cleanup_parts[:2] == [sys.executable, "-c"]
+    assert cleanup_parts[-2:] == ["<verified_orphan_pid>",
+                                  "<verified_orphan_starttime_ticks>"]
+    assert "bash /scripts/lib/kill_test_tree.sh" not in live
     # parity mode still reproduces the parent's (broken) quoting for goldens
     parity = build_module_prompt("model_config", prompt_data, **GOLDEN_KWARGS)
     assert "run_module_pytest.sh" in parity
+
+
+def test_live_prompt_keeps_bridge_polls_below_client_deadline(prompt_data):
+    """The bridge call deadline is the harness CLI's, not ours: the prompt
+    must neither promise a session-long timeout nor hard-code one vendor's
+    number, and must keep the detached-launch + short-poll discipline."""
+    live = build_module_prompt("model_config", prompt_data, live=True,
+                               **GOLDEN_KWARGS)
+    assert "client-side deadline set by the harness CLI" in live
+    assert "cursor-agent's is fixed by the CLI" in live
+    assert "follows the harness session budget" not in live
+    assert "30-second tool deadline" not in live
+    assert "under 20 seconds each" in live
+    assert "sleep 30" not in live
+    assert "Cap per-call sleep at 60 s" not in live
+    assert "`setsid -f sh -c" in live
+    assert "plain `nohup ... &` is insufficient" in live
+    assert "echo $$ > \"$1\"; shift; exec \"$@\"" in live
+    assert "bare stdin reader" in live
+    assert "TEST_TIMEOUT_SEC=7200" in live  # GOLDEN_KWARGS default budget
+    assert "stops this attempt's background processes" in live
+
+
+def test_live_worker_prompt_covers_both_implementations(prompt_data):
+    live = build_module_prompt("worker_runner", prompt_data, live=True,
+                               **GOLDEN_KWARGS)
+    assert "vllm_omni/worker/ vllm_omni/worker_v2/" in live
+    assert "imx-omni-pytest -vv -s tests/worker_v2/" in live
+    assert "from vllm_omni.worker_v2.omni_ar_model_runner import *" in live
+    assert "from vllm_omni.worker_v2.omni_generation_model_runner import *" in live
+    for path in prompt_data.module_test_map["worker_runner"]:
+        if path == "tests/e2e/offline_inference/custom_pipeline/":
+            path = "tests/e2e/features/custom_pipeline/"
+        assert f"imx-omni-pytest -vv -s {path}" in live
+    # Historical maps/goldens remain stable while operational scope grows.
+    parity = build_module_prompt("worker_runner", prompt_data, **GOLDEN_KWARGS)
+    assert "worker_v2" not in parity
+    assert parity == (GOLDENS / "module_prompt_worker_runner.txt").read_text()
+
+
+def test_live_scheduler_prompt_covers_actual_queue_and_streaming_owners(prompt_data):
+    live = build_module_prompt("scheduler", prompt_data, live=True,
+                               **GOLDEN_KWARGS)
+    assert "vllm_omni/core/sched/" in live
+    assert "imx-omni-pytest -vv -s tests/core/sched/" in live
+    assert "imx-omni-pytest -vv -s tests/model_executor/test_cfg_pairing.py" in live
+    assert "imx-omni-pytest -vv -s tests/distributed/" in live
+    parity = build_module_prompt("scheduler", prompt_data, **GOLDEN_KWARGS)
+    assert "imx-omni-pytest -vv -s tests/core/sched/" not in parity
+
+
+def test_live_prompt_validator_path_exists_without_parent_checkout(prompt_data):
+    live = build_module_prompt(
+        "worker_runner", prompt_data, live=True,
+        **{**GOLDEN_KWARGS, "script_dir": str(REBASE_DATA)})
+    validator = REBASE_DATA / "api_drift_guard.py"
+    assert validator.is_file()
+    assert f"python3 '{validator}'" in live
+    assert "Do not search the shared filesystem" in live
+    assert "use `run_import_check`" in live
+    assert "Run **41**" not in live
+    assert "re-run** `tasks/42_check_upstream_imports.sh`" not in live
+
+
+def test_live_input_prompt_includes_renderer_changes_and_input_regressions(prompt_data):
+    git_calls = []
+
+    def git(args, cwd):
+        git_calls.append(args)
+        return "commit" if args[0] == "rev-parse" else "renderer change"
+
+    live = build_module_prompt("input_output", prompt_data, live=True,
+                               run_git=git, **GOLDEN_KWARGS)
+    assert "vllm/renderers/" in next(args for args in git_calls if args[0] == "log")
+    assert "imx-omni-pytest -vv -s tests/inputs/" in live
+    parity = build_module_prompt("input_output", prompt_data, **GOLDEN_KWARGS)
+    from dataclasses import replace
+    historical = replace(prompt_data, live_module_overrides={})
+    assert parity == build_module_prompt("input_output", historical, **GOLDEN_KWARGS)
+    assert "vllm/renderers/" not in parity
+    assert "imx-omni-pytest -vv -s tests/inputs/" not in parity
 
 
 def test_module_pytest_mutex_without_gpus_still_runs(tmp_path, monkeypatch):

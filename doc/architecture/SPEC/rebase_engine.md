@@ -36,7 +36,9 @@
 | `push_gate.py` | 推送闸裁决：结构性 vs 断言失败的确定性分类（Rev 8 §2.3） |
 | `push_to_ci.py` | commit+push-to-CI 编排：preflight、WAL 卫生、C4 双闸、单一传输 |
 | `push_wal.py` | 推送 WAL：先落盘的 intent、精确 OID 三分对账、回滚数据 |
+| `remote_ci_owner.py` | 远端 CI 作业 → 模块归属解析（本地与远端作业名、pipeline 路由） |
 | `rebase_tools.py` | 父级 20 工具 + `doc_search`/`doc_read`（追加在父级顺序之后）作为 `ToolDef`；未接线后端**可见地**失败 |
+| `wheel.py` | 预编译 wheel 选取与安装：目标分支游走、baseline rev-parse、venv 持有者释放、EBUSY 重试、scratch 自清理 |
 | `runctx.py` | `RebaseRuntime` + `CheckoutLock`（flock+卫生盾）+ 按事件循环的注册表 |
 | `substate.py` | 可持久、单写者、merge-not-overwrite 的 `state.json`（run_id 戳） |
 | `test_loop.py` | 本地测试环：逐测试恢复、baseline 复跑分流回归、类型化 skip |
@@ -172,3 +174,20 @@ run-20261024 里这些链在 wave 1 完成后又占着 run 的 GPU 锁约 7 小�
   整套约 4 小时，旧的 7200s 包装器永远到不了终态），渲染为 prompt 的
   `{MODULE_TEST_TIMEOUT_SEC}` 并写进每次 attempt 末尾的预算说明。
 - `harness_timeout_s` 不再硬编码 7200，取 `settings.rebase_harness_timeout_sec`。
+
+## harness 完成契约、读审计与宿主事实（2026-10-27，自 feat/rebase-main-v0320 移植）
+
+- `_harness_attempt` 的完成不再等于"会话未截断"：需要**本次 attempt** 重写的
+  `signals/module.<m>.done`（首行 `MODULE_DONE <m>`）、没有新的 `.fail`、未截断、
+  没有 typed refusal、且本模块的计划闸在本次 attempt 内打开。零事件的 CLI 崩溃
+  曾被读成 done 并通过 wave gate。
+- typed refusal 中，`audit: <tool> outside session roots: ...`（读包含）**不**否决
+  完成：那是原生读工具无法关闭的 harness 的侦测记录，写进 trace
+  （`harness_read_audit`）与结果文本。写审计与会话失败仍然否决。
+- 会话请求带 `read_roots=(vllm_path, target_venv)`；桥 spec 带
+  `host_env={CUDA_VISIBLE_DEVICES, HF_HOME}`（见 `tool_bridge`）。
+- `module_pytest.py`：`rebase.testing.module_max_timeout_sec` 是 `TEST_TIMEOUT_SEC`
+  的上限（vllm-omni 与计划预算同为 21600），`module_test_platform` 过滤非本平台
+  的 pytest 项。
+- `wheel.py`：`release_venv_holders`（仅 venv 结构存在时、排除调用者祖先链）、
+  EBUSY/ETXTBSY 重试、baseline rev-parse 前置校验、分支重置前 `git clean -ffd`。

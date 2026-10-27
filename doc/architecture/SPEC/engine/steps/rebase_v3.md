@@ -51,6 +51,9 @@ step —— 薄的受治理 wrapper，substate-first、类型化失败、发布�
   lifecycle finalizer，每条退出路径都放。可变操作只碰 run_dir 内的
   `git clone --shared` **scratch** upstream；canonical 路径绝不被采纳为可变
   树；resume 采纳幸存 scratch 时重新注册 teardown。
+- full 模式的模块与 debug 入口也重新确保 scratch：wheel/assign 已 checkpoint
+  时仍按 `upstream_commit` 恢复 checkout；不得改用 canonical HEAD，checkout
+  失败返回 BLOCKED（debug 返回结构性 error）。
 - **C3**（`_module_scope`）：repo 树 + run dir 是硬可写墙；模块
   `local_paths` + `plans/` 是 primary；未知模块得到永不匹配的 primary ——
   它的每次仓库写都被记录 out-of-scope，而非静默在圈内。
@@ -111,3 +114,22 @@ harness 会话通过 MCP tool bridge 拿到同一套工具面，plan gate 在派
   的 `finally`，都调用 `rebase_engine.processes.cleanup_run_processes`：
   上一个 attempt 留下的后台 pytest 链不能把 GPU 锁带进下一个 step
   （run-20261024 的 `GpuLockTimeout` 阻断即由此而来）。
+
+## harness tier 直通、评审路由与 scratch 生命周期（2026-10-27，自 feat/rebase-main-v0320 移植）
+
+- `_tier_client`：`target.kind == "harness"` 时返回 `(transport, target)`，只检查
+  CLI 可用与登录（`auth_gap`），不再因为空 api_key 而 BLOCKED——
+  `STRICT_BACKEND=cursor` 的 run-20261027-173249 正是在此处的前身被挡。
+- `_harness_completion_client(settings, backend)`：把 harness `complete()` 适配成
+  `messages.create` 形状，供计划评审与 wave-gate 评审在 `rebase_backend != api`
+  时使用；`stop_reason != end_turn` 抛错而不是给出裁决。评审模型 =
+  `rebase_reviewer_model`，否则 `rebase_backend_model`/`strict_backend_model`。
+- `_run_debug_agent`：harness tier 走 `_harness_attempt`（与模块 attempt 相同的
+  budgets、CUDA/HF、`target_venv`、state slice），API tier 保持 `run_agent_loop`。
+- remote_ci 的上游 commit 信号必须是 40 位 SHA，在边界拒绝。
+- scratch：只有干净 `done` 才丢弃一次性上游 checkout；blocked/崩溃的 run 可恢复，
+  其 venv 的 editable vllm 解析进 scratch。full 模式的模块/debug 入口按
+  `upstream_commit` 重新确保 scratch。
+- baseline venv（`ensure_baseline_venv`）：硬链接克隆 campaign venv 并换入
+  baseline commit 的 wheel，让"omni main 对上次对齐的 wheel 是否也失败"可问；
+  任何失败返回 None，保留保守的回归判定。

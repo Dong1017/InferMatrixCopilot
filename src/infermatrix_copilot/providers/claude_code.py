@@ -101,8 +101,36 @@ class ClaudeCodeTransport(HarnessTransport):
 
     @staticmethod
     def _parse(stdout: str) -> dict:
-        """The single JSON object from -p json output; tolerant of stray
-        warning lines before it."""
+        """The single JSON result object from -p json output; tolerant of
+        stray warning lines before OR after it. Prefer the last whole-line
+        object carrying a "result" (telemetry trails more often than it
+        leads); a stray line containing a brace must never shadow the real
+        object or the session silently parses to {} — empty text, zero
+        turns, done."""
+        text = stdout.strip()
+        if not text:
+            return {}
+        try:
+            data = json.loads(text)
+            if isinstance(data, dict):
+                return data
+        except json.JSONDecodeError:
+            pass
+        fallback: dict | None = None
+        for line in reversed(text.splitlines()):
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                data = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(data, dict):
+                if "result" in data:
+                    return data
+                fallback = fallback if fallback is not None else data
+        if fallback is not None:
+            return fallback
         start = stdout.find("{")
         if start < 0:
             return {}
@@ -178,10 +206,22 @@ class ClaudeCodeTransport(HarnessTransport):
         usage = self._usage(data)
         tool_calls, tools_used = self._bridge_activity(req.run_dir, before)
         is_error = bool(data.get("is_error"))
+        stop_reason = str(data.get("stop_reason") or "")
+        unparsed = not data
+        # A session the CLI ended badly (quota/auth/CLI error, refusal, budget
+        # stop) or whose output we could not parse is NOT a completed loop:
+        # the completion contract upstream treats truncated=True as "do not
+        # trust this attempt". refusal/max_budget additionally become typed
+        # refusals so a marker file can never override them.
+        truncated = (timed_out or is_error or unparsed
+                     or stop_reason in ("max_turns", "max_budget", "refusal"))
+        refusals = ([f"claude-code stop_reason={stop_reason}"]
+                    if stop_reason in ("refusal", "max_budget") else [])
         if req.trace is not None:
             req.trace.record(
                 "harness_session", provider=self.spec.id, step=req.step_name,
                 num_turns=data.get("num_turns"), is_error=is_error,
+                stop_reason=stop_reason or None,
                 timed_out=timed_out, cost_usd=usage.cost_usd,
                 bridge_tool_calls=tool_calls,
                 served_model=usage.served_model)
@@ -189,8 +229,8 @@ class ClaudeCodeTransport(HarnessTransport):
             text=str(data.get("result") or ""),
             iterations=int(data.get("num_turns") or 0),
             tool_calls=tool_calls,
-            truncated=timed_out or data.get("stop_reason") == "max_turns",
-            refusals=[],
+            truncated=truncated,
+            refusals=refusals,
             input_tokens=usage.input_tokens,
             output_tokens=usage.output_tokens,
             tools_used=tools_used[:40])
