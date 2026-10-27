@@ -1,6 +1,6 @@
 # rebase_engine/ —— 规范
 
-<!-- verified-against: 2026-09-29 -->
+<!-- verified-against: 2026-10-27 -->
 
 `LOC ~7500（26 个模块） · repo-rebase-v3 的原生 rebase 引擎 · refactor-status: ok`
 
@@ -31,6 +31,7 @@
 | `path_sync.py` | 模块路径图同步 + manifest modules 段重写 + L2 决定应用 |
 | `phase1_steps.py` | phase-1 组合（归类 + 路径同步），父级报告文件名不变 |
 | `plan_review.py` | L4 计划评审后端（注入的 LLM client，父级形状的结果） |
+| `processes.py` | 回收本 run 的后台测试进程（含 setsid 脱离的链）：按 `IMX_RUN_ID` + `IMX_LOG_DIR` 双标记 + 出生时间识别 |
 | `prompt_builder.py` | 模块/调试 prompt 渲染 —— 等输入下与父级字节一致（golden 钉住）；`*_live` 变体不受 parity 钉 |
 | `push_gate.py` | 推送闸裁决：结构性 vs 断言失败的确定性分类（Rev 8 §2.3） |
 | `push_to_ci.py` | commit+push-to-CI 编排：preflight、WAL 卫生、C4 双闸、单一传输 |
@@ -156,3 +157,18 @@ agent 会反复从头探索。flash 级模型在同一 module 上约需 pro 级 
 现在 infra 记录里会带上已报告的断言 id（复用 `ci_loop.extract_failed_test_ids`）。
 实例：2026-09-19 `simple_diffusion_test` 超时前已报 10 个量化断言失败，全部不可见，
 直到 Buildkite #3055 重新发现。
+
+## attempt 级进程回收与模块测试预算（2026-10-27）
+
+module agent 曾用 `setsid` 启动 pytest 链并在会话结束后留下它们继续跑：
+run-20261024 里这些链在 wave 1 完成后又占着 run 的 GPU 锁约 7 小时，
+`tests` step 等锁 3600s 后以 `GpuLockTimeout` 阻断。现在：
+- `processes.cleanup_run_processes(run_dir, run_id)` 在每次 module/debug attempt
+  结束时（包括正常返回）调用。只回收**同用户**且**同时**携带 `IMX_RUN_ID`
+  与 `IMX_LOG_DIR` 两个标记的进程；身份绑定出生时间，PID 复用不会误杀；
+  其他 run 的进程不受影响。prompt 不再教 agent 留下脱离链。
+- `ModuleRunConfig.test_timeout_sec` 来自 adapter 的
+  `rebase.testing.module_timeout_sec`（vllm-omni 为 21600：offline inference
+  整套约 4 小时，旧的 7200s 包装器永远到不了终态），渲染为 prompt 的
+  `{MODULE_TEST_TIMEOUT_SEC}` 并写进每次 attempt 末尾的预算说明。
+- `harness_timeout_s` 不再硬编码 7200，取 `settings.rebase_harness_timeout_sec`。

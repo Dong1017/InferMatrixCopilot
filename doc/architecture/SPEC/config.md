@@ -1,6 +1,6 @@
 # config.py —— 规范
 
-<!-- verified-against: 2026-10-08 -->
+<!-- verified-against: 2026-10-27 -->
 
 `LOC ~658 · 配置 · refactor-status: oversized`
 
@@ -96,6 +96,11 @@ provider 的缺省模型必须在**这一处**解析，否则 `ResolvedTarget.mo
 
 注意：tier 模型名指向 RAW-API 模型，对 harness CLI 无意义，**绝不**转发过去；
 为空时回落到 `strict_backend_model`，再回落到 harness 自身默认值。
+
+`rebase_harness_timeout_sec`（默认 7200，必须 > 0；2026-10-27）是每次 module /
+debug harness 会话的墙钟预算，取代 `ModuleRunConfig.harness_timeout_s` 原来的
+硬编码值；zcode 传输同时用它设置工具桥的 MCP `timeoutMs`。模块测试命令自身的
+`TEST_TIMEOUT_SEC` 不在这里——那是 adapter 的 `rebase.testing.module_timeout_sec`。
 
 ## 自进化接入（2026-10-04）
 

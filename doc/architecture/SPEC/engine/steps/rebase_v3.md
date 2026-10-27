@@ -1,6 +1,6 @@
 # engine/steps/rebase_v3.py —— 规范
 
-<!-- verified-against: 2026-09-29 -->
+<!-- verified-against: 2026-10-27 -->
 
 `LOC ~2204 · step 库（v3 rebase 装配层） · refactor-status: oversized`
 
@@ -100,3 +100,14 @@ harness 会话通过 MCP tool bridge 拿到同一套工具面，plan gate 在派
 `build_backends(repo=)` 收的是仓库 **ROOT 路径**（→ `TestRunner(repo_root=)`），
 不是仓库名：传名字会让 run_pytest/run_precommit/reproduce 以
 `FileNotFoundError` 静默失效，module 却报告完成。
+
+## attempt 级进程回收与测试预算注入（2026-10-27）
+
+- `_agent_shell_env` 把 adapter 的 `rebase.testing.module_timeout_sec`
+  （缺省 7200）写成 `TEST_TIMEOUT_SEC`；`_v3_module_rebase` 与 `_run_debug_agent`
+  据此填 `ModuleRunConfig.test_timeout_sec`，并用
+  `settings.rebase_harness_timeout_sec` 代替硬编码的 harness 会话预算。
+- `_ensure_checkout_locks` 取锁前、锁 finalizer 释放前，以及 `_run_debug_agent`
+  的 `finally`，都调用 `rebase_engine.processes.cleanup_run_processes`：
+  上一个 attempt 留下的后台 pytest 链不能把 GPU 锁带进下一个 step
+  （run-20261024 的 `GpuLockTimeout` 阻断即由此而来）。
