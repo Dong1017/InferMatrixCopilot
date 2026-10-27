@@ -200,13 +200,18 @@ class ZCodeTransport(HarnessTransport):
 
     # -- process plumbing ----------------------------------------------------
     @staticmethod
-    def _write_mcp_config(session: Path, spec_path: Path) -> None:
+    def _write_mcp_config(session: Path, spec_path: Path, *,
+                          timeout_s: float = 30.0) -> None:
         package_root = Path(__file__).resolve().parents[2]
         config = session / ".zcode" / "config.json"
         config.parent.mkdir()
         config.write_text(json.dumps({"features": {"memory": False}, "memory": {"use": False},
                                      "mcp": {"servers": {_BRIDGE_SERVER: {
             "type": "stdio",
+            # ZCode otherwise abandons tools after 30s, even while a valid
+            # test or nested plan review is still running in the bridge.
+            # The session deadline remains the outer bound for execution.
+            "timeoutMs": max(1, int(timeout_s * 1000)),
             "command": sys.executable,
             "args": ["-m", "infermatrix_copilot.tool_bridge",
                      "--spec", str(spec_path)],
@@ -608,7 +613,8 @@ class ZCodeTransport(HarnessTransport):
         session = Path(tempfile.mkdtemp(prefix="imc-zcode-session-"))
         try:
             if req.bridge_spec_path is not None:
-                self._write_mcp_config(session, req.bridge_spec_path)
+                self._write_mcp_config(session, req.bridge_spec_path,
+                                       timeout_s=req.timeout_s)
             header = ""
             if req.scope.root:
                 header = (f"The repository checkout is at {req.scope.root}. "

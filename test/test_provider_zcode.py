@@ -166,6 +166,18 @@ def test_run_session_plan_mode_bridge_and_parse(tmp_path, monkeypatch):
     assert session["served_model"] == "GLM-5.3-Flash"
 
 
+def test_bridge_timeout_covers_long_running_module_tools(tmp_path):
+    transport = _transport(tmp_path)
+    req = _request(tmp_path)
+    req.timeout_s = 7200
+    transport.run_session(req)
+    server = json.loads(_capture(tmp_path)["config"])["mcp"]["servers"][
+        "infermatrix-tools"]
+    # ZCode defaults to 30 seconds without this setting, abandoning valid
+    # test and plan-review calls while the bridge continues executing them.
+    assert server.get("timeoutMs", 30000) == 7_200_000
+
+
 def test_tool_outside_allowlist_is_an_audit_refusal(tmp_path):
     transport = _transport(tmp_path)
     (tmp_path / "bin" / "rogue").write_text("", encoding="utf-8")

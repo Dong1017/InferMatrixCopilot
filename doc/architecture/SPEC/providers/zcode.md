@@ -1,6 +1,6 @@
 # providers/zcode.py —— 规范
 
-<!-- verified-against: 2026-10-16 -->
+<!-- verified-against: 2026-10-27 -->
 
 `harness transport（Z.AI / GLM 订阅） · refactor-status: ok`
 
@@ -39,6 +39,10 @@ argv 单参数上限 128KiB）。
   `Read` 读附件时才保留 `Read`，且任何读到临时目录之外的调用都让这次调用失败。
   one-shot 的局部配置关闭 memory/use、skills、plugins、subagent 和 MCP，并把 CLI storage
   放入会话临时目录；避免保留下来的 Read 接触宿主自动记忆。工具桥会话同样关闭 memory/use。
+- **工具桥的 MCP 超时跟随会话预算。** 会话配置里写
+  `mcp.servers.<bridge>.timeoutMs = timeout_s * 1000`；zcode 默认 30s，
+  会在桥里仍在跑的测试或嵌套计划评审完成前放弃该工具调用，之后每次桥调用
+  都像挂死。会话 deadline 仍是执行的外层上界（2026-10-27）。
 - **失败的运行不能读成空评审。** 非零退出或流里没有 `result` 事件（未超时时），普通调用
   和原生事件调用先将已识别失败转换为固定安全消息的 `ZCodeFailure`；未知失败仍抛
   `RuntimeError`，保留 zcode 自己的 stderr 诊断。

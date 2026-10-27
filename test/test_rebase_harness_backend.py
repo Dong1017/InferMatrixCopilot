@@ -216,8 +216,8 @@ def test_tier_model_is_never_forwarded_to_a_harness(monkeypatch):
     cfg = _types.SimpleNamespace(
         log_dir="/tmp", backend="cursor", backend_model="", settings=None,
         model="deepseek-flash", script_dir="/tmp", manifest_path="",
-        repo="r", max_turns=10, harness_timeout_s=1.0, paths_spec={},
-        state_slice={}, baseline_ref="origin/main")
+        repo="r", max_turns=10, harness_timeout_s=1.0, test_timeout_sec=7200,
+        paths_spec={}, state_slice={}, baseline_ref="origin/main")
     scope = ToolScope(name="s", allowed_tools=frozenset(), path_scope=None,
                       read_only=True, root="/tmp")
     asyncio.run(_harness_attempt(

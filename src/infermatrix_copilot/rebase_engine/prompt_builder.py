@@ -213,6 +213,7 @@ def build_module_prompt(
     adaptive_guidance: str = "",
     live: bool = False,
     baseline_ref: str = "origin/main",
+    test_timeout_sec: int = 7200,
     run_git: Callable[[list[str], str], str] | None = None,
 ) -> str:
     """Byte-parity render of the parent's `build_module_prompt`. `script_dir`
@@ -261,6 +262,7 @@ def build_module_prompt(
     vars_map = {
         "MODULE_NAME":       module,
         "MODULE_KEY":        module,
+        "MODULE_TEST_TIMEOUT_SEC": str(test_timeout_sec),
         "VLLM_PATH":         vllm_path,
         "OMNI_PATH":         omni_path,
         "VLLM_COMMIT":       vllm_commit,

@@ -61,6 +61,12 @@ def _is_ancestor_of_self(pid: int) -> bool:
 def _alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
+        try:
+            with open(f"/proc/{pid}/stat") as stat:
+                if stat.read().rsplit(")", 1)[1].split()[0] in ("Z", "X"):
+                    return False
+        except (OSError, IndexError):
+            pass
         return True
     except ProcessLookupError:
         return False

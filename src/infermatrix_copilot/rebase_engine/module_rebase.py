@@ -59,6 +59,7 @@ class ModuleRunConfig:
     # the harness HAS one (claude --max-turns); cursor/codex have none, so the
     # real bound there is this timeout plus the prompt's budget discipline.
     harness_timeout_s: float = 7200.0
+    test_timeout_sec: int = 7200
     max_debug_retries: int = 3
     plan_review_max_rounds: int = 2
     model_aliases: Mapping[str, str] | None = None
@@ -180,6 +181,13 @@ async def _harness_attempt(prompt: str, *, module: str, config,
     from ..tool_bridge import write_bridge_spec
 
     run_dir = Path(config.log_dir)
+    prompt += (f"\n\nCurrent operator-selected budgets: this harness session has "
+               f"{config.harness_timeout_s:g} seconds; required module test "
+               f"commands have TEST_TIMEOUT_SEC={config.test_timeout_sec}. "
+               "These replace older attempt budgets. All test commands, "
+               "assertions and model geometry remain required. Background "
+               "tests belong to this attempt and will be stopped when it ends; "
+               "do not leave a detached chain running after returning.")
     transport = transport_for_id(config.settings, config.backend)
     spec_path = write_bridge_spec(
         run_dir=run_dir, step_name=f"rebase.module.{module}", scope=scope,
@@ -266,7 +274,8 @@ async def rebase_module(
         plan_review_max_rounds=config.plan_review_max_rounds,
         broken_imports=broken_imports, module_test_plan=module_test_plan,
         adaptive_guidance=guidance, live=True,
-        baseline_ref=config.baseline_ref)
+        baseline_ref=config.baseline_ref,
+        test_timeout_sec=config.test_timeout_sec)
 
     substate.update({"modules": {module: {"status": "running"}}})
     agent_log = str(Path(config.log_dir) / "agents" / f"module-{module}.log")
@@ -291,6 +300,9 @@ async def rebase_module(
         except Exception as exc:  # noqa: BLE001 - failure is substate data
             return {"done": False, "text": f"agent loop error: {exc}",
                     "turns": 0, "plan_done": False}
+        finally:
+            from .processes import cleanup_run_processes
+            cleanup_run_processes(Path(config.log_dir), substate.run_id)
 
     # parent parity: an incomplete first run gets up to max_debug_retries
     # follow-up attempts with the debug prompt built from the failure text.

@@ -1,6 +1,6 @@
 # testing/ —— 规范
 
-<!-- verified-against: 2026-08-25 -->
+<!-- verified-against: 2026-10-27 -->
 
 `LOC ~1760（6 个文件） · 测试执行底座（rebase agent shell 测试层的 Python 移植） · refactor-status: ok`
 
@@ -47,6 +47,10 @@ test_runner.sh 的 Python 移植。仓库专属数据（watchdog 模式、artifa
   pid —— 升级 SIGKILL 绝不打中无关进程。
 - GPU 锁绝不 unlink 活主的锁：偷锁在 flock side file 的临界区内**重新判定**
   staleness；release 只删除仍属于自己的锁文件。
+- 锁主存活判定走 `process_tree._alive`：`kill(pid, 0)` 成功但
+  `/proc/<pid>/stat` 为 `Z`/`X`（未被收割的僵尸）算**死**，否则一个已退出
+  但父进程未 wait 的 pytest 包装器会无限期占住互斥锁（2026-10-27，
+  `test_rebase_process_lifecycle` 用真实僵尸进程钉住）。
 - **E2** —— Tier-2 无 reviewer / reviewer 异常 / 无法解析的回复一律 CONTINUE，
   **绝不 wedge 一次 run**；Tier 1 不经评审即杀。
 - **E1（精神）** —— 每次 Tier-2 裁决落 decision log（`record_fn`/`result.decisions`），
