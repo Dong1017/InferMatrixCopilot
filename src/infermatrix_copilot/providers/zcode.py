@@ -203,6 +203,15 @@ class ZCodeTransport(HarnessTransport):
     def _write_mcp_config(session: Path, spec_path: Path, *,
                           timeout_s: float = 30.0) -> None:
         package_root = Path(__file__).resolve().parents[2]
+        # The harness stays credential-free; its scoped bridge also needs
+        # the lease's GPU visibility and the target environment for tests.
+        bridge_env = {k: os.environ[k] for k in (
+            "CUDA_VISIBLE_DEVICES", "LD_LIBRARY_PATH", "HF_HOME",
+            "OMP_NUM_THREADS", "MKL_NUM_THREADS", "ZCODE_DATA_BASE_DIR",
+            "STRICT_BACKEND", "STRICT_BACKEND_MODEL", "STRICT_BACKEND_CLI",
+            "ZCODE_PROVIDER_ID", "ZCODE_REASONING_LEVEL",
+            "REBASE_REVIEWER_MODEL", "NOTIFY_EMAIL") if k in os.environ}
+        bridge_env["PYTHONPATH"] = str(package_root)
         config = session / ".zcode" / "config.json"
         config.parent.mkdir()
         config.write_text(json.dumps({"features": {"memory": False}, "memory": {"use": False},
@@ -215,7 +224,7 @@ class ZCodeTransport(HarnessTransport):
             "command": sys.executable,
             "args": ["-m", "infermatrix_copilot.tool_bridge",
                      "--spec", str(spec_path)],
-            "env": {"PYTHONPATH": str(package_root)},
+            "env": bridge_env,
         }}}}, indent=2), encoding="utf-8")
 
     @staticmethod
@@ -296,7 +305,8 @@ class ZCodeTransport(HarnessTransport):
         return path
 
     def _run(self, text: str, *, session: Path, timeout_s: float,
-             tool_less: bool = False, model: str = "", native_event_sink=None) -> tuple[list[dict], bool]:
+             tool_less: bool = False, model: str = "", native_event_sink=None,
+             mode: str = "plan") -> tuple[list[dict], bool]:
         """One CLI invocation → (parsed events, timed_out). A timeout kills
         the process but keeps the partial stream as salvage material.
         `tool_less` also removes the native reads unless an oversized prompt
@@ -310,15 +320,15 @@ class ZCodeTransport(HarnessTransport):
         if oversized:
             prompt_file = session / "PROMPT.md"
             prompt_file.write_text(text, encoding="utf-8")
-            cmd += [f"--prompt=Your complete instructions are in the attached "
+            cmd += [(f"--prompt=Your complete instructions are in the attached "
                     f"file {prompt_file}. Read ALL of it (page through it with "
-                    f"offset) before acting, then follow it exactly.",
+                    f"offset) before acting, then follow it exactly."),
                     "--attach", str(prompt_file)]
         else:
             # `--prompt=` form: a prompt starting with "-" must not be
             # parsed as an option.
             cmd += [f"--prompt={text}"]
-        cmd += ["--output-format", "stream-json", "--mode", "plan",
+        cmd += ["--output-format", "stream-json", "--mode", mode,
                 "--cwd", str(session),
                 f"--disallowed-tools={','.join(disallowed)}"]
         env = sanitized_env()
@@ -611,6 +621,12 @@ class ZCodeTransport(HarnessTransport):
     # -- transport contract --------------------------------------------------
     def run_session(self, req: AgentSessionRequest) -> AgentOutcome:
         session = Path(tempfile.mkdtemp(prefix="imc-zcode-session-"))
+        if req.trace is not None:
+            req.trace.record(
+                "harness_session_started", provider=self.spec.id,
+                step=req.step_name,
+                requested_model=req.model or self.settings.strict_backend_model,
+                session_dir=str(session))
         try:
             if req.bridge_spec_path is not None:
                 self._write_mcp_config(session, req.bridge_spec_path,
@@ -624,7 +640,10 @@ class ZCodeTransport(HarnessTransport):
             events, timed_out = self._run(
                 f"{header}{req.system}\n\n{req.prompt}", session=session,
                 timeout_s=req.timeout_s,
-                model=req.model or self.settings.strict_backend_model)
+                model=req.model or self.settings.strict_backend_model,
+                # Mutating workflows write only through the scoped bridge;
+                # native writes/shell/subagents retain the same denylist.
+                mode="plan" if req.scope.read_only else "yolo")
         finally:
             shutil.rmtree(session, ignore_errors=True)
         usage = self._usage(events)

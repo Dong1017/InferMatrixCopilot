@@ -85,6 +85,10 @@ class AgentSessionRequest:
     step_name: str = ""
     bridge_spec_path: Path | None = None
     trace: Any = None  # RunTrace-shaped (record(kind, **fields)) or None
+    # Extra READ-containment roots for the session audit beyond the scope
+    # root and the run dir (a rebase module agent must read the upstream
+    # checkout and the installed target runtime). Never widens writes.
+    read_roots: tuple[str, ...] = ()
 
 
 @dataclass

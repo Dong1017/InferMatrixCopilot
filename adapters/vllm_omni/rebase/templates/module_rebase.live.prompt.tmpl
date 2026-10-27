@@ -1,6 +1,17 @@
 You are rebasing vllm-omni module `{MODULE_NAME}`.
 
-Goal: make `{OMNI_FILES}` compatible with upstream while preserving vllm-omni intent from `origin/main`.
+Goal: make `{OMNI_FILES}` compatible with upstream while preserving vllm-omni intent from `{BASELINE_REF}`.
+
+This campaign targets upstream `{TARGET_BRANCH}`, pinned at `{UPSTREAM_COMMIT}`.
+The module assignment baseline is `{LAST_REBASE_UPSTREAM_COMMIT}`. That baseline
+selects relevant changes; it does not establish the starting Omni tree's API
+version. Verify the upstream checkout and installed API match the run's pin.
+When the prior alignment is documented, compare its commit with the pinned
+target in both directions for your upstream paths. Release targets may omit
+APIs present on main. Port constructors, overrides, imports, and outputs
+against this target. Earlier verification does not validate the current pin.
+Preserve original test commands, assertions, budgets, and model geometry while
+repeating verification against the pinned target.
 
 {PLAN_REVIEW_CONTRACT}
 
@@ -10,11 +21,15 @@ Goal: make `{OMNI_FILES}` compatible with upstream while preserving vllm-omni in
 - CUDA_VISIBLE_DEVICES={CUDA_DEVICES}
 - HF_HOME={HF_HOME}
 
+Module signals belong under `{SIGNAL_DIR}`. If that value is empty in a resumed
+run, resolve `$IMX_LOG_DIR/signals` to an absolute path before using `write_file`.
+Never write module markers at the filesystem root.
+
 {REMOTE_CONTEXT}
 
 ## Execution flow
 1. **Plan first** (per contract above), then begin on `{OMNI_FILES}`.
-2. Run **41** (check API drift) + **42** (check upstream imports) before deep pytest. If 42 first shows broken imports, **fix then full 42 re-run** before long pytest.
+2. Run the shipped API drift guard and upstream import audit described below before deep pytest. Fix broken imports and repeat the full audit before long pytest.
 3. Triage the **first real** failure: traceback, `FAILED`, `MISMATCH`, `BROKEN`—not watchdog-only chatter.
 4. **Minimal patch** in `{OMNI_FILES}` (+ omni tests/fixtures needed).
 5. Re-run **that** check first; prefer **targeted** pytest when the runbook allows.
@@ -40,6 +55,17 @@ Goal: make `{OMNI_FILES}` compatible with upstream while preserving vllm-omni in
 - When a test fixture bypasses `__init__`, initialize newly required fields in
   that fixture to the real disabled-feature defaults. Do not add production
   fallbacks solely to satisfy an incomplete mock.
+- Before diagnosing audio quality, transcript similarity, codec EOS, or model
+  acceptance failures, inspect the actual pytest run level and engine
+  `load_format` in the log. The default `core_model` run level injects dummy
+  weights even when an `advanced_model` test is selected. Dummy-weight results
+  cannot establish real-weight quality or acceptance. Preserve required full
+  commands; record their actual outcomes and limits, then use a targeted
+  real-weight run at the test's declared run level when needed for diagnosis.
+  Compare the same test and runtime conditions with `{BASELINE_REF}` before editing
+  Omni. Fix only failures introduced by this rebase and absent from the baseline;
+  source byte identity alone is not runtime baseline evidence. Do not weaken
+  assertions or change existing baseline behavior to make a dummy run pass.
 
 **Engine / unpack:** Fix return-shape, kwargs, ordering at the real omni engine boundary; keep `shutdown` kwargs in sync with upstream.
 
@@ -57,21 +83,22 @@ Goal: make `{OMNI_FILES}` compatible with upstream while preserving vllm-omni in
 
 **CPU/merge pipeline:** optional-dep `ModuleNotFoundError`, bad LoRA `HTTPException`/400—fix deps/fixtures in `{OMNI_PATH}`.
 
-## Parallel execution (Phase 2)
-Other module agents edit `{OMNI_PATH}` concurrently.
+## Serialized module execution (Phase 2)
+Module agents run one at a time in the shared `{OMNI_PATH}` checkout. Completed
+modules and resumed attempts may leave dirty files; preserve their changes.
 
 1. Dirty `git status` outside `{OMNI_FILES}` is **expected**—ignore it.
-2. Never `git stash`, `git checkout`, or `git clean` paths outside `{OMNI_FILES}` (you would destroy other agents' work).
+2. Never stash, revert, clean, or commit paths outside `{OMNI_FILES}` (you would destroy or include another module's work).
 3. Do not ask the user to clean the workspace or wait for other modules.
 4. `tasks/01_guard_branch_clean.sh` already ran in Phase 1; do not re-verify globally.
 
 **Primary scope = `{OMNI_FILES}`.** Repeated `Module progress: (k done, f failed, s skipped) (k/M)` with the **same tuple** = **plateau** (heartbeat), not new failures. A tuple change then `ERROR: Module rebase failed` **without** `Timeout waiting for modules` = aggregate wave outcome—check signals.
 
-**All-fail-in-one-poll:** `(0,0,0)` → `(0,N,0)` with all modules failing in the same tick is likely **systemic** (shared config, common import, env var, tmux failure). Check shared infrastructure first. **Single-module waves:** same systemic check before blaming your code.
+**Failures across several modules:** check shared config, common imports, environment, and harness infrastructure before changing module code.
 
-**Straggler avoidance:** Finish checks and write the completion contract promptly. In **single-module waves** (no parallel modules), the orchestrator waits only for you—write your verdict as soon as final.
+**Completion:** Finish checks and write the completion contract promptly. The orchestrator waits for this module before starting the next one.
 
-**Orchestrator restart/resume:** `Skipping <module> (already done)` = incremental relaunch. Do not assume all agents restart together.
+**Orchestrator restart/resume:** `Skipping <module> (already done)` = incremental relaunch. Inspect the current files and preserve work from completed modules.
 
 ### Shared log hygiene
 Anchor on the **current run**—match `Resuming run: rebase-* (phase: …)` for **this** session. `[claude_auth]` / `API key probe OK` is CLI init—**not** a module failure. Repeated `Using level-1 agent model:` banners are **noise**—diagnose from `ERROR:` / phase banners / task names. Git boilerplate (`detached HEAD`, `git switch -c`) is scaffold—not merge outcome unless paired with conflict/error lines. `SSH fetch failed; retrying via HTTPS token auth` followed by HTTPS success is normal infrastructure fallback—**not** a module failure.
@@ -85,21 +112,15 @@ If a **required verification** fails and root cause is under `{OMNI_PATH}` but o
 1. **Follow the root cause**—minimal targeted fixes anywhere under `{OMNI_PATH}`.
 2. Keep fixes **small**—align with `{VLLM_PATH}`; no unrelated refactors.
 3. **Document** every out-of-scope edit in the completion contract.
-4. Prefer **additive** changes if another agent may touch the same file.
+4. Read the current file first and preserve work from completed modules and resumed attempts.
 5. After **two** failed attempts on that out-of-scope fix, **stop** and write `.fail` with traceback.
 
 ## Evaluation gates
-**Truth = the latest checker output: exit code, final banner, every `MISMATCH`/`BROKEN`.** Ignore fix-agent tmux chatter and lines like `Import fix agent reported success` until a **full** `41`/`42` run after that path confirms (exit 0, zero `MISMATCH`/`BROKEN`).
+**Truth = the latest full checker output: exit code and every `MISMATCH`/`BROKEN`.** A completion message from another agent does not replace verification after its edits.
 
-- **Chronology:** Anchor on the **latest** full run. Old failures are void after a later run exits 0 with no `MISMATCH`/`BROKEN`.
-- **Success-before-failure:** Earlier green `41`/`42`/install lines before a later `ERROR:` still stand—do not blame install/Dockerfile unless that step also shows failure in the **same** segment.
-- **42 after fix:** After `ERROR: N broken upstream import(s)`, **re-run** `tasks/42_check_upstream_imports.sh` before treating imports as green.
-- **SKIP on green 41:** `SKIP` + exit **0** + `API drift check passed.` + no `MISMATCH` = pass. `SKIP` + non-zero exit or any `MISMATCH` = not green.
-- **42 noise:** `All upstream imports resolve correctly.` may be followed by `Broken imports detected.`—anchor on the **last full `42` block**: exit 0 + no `BROKEN` = pass. If ambiguous, re-run 42.
-- **SKIP when symbol absent:** Fix real imports/call sites per `{VLLM_PATH}`—no fake shims for drift only.
-- **First pass alignment:** Match `{VLLM_PATH}` early. If `41` prints `FORBIDDEN` imports, fix in the same drift pass.
-
-After edits, re-run **41** (zero `MISMATCH`) and **42** (zero `BROKEN`). ROCm/tokenizer/`TRANSFORMERS_CACHE` warnings are **noise** when checkers exit 0 green.
+- Repeat both checks after a fix. Exit 0 with zero `MISMATCH`/`BROKEN` is required; an earlier green run does not validate later edits.
+- Read skipped checks and explain any unverified path. Missing symbols need real imports/call-site ports matching `{VLLM_PATH}`, with no fake shims.
+- ROCm/tokenizer/`TRANSFORMERS_CACHE` warnings alone do not fail a checker that exits 0 without mismatches.
 
 **Phase 1 ops (not your concern unless blocked):** Wheel/install halts—read `vllm_install.log` end-to-end. **`Failed modules: none`** + wheel failure ⇒ no module wave. **Phase 1 merge:** `CONFLICT`, `Automatic merge failed` → orchestrator halted **before** Phase 2—not your failure. **Path sync:** `tasks/35_sync_module_paths.sh failed`, missing `path_sync_final_*.json` → mapping drift, not pytest failure.
 
@@ -108,11 +129,14 @@ After edits, re-run **41** (zero `MISMATCH`) and **42** (zero `BROKEN`). ROCm/to
 **Merge (your edits):** Resolve conflict markers **only** inside `{OMNI_FILES}`. No `git merge`/`git stash` for the rest of the tree.
 
 ## API drift (blocking before broad pytest)
-`tasks/41_check_api_drift.sh` is **hard.** Any `MISMATCH` or non-zero exit → not green. Read output end-to-end; confirm on the **latest** full run after each fix. Open `api_drift_check.md` (or logged report) and fix **every** listed mismatch.
+The old `tasks/41_check_api_drift.sh` and `tasks/42_check_upstream_imports.sh` were retired. Do not search the shared filesystem for them. Use these shipped equivalents with the target repository's Python:
+
+1. **API drift guard:** from `{OMNI_PATH}`, use `run_shell` to execute `python3 '{SCRIPT_DIR}/api_drift_guard.py'`. The runner puts the target venv on PATH; confirm `python3` resolves there. Read the entire output. Any `MISMATCH` or non-zero exit blocks completion. Repeat the full guard after fixes.
+2. **Upstream import audit:** use `run_import_check` to resolve every explicit `vllm` module and named import found by AST in the scoped Omni files, including both worker implementations when assigned. Resolve names with the installed target modules; collect all failures as `BROKEN` and raise/exit non-zero if any exist. Also run the smoke-import command below. Inspect optional/hardware import failures rather than masking them; report any path that could not be verified. Repeat the full audit after fixes. There is no separate checker script or checker tool to locate.
 
 Typical fixes vs `{VLLM_PATH}`: `StageEngineCoreClient.shutdown` kwargs; `launch_core_engines` unpack/return-shape at the real omni↔upstream boundary. **`SKIP launch_core_engines unpack-check`** when the file does not inline `launch_core_engines` is fine on exit 0—no fake unpack.
 
-**Infra:** `BROKEN`/`MISMATCH` followed by `tmux: command not found`—fix cited code first; `tmux` missing is environment. **`ImportError` from `{VLLM_PATH}/vllm/_C.abi3.so` with `undefined symbol`** → stale/incompatible binary—reinstall from `{VLLM_PATH}` (e.g. `VLLM_USE_PRECOMPILED=1 uv pip install -e .`). Never edit upstream source. Bad wheel index: same triage via `vllm_install.log` + `platform_tag`.
+**Infra:** `BROKEN`/`MISMATCH` followed by `tmux: command not found`—fix cited code first; `tmux` missing is environment. An extension `ImportError` with `undefined symbol` indicates a stale/incompatible binary: inspect `vllm_install.log` and the pinned wheel/runtime first. Never edit upstream source.
 
 ## Inputs
 ### Module prompt source
@@ -151,13 +175,13 @@ If `{COMMIT_LIST}` is empty while notes imply commits: do not invent churn—fla
 - Upstream vLLM target branch: {VLLM_PATH}
   Key paths: {UPSTREAM_FILES}
 - vllm-omni baseline intent:
-  `git show origin/main:<path>` in {OMNI_PATH}
+  `git show {BASELINE_REF}:<path>` in {OMNI_PATH}
 
 ## Hard rules
 1. Edit only under {OMNI_PATH}. Never modify {VLLM_PATH}.
 2. **Temporary files**: Create all helper scripts and scratch artifacts under `\${AGENT_TMP}` (outside the repos). Never create temp files in `{OMNI_PATH}` or `{VLLM_PATH}`.
 3. Use only env from this prompt: `CUDA_VISIBLE_DEVICES={CUDA_DEVICES}`, `HF_HOME={HF_HOME}`. Ignore stale values in module prompt source.
-4. Preserve omni-specific behavior from `origin/main` while adapting to upstream APIs.
+4. Preserve omni-specific behavior from `{BASELINE_REF}` while adapting to upstream APIs.
 5. Do not change copyright/license headers or license files.
 6. Execute only valid shell commands. Never run bare narrative tokens (example: `Resume`).
 7. **Never ask the user a question or wait for human input.**
@@ -187,7 +211,7 @@ On its own line (parser-friendly):
 
 **Pytest truth:** `ERROR: FAILED: <job> (rc=…)`/`FAILED`/`ERROR` **override** `[watchdog] … CONTINUE` when `rc≠0`. `rc=143` SIGTERM; `rc=124` timeout; `rc=2` collection error.
 
-**Global timeout / stall:** `Build timed out` + frozen `Module progress` → parallel wave issue, not your `{OMNI_FILES}`. Confirm your module wrote the completion marker.
+**Global timeout / stall:** `Build timed out` + frozen `Module progress` → inspect the active module's logs and owning test outcome. Confirm the completion marker only after required verification terminates successfully.
 
 **Other signals to filter:**
 - `[MODEL DOWNLOAD]`, `IGNORE (gated model access / HF 401)`, remote container deps (`installing vllm-omni[dev]`) → infra noise unless pytest after recovery fails on your files.
@@ -202,20 +226,37 @@ On its own line (parser-friendly):
 - Post-green CI (`ECONNRESET`, push auth) → report exact line. Pre-commit: fix real Ruff/format in `{OMNI_PATH}`.
 
 ## Verification (must all pass)
+- Every rendered full verification command below is required and must have an actual terminal pass with its original selected scope, timeout budget, and granted GPU geometry. Preserve the commands as rendered.
+- Targeted diagnostics never substitute for a required full command. Write `MODULE_DONE` only after actual terminal evidence confirms that every required command passed; a live test, missing outcome, observation timeout, or diagnostic pass leaves full verification incomplete.
 **Module pytest wrapper:** Every verification line uses `imx-omni-pytest …`. **Do not replace with bare `pytest`.** It applies `test_watchdog.sh`, `TEST_TIMEOUT_SEC`, logs under `\${LOG_DIR}/tests/module_*.log`, and shared GPU lock for **every** pytest line from Phase-2 sessions.
 
-**Long-running verification:** The MCP client timeout follows the harness
-session budget; it is not a fixed 30-second limit. Use the module pytest wrapper
-with `TEST_TIMEOUT_SEC={MODULE_TEST_TIMEOUT_SEC}` and allow terminal completion.
-For short observation polls, guard missing paths before invoking commands that
-would otherwise read stdin. Do not duplicate a live test or confuse an
-observation timeout with a test result.
-- All commands, assertions, selected scope and granted GPU geometry remain required.
-- The engine cleans up this attempt's background processes when the attempt ends,
-  including after a normal return. Never return while verification is still live
-  or leave a detached chain for another module to inherit.
-- If background verification is needed, redirect all three standard streams,
-  record the wrapper PID, poll it, and collect its terminal outcome before returning.
+**Long-running verification and bridge call deadlines:** Every bridge tool call
+has a client-side deadline set by the harness CLI, not by this prompt: zcode's
+follows the session budget; cursor-agent's is fixed by the CLI and may be far
+shorter than a test run. A call that outlives it is cut off at the client while
+the shell keeps running, and the single-call stdio bridge then looks hung for
+every later call. Therefore:
+- Use `imx-omni-pytest …` with `TEST_TIMEOUT_SEC={MODULE_TEST_TIMEOUT_SEC}` for
+  every required verification command. Keep the selected scope, assertions and
+  granted GPU geometry; do not shrink or extend the test budget.
+- Never block a tool call on a long wait (`sleep 480 && tail …`). For anything
+  longer than a short command, launch detached with stdin/stdout/stderr
+  redirected and a PID file, e.g.
+  `setsid -f sh -c 'echo $$ > "$1"; shift; exec "$@"' sh "$pidfile" imx-omni-pytest ... </dev/null >"$log" 2>&1`
+  (a plain `nohup ... &` is insufficient: the non-interactive bridge shell waits
+  for that job). Then poll the saved wrapper PID with short calls, at most one
+  check per tool call and under 20 seconds each including any sleep.
+- Guard optional glob or command-substitution results before passing them to
+  stdin-reading commands (`tail`, `head`, `cat`, `grep`); an empty expansion
+  turns `tail -n 5 "$log"` into a bare stdin reader that holds the bridge.
+- Observation or tool timeouts are not test results. While the owning wrapper or
+  its descendants are live, do not signal, restart or duplicate them; wait for
+  the wrapper's own terminal outcome and report incomplete when it is unavailable.
+- The engine stops this attempt's background processes when the attempt ends,
+  including after a normal return. Never return while verification is still
+  live, and never leave a detached chain for another module to inherit.
+- Produce incremental output (file writes, short commands, debug memory entries)
+  so the run keeps a heartbeat; a silent session is timed out as stalled.
 
 Run:
 {IMPORT_CHECK}
@@ -242,14 +283,14 @@ If broken, find the new symbol in {VLLM_PATH} and update omni. Same semantics as
 
 ## Failure handling (up to {MAX_DEBUG_RETRIES} attempts)
 
-### MANDATORY: When a test fails, FIRST check origin/main baseline
-1. Call `git_show_test_baseline "<failing_test_path>"` — this shows how origin/main updated this test
-2. If origin/main CHANGED the test (new params, imports, assertions) → apply the SAME changes to omni
-3. If origin/main DELETED the test → check if omni still needs it
-4. If origin/main RENAMED/SPLIT the test → find the new file and port omni modifications there
-5. Only after aligning the test with origin/main, fix product code
+### MANDATORY: When a test fails, FIRST check {BASELINE_REF} baseline
+1. Call `git_show_test_baseline "<failing_test_path>"` — this shows how {BASELINE_REF} updated this test
+2. If {BASELINE_REF} CHANGED the test (new params, imports, assertions) → apply the SAME changes to omni
+3. If {BASELINE_REF} DELETED the test → check if omni still needs it
+4. If {BASELINE_REF} RENAMED/SPLIT the test → find the new file and port omni modifications there
+5. Only after aligning the test with {BASELINE_REF}, fix product code
 6. Do NOT change product code to make a stale test pass
-7. NEVER re-create or restore a test file that origin/main deleted or renamed
+7. NEVER re-create or restore a test file that {BASELINE_REF} deleted or renamed
    just because the rebase harness (config.sh / a CI test command) still
    references the old path. Harness config is NOT ground truth: if a referenced
    test path no longer exists (pytest rc=4, "file or directory not found"), use
@@ -261,7 +302,7 @@ If broken, find the new symbol in {VLLM_PATH} and update omni. Same semantics as
 2. Classify: `unrecognized arguments` → setup. Ruff after green pytest → still blocking. Unmapped CI → mapping. **`41`/`MISMATCH`** → signature/unpack. **`42`/`BROKEN`** → import path/symbol vs `{VLLM_PATH}`.
 3. **Time check:** If > 5 minutes of wall-clock work (not test wait) on the same failure without progress, write a `.fail` with what you tried and stop. Do not repeat the same fix pattern.
    - **"No code changes" trap:** If root cause is infra/config/environment, not omni code, you must still produce output. Document what you checked and why no fix is possible. Silence wastes the debug round.
-4. Map failing omni call site ↔ upstream in `{VLLM_PATH}`; `git show origin/main` for intent.
+4. Map failing omni call site ↔ upstream in `{VLLM_PATH}`; `git show {BASELINE_REF}` for intent.
 5. Minimal compatible fix in `{OMNI_PATH}`.
 6. Re-run failing check, then full verification.
 7. Report: changed files, summary, latest results, `MODULE={MODULE_NAME}`.
@@ -272,11 +313,19 @@ Infra (`rc=124`, GPU lock, OOM kill storms): one controlled retry with snapshot;
 
 Merge conflicts in your files: report paths, markers cleared, strategy—do not blame pytest until verification fails.
 
-## Killing hung tests
-Never `pgrep -f | kill` alone (broad pattern). Use:
-  bash {KILL_TEST_SCRIPT} "pytest.*<test_pattern>"
-or:
-  bash {KILL_TEST_SCRIPT} --pid <pid>
+## Terminal orphan cleanup
+Use `run_pytest` or `reproduce` for tests; their native runner owns actual
+budget/watchdog cleanup. The old `lib/kill_test_tree.sh` is retired.
+Observation or shell/tool timeouts never authorize manually terminating a live
+owning wrapper or its descendants. Do not signal, restart, or duplicate them;
+use short read-only checks and await the actual owning runner's terminal outcome.
+Manual cleanup is allowed only AFTER that terminal outcome, for verified owned
+orphans whose PID and birth identity match the owning attempt. Preserve foreign
+processes. Replace both placeholders with the verified orphan PID and its
+`/proc/<pid>/stat` starttime ticks, then use the identity-checked helper:
+  {COPILOT_PYTHON} -c 'import sys; from infermatrix_copilot.testing.process_tree import kill_tree; pid=int(sys.argv[1]); kill_tree([pid], identity=dict([(pid, int(sys.argv[2]))]))' '<verified_orphan_pid>' '<verified_orphan_starttime_ticks>'
+Never terminate tests by a broad process-name pattern. Missing terminal evidence
+means incomplete verification and does not authorize manual cleanup.
 
 ## Completion contract
 On success, write exactly:

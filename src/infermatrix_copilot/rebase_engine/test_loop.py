@@ -3,8 +3,9 @@
 
 Control-flow parity, pinned by tests: per-test resume from checkpointed
 progress (this run only — substate is run-stamped); GPU-count skips; a
-failure re-runs the SAME test on the main-baseline worktree to split
-pre-existing failures from rebase regressions (an unavailable worktree must
+failure re-runs the SAME test on the main-baseline worktree and requires
+matching failure nodes and causes to establish pre-existing failures
+(an unavailable worktree must
 not mask a regression behind a git error — it is treated as a regression);
 regressions go to the debug loop; every transition checkpoints.
 
@@ -28,7 +29,7 @@ from typing import Awaitable, Callable, Mapping, Sequence
 from .substate import Substate
 
 
-from .ci_loop import extract_failed_test_ids
+from .ci_loop import extract_exception_lines, extract_failed_test_ids
 
 log = logging.getLogger(__name__)
 
@@ -51,6 +52,23 @@ def _log_text(output: str) -> str:
         except OSError:
             return ""
     return output
+
+
+def _baseline_reproduces(current: str, baseline: str) -> bool:
+    """Require baseline evidence for every current failure and its cause.
+
+    A baseline that cannot import the old source against the new runtime
+    has not executed the failing tests and cannot establish old failures.
+    """
+    current_log, baseline_log = _log_text(current), _log_text(baseline)
+    current_tests = extract_failed_test_ids(current_log)
+    current_errors = extract_exception_lines(current_log)
+    return bool(
+        current_tests
+        and current_tests <= extract_failed_test_ids(baseline_log)
+        and current_errors
+        and current_errors <= extract_exception_lines(baseline_log)
+    )
 
 
 
@@ -205,15 +223,20 @@ async def run_test_loop(
             # regression; regression-preserving, like an absent worktree
             log.warning("  baseline INFRA FAILURE (%s) on %s — treating as "
                         "REGRESSION", baseline.infra, label)
-        elif baseline.rc != 0:
+        elif baseline.rc != 0 and _baseline_reproduces(
+                result.output, baseline.output):
             log.info("  [PRE-EXISTING] %s fails on main too (rebase rc=%d, "
                      "main rc=%d) — skipping, not a regression", label,
                      result.rc, baseline.rc)
             skipped_tests.append(slug)
             checkpoint(slug)
             continue
+        elif baseline.rc != 0:
+            log.warning("  baseline failed without reproducing every current "
+                        "failure and cause on %s — treating as REGRESSION",
+                        label)
 
-        log.info("  [REGRESSION] %s passes on main but fails on rebase — "
+        log.info("  [REGRESSION] %s has no matching baseline failure — "
                  "debugging", label)
         verdict = await debug_fn(slug, label, result.rc, result.output)
         if verdict is True:
@@ -296,10 +319,42 @@ def snapshot_worktree(repo: Path) -> tuple[str, dict[str, dict]]:
         except OSError:
             pass
         untracked[f] = entry
-    snap = _git_out(repo, ["stash", "create",
-                           "pre-debug-attempt snapshot"]).strip()
-    if not snap:
-        snap = _git_out(repo, ["rev-parse", "HEAD"]).strip()
+    # ``stash create`` must be authoritative for a dirty tracked tree.  A
+    # failed command also writes no stdout, which used to look identical to a
+    # clean tree and silently fell back to HEAD.  Restoring that fallback
+    # erased every accepted edit that predated the rejected debug attempt.
+    tracked_status = subprocess.run(
+        ["git", "-C", str(repo), "status", "--porcelain=v1",
+         "--untracked-files=no"],
+        capture_output=True, text=True, timeout=60)
+    if tracked_status.returncode != 0:
+        raise RuntimeError(
+            "cannot inspect tracked worktree before debug snapshot: "
+            f"{tracked_status.stderr.strip() or 'git status failed'}")
+
+    stash = subprocess.run(
+        ["git", "-C", str(repo), "stash", "create",
+         "pre-debug-attempt snapshot"],
+        capture_output=True, text=True, timeout=120)
+    snap = stash.stdout.strip()
+    if tracked_status.stdout.strip():
+        if stash.returncode != 0 or not snap:
+            raise RuntimeError(
+                "cannot snapshot dirty tracked worktree before debug attempt: "
+                f"{stash.stderr.strip() or 'git stash create returned no commit'}")
+    elif stash.returncode != 0:
+        raise RuntimeError(
+            "cannot snapshot clean worktree before debug attempt: "
+            f"{stash.stderr.strip() or 'git stash create failed'}")
+    elif not snap:
+        head = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=60)
+        if head.returncode != 0 or not head.stdout.strip():
+            raise RuntimeError(
+                "cannot resolve HEAD for clean debug snapshot: "
+                f"{head.stderr.strip() or 'git rev-parse returned no commit'}")
+        snap = head.stdout.strip()
     return snap, untracked
 
 

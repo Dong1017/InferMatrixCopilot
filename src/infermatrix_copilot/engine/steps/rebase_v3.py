@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import asdict as _dc_asdict
 
 import asyncio
+import re
 import shlex
 import weakref
 from pathlib import Path
@@ -28,6 +29,7 @@ from ...rebase_engine.phase1_steps import Phase1Config, run_commit_assignment
 from ...rebase_engine.push_gate import evaluate_push_gate
 from ...rebase_engine.substate import Substate
 from ...rebase_engine.test_manifest import ManifestSpec, build_manifest
+from ...rebase_engine.remote_ci_owner import RemoteOwnerResolver
 from ...rebase_engine.testing_env import scrubbed_agent_env
 from ...scopes import PathScope, ToolScope
 from ..step import FailureKind, StepContext, StepResult
@@ -95,6 +97,17 @@ def _tier_client(ctx: StepContext):
         target = ctx.settings.tier_target(mode)
     except TierNotConfiguredError as exc:
         return StepResult(False, FailureKind.BLOCKED, str(exc))
+    if getattr(target, "kind", "api") == "harness":
+        from ...providers.registry import transport_for_id
+
+        transport = transport_for_id(ctx.settings, target.provider_id)
+        gap = (None if transport.cli_path() else
+               f"{target.provider_id} CLI is unavailable") or transport.auth_gap()
+        if gap:
+            ctx.trace.record("capability_gap", capability="rebase.module_agent",
+                             detail=gap)
+            return StepResult(False, FailureKind.BLOCKED, gap)
+        return transport, target
     if not target.api_key:
         ctx.trace.record("capability_gap", capability="rebase.module_agent",
                          detail=f"no API key for tier target {target.source} "
@@ -139,25 +152,42 @@ def _test_roots(manifest: dict) -> tuple:
     return tuple(tm.get("test_change_roots") or ("tests/",))
 
 
+def _host_facts(host_env: Mapping[str, str] | None = None) -> tuple[str | None, str | None]:
+    """(CUDA_VISIBLE_DEVICES, HF_HOME) for target subprocesses: the explicit
+    `host_env` (the bridge spec's copy of what the PARENT run was granted)
+    wins over this process's environment — a harness spawns the bridge with
+    an allowlisted env that carries neither."""
+    import os
+    host = dict(host_env or {})
+    return (host.get("CUDA_VISIBLE_DEVICES", os.environ.get("CUDA_VISIBLE_DEVICES")),
+            host.get("HF_HOME", os.environ.get("HF_HOME")))
+
+
 def _target_test_env(settings, manifest: dict,
-                     *, pythonpath_prepend: str | None = None) -> dict:
+                     *, pythonpath_prepend: str | None = None,
+                     venv_override: str | None = None,
+                     host_env: Mapping[str, str] | None = None) -> dict:
     """The env for TARGET-repo subprocesses (tests, precommit, wheel
     installs): inherit-plus-overlay with the target venv on PATH, the
     host's CUDA selection, and HF_HOME — raw manifest commands like
     `pytest ...` must resolve inside the target repo's runtime, never the
-    copilot's own virtualenv."""
-    import os
+    copilot's own virtualenv. `venv_override` swaps the runtime for
+    baseline runs (the last-rebase wheel — see `_ensure_baseline_venv`);
+    `host_env` supplies CUDA/HF when this process is a bridge."""
     from ...testing.env_plan import build_subprocess_env
-    venv = _target_venv(manifest, extra=settings.expansion_env())
+    venv = venv_override or _target_venv(manifest,
+                                         extra=settings.expansion_env())
+    cuda, hf_home = _host_facts(host_env)
     return build_subprocess_env(
         venv=Path(venv) if venv else None,
-        cuda_visible_devices=os.environ.get("CUDA_VISIBLE_DEVICES"),
-        hf_home=os.environ.get("HF_HOME"),
+        cuda_visible_devices=cuda,
+        hf_home=hf_home,
         pythonpath_prepend=pythonpath_prepend)
 
 
 def _agent_shell_env(ctx: StepContext, manifest: dict, repo_root: str,
-                     adapter_dir: Path, *, gpu_mutex: bool = True) -> dict:
+                     adapter_dir: Path, *, gpu_mutex: bool = True,
+                     host_env: Mapping[str, str] | None = None) -> dict:
     """The env for AGENT shells (`run_shell` + everything it spawns): the
     PR1 credential scrub over the process env, then the TARGET runtime
     overlay (venv PATH/VIRTUAL_ENV, host CUDA selection, HF_HOME) and the
@@ -173,11 +203,11 @@ def _agent_shell_env(ctx: StepContext, manifest: dict, repo_root: str,
     # every other adapter keeps the token scrubbed)
     keep_hf = bool((manifest.get("validation") or {})
                    .get("requires_hf_token"))
+    cuda, hf_home = _host_facts(host_env)
     env = build_subprocess_env(
         base=scrubbed_agent_env(keep_hf_token=keep_hf),
         venv=Path(venv) if venv else None,
-        cuda_visible_devices=os.environ.get("CUDA_VISIBLE_DEVICES"),
-        hf_home=os.environ.get("HF_HOME"))
+        cuda_visible_devices=cuda, hf_home=hf_home)
     env["IMX_TARGET_REPO"] = str(repo_root)
     env["IMX_LOG_DIR"] = str(ctx.run_dir)
     env["IMX_ADAPTER_REBASE"] = str(adapter_dir / "rebase")
@@ -202,9 +232,29 @@ def _agent_shell_env(ctx: StepContext, manifest: dict, repo_root: str,
     return env
 
 
+def _harness_completion_client(settings, backend: str):
+    """Adapt shared tool-less harness replies for existing reviewer callers."""
+    from types import SimpleNamespace
+
+    from ...providers.registry import transport_for_id
+
+    transport = transport_for_id(settings, backend)
+
+    def create(**params):
+        reply = transport.complete(
+            system="", messages=params["messages"],
+            model=params["model"], max_tokens=params["max_tokens"])
+        if reply.stop_reason != "end_turn":
+            raise RuntimeError("harness reviewer did not complete")
+        return SimpleNamespace(content=reply.blocks)
+
+    return SimpleNamespace(messages=SimpleNamespace(create=create))
+
+
 def build_backends(*, settings, state, run_dir: Path, trace,
                    manifest: dict, repo: str, model: str,
-                   base_url: str = "", api_key: str = ""):
+                   base_url: str = "", api_key: str = "",
+                   host_env: Mapping[str, str] | None = None):
     """The PRODUCTION `RebaseBackends`: plan review on the run's resolved
     tier backend, pytest/reproduce/precommit through the PR1 runner in the
     TARGET env, and the knowledge tools on the copilot stores (agents may
@@ -224,16 +274,24 @@ def build_backends(*, settings, state, run_dir: Path, trace,
     from ...rebase_engine.rebase_tools import RebaseBackends
     from ...testing.runner import TestJob, TestRunner
     repo_name = (state.get("task_spec") or {}).get("repo", "")
-    reviewer_model = getattr(settings, "rebase_reviewer_model", "") \
-        or model
+    review_backend = getattr(settings, "rebase_backend", "api") or "api"
+    reviewer_model = getattr(settings, "rebase_reviewer_model", "") or (
+        (getattr(settings, "rebase_backend_model", "")
+         or getattr(settings, "strict_backend_model", ""))
+        if review_backend != "api" else model)
 
     def request_plan_review(**kw) -> dict:
-        from anthropic import Anthropic
-        ckw: dict = {"api_key": api_key}
-        if base_url:
-            ckw["base_url"] = base_url
+        if review_backend != "api":
+            client = _harness_completion_client(settings, review_backend)
+        else:
+            from anthropic import Anthropic
+
+            ckw: dict = {"api_key": api_key}
+            if base_url:
+                ckw["base_url"] = base_url
+            client = Anthropic(**ckw)
         return review_plan(
-            Anthropic(**ckw), reviewer_model,
+            client, reviewer_model,
             plan_json_path=str(kw.get("plan_json_path", "")),
             plan_md_path=str(kw.get("plan_md_path", "") or ""),
             kind=str(kw.get("kind", "rebase")))
@@ -257,7 +315,7 @@ def build_backends(*, settings, state, run_dir: Path, trace,
             TestJob(key=f"{key}_{abs(hash(cmd)) % 10 ** 8}", command=cmd,
                     timeout_sec=float(kw.get("timeout") or 1800),
                     min_gpus=0, gpu_lock=True),
-            _target_test_env(settings, manifest))
+            _target_test_env(settings, manifest, host_env=host_env))
         tail = ""
         try:
             if outcome.log_file and Path(outcome.log_file).is_file():
@@ -300,7 +358,7 @@ def build_backends(*, settings, state, run_dir: Path, trace,
             TestJob(key="agent_precommit", command=command,
                     timeout_sec=float(pc.get("timeout_sec") or 600),
                     min_gpus=0, gpu_lock=False),
-            _target_test_env(settings, manifest))
+            _target_test_env(settings, manifest, host_env=host_env))
         return {"exit_code": outcome.rc, "passed": outcome.rc == 0,
                 "log_file": outcome.log_file}
 
@@ -480,7 +538,7 @@ def build_backends(*, settings, state, run_dir: Path, trace,
         try:
             from ...knowledge_docs import KnowledgeDocs
             kn = manifest.get("knowledge") or {}
-            docs = KnowledgeDocs(ctx.settings.knowledge_dir,
+            docs = KnowledgeDocs(settings.knowledge_dir,
                                  kn.get("repo_subdir"))
             query = str(kw.get("query") or kw.get("keyword") or "").strip()
             if not query:
@@ -497,7 +555,7 @@ def build_backends(*, settings, state, run_dir: Path, trace,
         try:
             from ...knowledge_docs import KnowledgeDocs
             kn = manifest.get("knowledge") or {}
-            docs = KnowledgeDocs(ctx.settings.knowledge_dir,
+            docs = KnowledgeDocs(settings.knowledge_dir,
                                  kn.get("repo_subdir"))
             path = str(kw.get("path") or "").strip()
             if not path:
@@ -598,8 +656,22 @@ def _register_scratch_teardown(ctx: StepContext, scratch: Path) -> None:
     _SCRATCH_REGISTERED.add(key)
     from ..lifecycle import register_finalizer
 
-    async def _teardown_scratch(_outcome, _path=scratch, _key=key) -> None:
+    async def _teardown_scratch(outcome, _path=scratch, _key=key) -> None:
         import shutil
+        # Only a clean terminal discards the disposable checkout. A blocked
+        # or crashed run is RESUMABLE, and the target venv's upstream package is an
+        # editable install resolving INTO this scratch — tearing it down on
+        # those exits silently breaks the upstream import for every later
+        # invocation until some step happens to rebuild the scratch
+        # (run-202601012: a resumed test loop died wholesale on
+        # "No module named <upstream>" because the wheel step replayed its
+        # recorded outcome instead of re-validating the install).
+        status = getattr(outcome, "status", "")
+        if status != "done":
+            print(f"[rebase] upstream scratch kept for the resumable run "
+                  f"(outcome={status or 'crash'}): {_path}", flush=True)
+            _SCRATCH_REGISTERED.discard(_key)
+            return
         shutil.rmtree(_path, ignore_errors=True)
         _SCRATCH_REGISTERED.discard(_key)
 
@@ -621,14 +693,14 @@ def _ensure_upstream_scratch(ctx: StepContext) -> str | StepResult:
     # only a path INSIDE the run dir counts as an existing scratch — a
     # canonical path in `upstream_path` (older state, manual seeding) must
     # never be adopted as the mutable tree
-    if str(scratch).startswith(str(ctx.run_dir)) \
-            and (scratch / ".git").exists():
-        _register_scratch_teardown(ctx, scratch)
-        return str(scratch)
-    if not origin:
-        return StepResult(False, FailureKind.BLOCKED,
-                          "no canonical upstream recorded — prelude gap")
-    scratch = ctx.run_dir / "upstream_scratch"
+    adopted = (str(scratch).startswith(str(ctx.run_dir))
+               and (scratch / ".git").exists())
+    created = False
+    if not adopted:
+        if not origin:
+            return StepResult(False, FailureKind.BLOCKED,
+                              "no canonical upstream recorded — prelude gap")
+        scratch = ctx.run_dir / "upstream_scratch"
     if not (scratch / ".git").exists():
         r = subprocess.run(["git", "clone", "--shared", "--no-checkout",
                             str(origin), str(scratch)],
@@ -637,11 +709,37 @@ def _ensure_upstream_scratch(ctx: StepContext) -> str | StepResult:
             return StepResult(False, FailureKind.BLOCKED,
                               "upstream scratch clone failed: "
                               + r.stderr.strip()[:300])
-        subprocess.run(["git", "-C", str(scratch), "checkout", "--detach",
-                        "HEAD"], capture_output=True, text=True,
-                       timeout=300)
+        created = True
         ctx.trace.record("upstream_scratch_created", path=str(scratch))
     _register_scratch_teardown(ctx, scratch)
+    if origin:
+        # The shared clone borrows local objects, but its fetches must reach
+        # the canonical repository's upstream. Fetching the local clone only
+        # exposes its local branches and can hide a configured release branch.
+        remote = ctx.state.get("upstream_remote", "origin")
+        source_remote = subprocess.run(
+            ["git", "-C", str(origin), "remote", "get-url", str(remote)],
+            capture_output=True, text=True, timeout=30, check=False)
+        if source_remote.returncode == 0 and source_remote.stdout.strip():
+            r = subprocess.run(
+                ["git", "-C", str(scratch), "remote", "set-url", "origin",
+                 source_remote.stdout.strip()],
+                capture_output=True, text=True, timeout=30, check=False)
+            if r.returncode != 0:
+                return StepResult(False, FailureKind.BLOCKED,
+                                  "upstream scratch remote configuration failed")
+    # A resumed wheel step is replayed, not re-run. Restore its recorded
+    # commit instead of silently using the canonical checkout's current HEAD.
+    # Plain checkout preserves local work or fails; never hard-reset it.
+    target = ctx.state.get("upstream_commit")
+    if target or created:
+        r = subprocess.run(["git", "-C", str(scratch), "checkout", "--detach",
+                            str(target or "HEAD")],
+                           capture_output=True, text=True, timeout=300)
+        if r.returncode != 0:
+            return StepResult(False, FailureKind.BLOCKED,
+                              "upstream scratch checkout failed: "
+                              + r.stderr.strip()[:300])
     ctx.state["upstream_path"] = str(scratch)
     return str(scratch)
 
@@ -849,6 +947,8 @@ async def _v3_prelude(ctx: StepContext) -> StepResult:
         extra=ctx.settings.expansion_env())
     if upstream:
         updates["upstream_origin_path"] = upstream
+        updates["upstream_remote"] = (manifest.get("upstream") or {}).get(
+            "remote", "origin")
         ctx.state.setdefault("upstream_origin_path", upstream)
     baseline = _task_params(ctx).get("last_rebase_commit", "") \
         or ctx.state.get("last_rebase_upstream_commit", "")
@@ -892,6 +992,17 @@ async def _v3_prelude(ctx: StepContext) -> StepResult:
                               "(--task-param upstream_commit=<sha>, or a "
                               "resumed run's substate) — refusing to push "
                               "an unprepared branch")
+        # The push path pins this value into the CI Dockerfile, whose pin
+        # forms only accept a full 40-hex SHA (push_to_ci validates the same
+        # way); a short SHA or tag here would pass the signal check and then
+        # fail every push round with "wheel pin does not match". Refuse it
+        # at the boundary instead.
+        if not re.fullmatch(r"[0-9a-f]{40}", upstream_commit):
+            return StepResult(False, FailureKind.BLOCKED,
+                              f"remote_ci upstream-commit signal "
+                              f"'{upstream_commit}' is not a full 40-hex SHA "
+                              "— pass the full commit id the wheel step "
+                              "selected")
         updates["upstream_commit"] = upstream_commit
 
     if mode in MUTATING_MODES:
@@ -1023,6 +1134,7 @@ async def _v3_wheel(ctx: StepContext) -> StepResult:
         installed = wheel_mod.ensure_wheel_installed(
             Path(upstream), found, wheel_spec,
             python=str(Path(venv) / "bin" / "python"),
+            venv_root=Path(venv),
             install_log=ctx.run_dir / "wheel_install.log",
             import_check_log=ctx.run_dir / "wheel_import_check.log",
             pre_checkout_head=pre_head)
@@ -1057,6 +1169,8 @@ async def _v3_assign(ctx: StepContext) -> StepResult:
     cfg = Phase1Config(
         upstream_repo=Path(upstream), target_repo=Path("."),
         log_dir=ctx.run_dir, baseline_commit=baseline,
+        target_branch=(manifest.get("upstream") or {}).get("target_branch")
+        or (manifest.get("repo") or {}).get("default_branch", "main"),
         base_class_watch_paths=tuple((manifest.get("rebase") or {})
                                      .get("base_class_watch_paths") or ()))
     modules = manifest.get("modules") or {}
@@ -1131,6 +1245,10 @@ async def _run_debug_agent(ctx: StepContext, manifest: dict, module: str,
     honestly gave up, or "error:<detail>" when the DEBUG MACHINERY itself
     failed (structural, per the §2.3 taxonomy — agent dispatch failures are
     never ordinary test failures)."""
+    if _task_params(ctx).get("rebase_mode") == "full":
+        upstream = _ensure_upstream_scratch(ctx)
+        if isinstance(upstream, StepResult):
+            return "error:" + upstream.summary
     client = _tier_client(ctx)
     if isinstance(client, StepResult):
         return "error:debug backend unavailable"
@@ -1162,15 +1280,49 @@ async def _run_debug_agent(ctx: StepContext, manifest: dict, module: str,
     ctx.trace.record("debug_attempt", slug=slug, module=module,
                      model=target.model)
     try:
-        result = await run_agent_loop(
-            client, prompt, model=target.model, tool_defs=defs,
-            extra_tools=tools,
-            scope=_module_scope(repo_root, module, manifest,
-                                run_dir=ctx.run_dir),
-            trace=ctx.trace, require_plan_review=False,
-            model_aliases=ctx.settings.model_aliases,
-            model_mismatch_policy=ctx.settings.model_mismatch_policy,
-            agent_log=str(agent_log))
+        scope = _module_scope(repo_root, module, manifest, run_dir=ctx.run_dir)
+        if getattr(target, "kind", "api") == "harness":
+            from ...rebase_engine.module_rebase import (
+                ModuleRunConfig,
+                _harness_attempt,
+            )
+
+            import os as _os
+            config = ModuleRunConfig(
+                vllm_path=paths.vllm_path, omni_path=repo_root,
+                script_dir=str(adapter_dir / "rebase"), model=target.model,
+                log_dir=str(ctx.run_dir), settings=ctx.settings,
+                signal_dir=str(ctx.run_dir / "signals" / "debug" / slug),
+                # the same host facts and budgets a module attempt gets: the
+                # bridge forwards CUDA/HF from here and the debug prompt's
+                # budget note must not fall back to the dataclass defaults
+                cuda_devices=_os.environ.get("CUDA_VISIBLE_DEVICES", "0,1"),
+                hf_home=_os.environ.get("HF_HOME", "/model"),
+                harness_timeout_s=float(getattr(
+                    ctx.settings, "rebase_harness_timeout_sec", 7200)),
+                test_timeout_sec=int(paths.env.get("TEST_TIMEOUT_SEC") or 7200),
+                backend=target.provider_id,
+                backend_model=getattr(ctx.settings, "rebase_backend_model", "")
+                or target.model,
+                manifest_path=str(adapter_dir / "manifest.yaml"),
+                paths_spec={k: val for k, val in _dc_asdict(paths).items()
+                            if k != "env"}, repo=repo_name,
+                target_venv=paths.env.get("VIRTUAL_ENV", ""),
+                state_slice={"task_spec": ctx.state.get("task_spec") or {},
+                             "run_id": ctx.state.get("run_id", ""),
+                             "upstream_commit": ctx.state.get("upstream_commit", "")})
+            result = await _harness_attempt(
+                prompt, module=module or slug, config=config, scope=scope,
+                trace=ctx.trace, tool_defs=defs, plan_prefix="",
+                require_plan_review=False)
+        else:
+            result = await run_agent_loop(
+                client, prompt, model=target.model, tool_defs=defs,
+                extra_tools=tools, scope=scope,
+                trace=ctx.trace, require_plan_review=False,
+                model_aliases=ctx.settings.model_aliases,
+                model_mismatch_policy=ctx.settings.model_mismatch_policy,
+                agent_log=str(agent_log))
     except Exception as exc:  # noqa: BLE001 - a debug crash is STRUCTURAL
         ctx.trace.record("debug_attempt_error", slug=slug, error=str(exc))
         return f"error:debug agent crashed: {exc}"
@@ -1179,6 +1331,10 @@ async def _run_debug_agent(ctx: StepContext, manifest: dict, module: str,
         cleanup_run_processes(ctx.run_dir, ctx.run_dir.name)
     if result.get("done"):
         return "done"
+    if result.get("session_completed"):
+        # A harness can finish honestly without a verified success signal.
+        # That is an unresolved test, not broken dispatch machinery.
+        return "not_done"
     # done=False from the loop is ALWAYS machinery/budget (fatal auth,
     # stream error, model mismatch, truncation abort, max turns) — an agent
     # that finishes, even unsuccessfully, returns done=True. Structural.
@@ -1228,15 +1384,20 @@ def _watchdog_collaborators(ctx: StepContext):
 
     def _client():
         if not client_holder:
-            from anthropic import Anthropic
-
             target = ctx.settings.tier_target("eco")
-            # max_retries=0: the 90 s cap is a WALL cap — the SDK's
-            # default retry loop would multiply it
-            ckw: dict = {"api_key": target.api_key, "max_retries": 0}
-            if target.base_url:
-                ckw["base_url"] = target.base_url
-            client_holder.append((Anthropic(**ckw), target.model))
+            if getattr(target, "kind", "api") == "harness":
+                settings = ctx.settings.model_copy(
+                    update={"strict_backend_timeout_s": 90.0})
+                client = _harness_completion_client(settings, target.provider_id)
+            else:
+                from anthropic import Anthropic
+
+                # max_retries=0: retries must not multiply the 90 s wall cap.
+                ckw: dict = {"api_key": target.api_key, "max_retries": 0}
+                if target.base_url:
+                    ckw["base_url"] = target.base_url
+                client = Anthropic(**ckw)
+            client_holder.append((client, target.model))
         return client_holder[0]
 
     def review_fn(test_name: str, snippet: str) -> str:
@@ -1319,7 +1480,8 @@ async def _v3_test_loop(ctx: StepContext) -> StepResult:
                           outputs={"state_updates": {"phase3_failed": []}})
 
     import os
-    from ...testing.runner import TestJob, TestRunner
+    import subprocess
+    from ...testing.runner import TestJob, TestRunner, pass_marker_for
     from ...testing.watchdog import WatchdogPatterns
     if _venv_declared(manifest) and not _target_venv(
             manifest, extra=ctx.settings.expansion_env()):
@@ -1387,6 +1549,38 @@ async def _v3_test_loop(ctx: StepContext) -> StepResult:
 
     worktree_path = ctx.run_dir / "main_worktree"
 
+    # A main-tracking campaign's wheel can remove symbols the target's main still
+    # imports, so a baseline sharing the campaign venv dies at conftest
+    # import and pre-existing failures read as regressions (run-202601012:
+    # tiny_model_tests' gated-model setup errors — the identical errors
+    # were PRE-EXISTING in the merged v0.30 campaign). Baseline runs get a
+    # venv carrying the LAST-REBASE wheel; None keeps the old shared-venv
+    # behavior (regression-preserving, never a silent pass).
+    baseline_commit = str(ctx.state.get("last_rebase_upstream_commit")
+                          or "")
+    _baseline_venv_cache: list[Path | None] = []
+
+    def _ensure_baseline_venv() -> Path | None:
+        if _baseline_venv_cache:
+            return _baseline_venv_cache[0]
+        result: Path | None = None
+        rb_wheel = (manifest.get("rebase") or {}).get("wheel")
+        venv = _target_venv(manifest, extra=ctx.settings.expansion_env())
+        upstream = str(ctx.state.get("upstream_path", "") or "")
+        if baseline_commit and rb_wheel and venv and upstream:
+            result = wheel_mod.ensure_baseline_venv(
+                Path(venv), wheel_mod.WheelSpec.from_manifest(rb_wheel),
+                Path(upstream), baseline_commit)
+        if result is None:
+            ctx.trace.record(
+                "baseline_venv_unavailable",
+                commit=baseline_commit[:12] or None,
+                detail="baseline runs share the campaign venv; pre-existing "
+                       "classification may be impossible after upstream "
+                       "import-breaking removals")
+        _baseline_venv_cache.append(result)
+        return result
+
     def baseline_fn(slug: str) -> tl.TestRunResult | None:
         wt = tl.ensure_main_worktree(Path(repo), worktree_path,
                                      base_ref=_baseline_ref(manifest))
@@ -1398,12 +1592,15 @@ async def _v3_test_loop(ctx: StepContext) -> StepResult:
             cuda_visible_devices=runner.cuda,
             record_fn=record_fn, review_fn=review_fn, report_fn=report_fn,
             notify_download=notify_download)
-        # main's files must import main's code: prepend the worktree so the
-        # baseline never executes against rebase dependencies (parent's
-        # baseline PYTHONPATH override) — same TARGET env otherwise; infra
-        # outcomes propagate (a baseline timeout must never read as "fails
-        # on main too")
-        env = _target_test_env(ctx.settings, manifest, pythonpath_prepend=str(wt))
+        # Prepend the worktree so baseline imports use its own target source.
+        # Native dependencies come from the BASELINE runtime when one could
+        # be built (last-rebase wheel); bootstrap failures cannot establish
+        # pre-existing test failures. Infra outcomes propagate (a baseline
+        # timeout must never read as "fails on main too")
+        bv = _ensure_baseline_venv()
+        env = _target_test_env(ctx.settings, manifest,
+                               pythonpath_prepend=str(wt),
+                               venv_override=str(bv) if bv else None)
         return _to_result(wt_runner.run(_job(slug), env, baseline=True))
 
     async def debug_fn(slug: str, label: str, rc: int,
@@ -1429,7 +1626,18 @@ async def _v3_test_loop(ctx: StepContext) -> StepResult:
         # debug patch must NOT stay in the tree — assertion failures pass
         # the push gate by default, so leftover edits would eventually be
         # committed and pushed
-        snap, untracked = tl.snapshot_worktree(Path(repo))
+        try:
+            snap, untracked = tl.snapshot_worktree(Path(repo))
+        except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+            ctx.trace.record("local_debug_snapshot_unavailable", slug=slug,
+                             detail=str(exc))
+            return f"debug snapshot unavailable: {exc}"
+        try:
+            policy_before = capture_patch_policy(Path(repo))
+        except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+            ctx.trace.record("local_debug_policy_unavailable", slug=slug,
+                             detail=str(exc))
+            return f"debug patch policy unavailable: {exc}"
         verdict = await _run_debug_agent(
             ctx, manifest, jobs_by_slug[slug].get("module", ""), slug,
             traceback_text or f"{label} failed with rc={rc}")
@@ -1445,6 +1653,21 @@ async def _v3_test_loop(ctx: StepContext) -> StepResult:
             return "post-debug re-run skipped (unverifiable fix)"
         if rerun.rc != 0:
             tl.restore_worktree(Path(repo), snap, untracked)
+            return False
+        try:
+            policy = evaluate_debug_patch(
+                Path(repo), policy_before, local_verdict="passed")
+        except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+            tl.restore_worktree(Path(repo), snap, untracked)
+            pass_marker_for(runner.tests_dir, _job(slug)).unlink(missing_ok=True)
+            ctx.trace.record("local_debug_policy_unavailable", slug=slug,
+                             detail=str(exc))
+            return f"debug patch policy unavailable: {exc}"
+        if not policy.allowed:
+            tl.restore_worktree(Path(repo), snap, untracked)
+            pass_marker_for(runner.tests_dir, _job(slug)).unlink(missing_ok=True)
+            ctx.trace.record("local_debug_policy_rejected", slug=slug,
+                             reason=policy.reason, paths=list(policy.paths))
             return False
         return True
 
@@ -1496,10 +1719,11 @@ _PRECOMMIT_HOOK_ID_RE = None  # compiled lazily
 
 
 def _precommit_failed_hooks(outcome) -> frozenset | None:
-    """The set of pre-commit hook ids that FAILED, parsed from the run's
-    log (`- hook id: <id>` lines follow each Failed hook), or None when
-    the log is missing/unparseable - callers must then treat the failure
-    as structural rather than guess."""
+    """Return IDs following Failed headers, or None for unparseable red.
+
+    Verbose Passed and Skipped hooks print IDs too. Counting those can
+    falsely classify a newly failing hook as pre-existing baseline debt.
+    """
     global _PRECOMMIT_HOOK_ID_RE
     import re
     if _PRECOMMIT_HOOK_ID_RE is None:
@@ -1511,8 +1735,21 @@ def _precommit_failed_hooks(outcome) -> frozenset | None:
                                                 errors="replace")
     except OSError:
         return None
-    ids = frozenset(_PRECOMMIT_HOOK_ID_RE.findall(text))
-    return ids or None
+    text = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", text)
+    status_re = re.compile(
+        r"^\S.*\.{3,}(?:\(no files to check\))?(Passed|Failed|Skipped)$")
+    ids = set()
+    awaiting_failed_id = False
+    for line in text.splitlines():
+        if header := status_re.fullmatch(line):
+            if awaiting_failed_id:
+                return None
+            awaiting_failed_id = header.group(1) == "Failed"
+        elif hook := _PRECOMMIT_HOOK_ID_RE.fullmatch(line):
+            if awaiting_failed_id:
+                ids.add(hook.group(1))
+                awaiting_failed_id = False
+    return frozenset(ids) if ids and not awaiting_failed_id else None
 
 
 def _precommit_baseline(ctx: StepContext, repo: str, pc: dict,
@@ -1543,6 +1780,11 @@ def _precommit_baseline(ctx: StepContext, repo: str, pc: dict,
                       timeout_sec=float(pc.get("timeout_sec") or 600),
                       min_gpus=0, gpu_lock=False)
         outcome = runner.run(job, _target_test_env(ctx.settings, manifest))
+        if not outcome.timed_out and outcome.rc != 0 \
+                and pc.get("retry_once", True):
+            # Auto-fix hooks can change which hooks fail on the next pass.
+            # Compare the same configured retry on current and baseline trees.
+            outcome = runner.run(job, _target_test_env(ctx.settings, manifest))
         if outcome.timed_out:
             # a timed-out probe proves nothing about the baseline - treat
             # it as unavailable so the original red stays STRUCTURAL
@@ -1744,6 +1986,10 @@ async def _v3_module_rebase(ctx: StepContext) -> StepResult:
         ctx, manifest, _task_params(ctx).get("rebase_mode", ""))
     if blocked is not None:
         return blocked
+    if _task_params(ctx).get("rebase_mode") == "full":
+        upstream = _ensure_upstream_scratch(ctx)
+        if isinstance(upstream, StepResult):
+            return upstream
     client = _tier_client(ctx)
     if isinstance(client, StepResult):
         return client
@@ -1804,6 +2050,7 @@ async def _v3_module_rebase(ctx: StepContext) -> StepResult:
         vllm_path=paths.vllm_path, omni_path=paths.omni_path,
         script_dir=str(adapter_dir / "rebase"), model=target.model,
         log_dir=str(ctx.run_dir),
+        signal_dir=str(ctx.run_dir / "signals"),
         last_rebase_vllm_commit=ctx.state.get("last_rebase_upstream_commit",
                                               ""),
         # the prompt's CUDA/HF facts must describe THIS host, not the
@@ -1817,14 +2064,25 @@ async def _v3_module_rebase(ctx: StepContext) -> StepResult:
         backend=getattr(ctx.settings, "rebase_backend", "api") or "api",
         backend_model=getattr(ctx.settings, "rebase_backend_model", "") or "",
         harness_timeout_s=ctx.settings.rebase_harness_timeout_sec,
-        test_timeout_sec=int(paths.env["TEST_TIMEOUT_SEC"]),
+        # the env builder always sets TEST_TIMEOUT_SEC from the adapter's
+        # `rebase.testing.module_timeout_sec`; the fallback only serves
+        # stubbed env builders
+        test_timeout_sec=int(paths.env.get("TEST_TIMEOUT_SEC") or (
+            (manifest.get("rebase") or {}).get("testing") or {}
+        ).get("module_timeout_sec", 7200)),
         settings=ctx.settings,
         manifest_path=str(adapter_dir / "manifest.yaml"),
         paths_spec={k: val for k, val in _dc_asdict(paths).items()
                     if k != "env"},
+        target_venv=paths.env.get("VIRTUAL_ENV", ""),
         repo=str((ctx.state.get("task_spec") or {}).get("repo") or ""),
         state_slice={"task_spec": ctx.state.get("task_spec") or {},
                      "run_id": ctx.state.get("run_id", ""),
+                     "target_branch": (manifest.get("upstream") or {})
+                     .get("target_branch") or (manifest.get("repo") or {})
+                     .get("default_branch", "main"),
+                     "last_rebase_upstream_commit": ctx.state.get(
+                         "last_rebase_upstream_commit", ""),
                      "upstream_commit": ctx.state.get("upstream_commit", "")})
     async with _serial_lock(ctx.run_dir):
         outcome = await rebase_module(
@@ -2125,6 +2383,9 @@ async def _v3_ci(ctx: StepContext) -> StepResult:
 
     from ...rebase_engine.test_manifest import _label_to_slug
 
+    owner_resolver = RemoteOwnerResolver(
+        Path(repo), manifest, tuple(ctx.state.get("active_modules") or ()))
+
     async def debug_fn(jr) -> bool:
         """One serialized CI-debug dispatch (parent `_dispatch_sdk_ci_debug`
         parity): snapshot → agent → tree-change check → local harness
@@ -2139,7 +2400,14 @@ async def _v3_ci(ctx: StepContext) -> StepResult:
                                     f"{jr.name} recorded unfixed")
             return False
         slug = _label_to_slug(jr.name)
-        module = str((_local_jobs().get(slug) or {}).get("module", ""))
+        owner = owner_resolver.resolve(jr.name, _local_jobs())
+        module = owner.module
+        # Routing coverage is independent of leaf identity and CI verdicts.
+        ctx.trace.record("ci_debug_owner_route", job_id=getattr(jr, "job_id", ""),
+                         slug=slug, module=module, status=owner.status,
+                         reason=owner.reason,
+                         candidate_modules=list(owner.candidate_modules),
+                         sources=list(owner.sources), path_count=len(owner.paths))
         log_tail = ""
         try:
             if jr.log_file and Path(jr.log_file).is_file():
@@ -2153,7 +2421,12 @@ async def _v3_ci(ctx: StepContext) -> StepResult:
         # file, a later agent's edit to that same file is invisible to
         # `status --porcelain` (round-1 review)
         before = _worktree_digest(repo)
-        snap, untracked = tl.snapshot_worktree(Path(repo))
+        try:
+            snap, untracked = tl.snapshot_worktree(Path(repo))
+        except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+            ctx.trace.record("ci_debug_snapshot_unavailable", job=jr.name,
+                             detail=str(exc))
+            return False
         try:
             policy_before = capture_patch_policy(Path(repo))
         except (OSError, RuntimeError, subprocess.SubprocessError) as exc:

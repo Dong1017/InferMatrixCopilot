@@ -227,6 +227,60 @@ def test_tool_handlers_parent_shapes(omni_repo):
     assert "not wired" in r["error"]
 
 
+@pytest.mark.parametrize("parent_exits", [False, True])
+def test_run_shell_timeout_kills_model_workers(omni_repo, parent_exits):
+    import os
+    import shlex
+    import signal
+    import sys
+    import time
+
+    if not Path("/proc/self/stat").exists():
+        pytest.skip("requires procfs process identities")
+    _, tools = _tools(omni_repo)
+    pid_file = omni_repo / "worker.pid"
+    script = omni_repo / "spawn.py"
+    script.write_text(
+        "import subprocess, sys, time\n"
+        "from pathlib import Path\n"
+        "child = subprocess.Popen([sys.executable, '-c', "
+        "'import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        "time.sleep(60)'], start_new_session=True)\n"
+        "Path(sys.argv[1]).write_text(str(child.pid))\n"
+        f"time.sleep({1 if parent_exits else 60})\n"
+    )
+    sentinel = subprocess.Popen([sys.executable, "-c",
+                                 "import time; time.sleep(60)"])
+
+    def running(pid):
+        try:
+            stat = Path(f"/proc/{pid}/stat").read_text()
+            return stat.rsplit(")", 1)[1].split()[0] != "Z"
+        except FileNotFoundError:
+            return False
+
+    try:
+        command = shlex.join([sys.executable, str(script), str(pid_file)])
+        result = json.loads(dispatch(
+            "run_shell", {"command": command, "timeout": 2},
+            extra=tools)["result"])
+        assert result == {"exit_code": -1, "stdout": "",
+                          "stderr": "Command timed out after 2s"}
+        child_pid = int(pid_file.read_text())
+        deadline = time.monotonic() + 2
+        while running(child_pid) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert not running(child_pid), "timed-out model worker survived"
+        assert sentinel.poll() is None, "unrelated process was terminated"
+    finally:
+        if pid_file.exists():
+            child_pid = int(pid_file.read_text())
+            if running(child_pid):
+                os.kill(child_pid, signal.SIGKILL)
+        sentinel.terminate()
+        sentinel.wait(timeout=5)
+
+
 def test_extra_tool_opt_in_write_scoping(omni_repo, trace):
     _, tools = _tools(omni_repo)
     scope = ToolScope(

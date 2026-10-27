@@ -545,9 +545,11 @@ def monitor_build(client: CIClient, build_id: str, *,
     try:
         auth = client.list_jobs(build_id)
     except Exception:  # noqa: BLE001 - degrade to the embedded snapshot
-        auth = [j for j in (final.get("jobs") or []) if isinstance(j, dict)]
-        if not final:
-            # neither the jobs endpoint nor the build itself was readable:
+        embedded = final.get("jobs")
+        auth = [j for j in embedded if isinstance(j, dict)] \
+            if isinstance(embedded, list) else []
+        if not isinstance(embedded, list):
+            # Neither source supplied a readable jobs list:
             # the reconciliation contract (nothing missed) cannot be
             # honored, so the outcome must not read clean
             reconciled = False

@@ -23,7 +23,9 @@ empty search result.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -176,14 +178,55 @@ def build_rebase_tools(tool_defs: list[dict], paths: RebasePaths,
 
     def handle_run_shell(command: str, workdir: str | None = None,
                          timeout: int = 600, **_: Any) -> dict:
+        from ..testing.process_tree import collect_descendants, kill_tree
+        from ..testing.runner import TestRunner, _record_walk
+
         cwd = workdir or paths.omni_path
         try:
-            proc = subprocess.run(["bash", "-c", command], capture_output=True,
-                                  text=True, errors="replace", timeout=timeout,
-                                  cwd=cwd, env=dict(paths.env) or None)
-            return {"exit_code": proc.returncode,
-                    "stdout": proc.stdout[-5000:],
-                    "stderr": proc.stderr[-5000:]}
+            with subprocess.Popen(
+                    # Match TestRunner's runtime protection: inherited SSH
+                    # metadata can make noninteractive Bash read ~/.bashrc
+                    # and replace the target venv's PATH before verification.
+                    ["bash", "--norc", "-c", command], stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE, text=True, errors="replace",
+                    cwd=cwd, env=dict(paths.env) or None,
+                    start_new_session=True) as proc:
+                # Killing only bash leaves pytest and setsid'd model workers
+                # alive. Reuse the test runner's identity-checked snapshots so
+                # cleanup also reaches children after their parent exits.
+                identity: dict[int, int] = {}
+                own_pid = os.getpid()
+                _record_walk(identity, [proc.pid], root=proc.pid,
+                             root_parent=own_pid)
+                root_birth = identity.get(proc.pid)
+                stop = threading.Event()
+
+                def snapshot_loop():
+                    while not stop.is_set() and proc.poll() is None:
+                        _record_walk(
+                            identity, collect_descendants(proc.pid),
+                            root=proc.pid, root_parent=own_pid,
+                            root_birth=root_birth)
+                        stop.wait(TestRunner.SNAPSHOT_INTERVAL)
+
+                snapshot_thread = threading.Thread(
+                    target=snapshot_loop, daemon=True)
+                snapshot_thread.start()
+                try:
+                    stdout, stderr = proc.communicate(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    stop.set()
+                    snapshot_thread.join(timeout=10)
+                    kill_tree(sorted(identity), identity=identity)
+                    proc.communicate(timeout=10)
+                    return {"exit_code": -1, "stdout": "",
+                            "stderr": f"Command timed out after {timeout}s"}
+                finally:
+                    stop.set()
+                    snapshot_thread.join(timeout=10)
+                return {"exit_code": proc.returncode,
+                        "stdout": stdout[-5000:],
+                        "stderr": stderr[-5000:]}
         except subprocess.TimeoutExpired:
             return {"exit_code": -1, "stdout": "",
                     "stderr": f"Command timed out after {timeout}s"}

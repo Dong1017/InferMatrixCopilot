@@ -1,6 +1,6 @@
 # providers/cursor.py —— 规范
 
-<!-- verified-against: 2026-09-30 -->
+<!-- verified-against: 2026-10-27 -->
 
 `LOC ~207 · harness transport（Cursor 订阅） · refactor-status: ok`
 
@@ -62,3 +62,15 @@ worktree 物化失败而降级到 live checkout 的 PR run 都在这里。托管
 worktree（repo+PR+sha 分键，run queue 不会让同 PR 的两个 run 并发）与 run 自己的
 目录不加锁。等待上限为会话超时 + 60 s；超时则返回空文本、`truncated`、refusal，
 并记 `capability_gap`（`cursor.exclusive_cwd`），绝不在别人的配置下静默开跑。
+
+## 2026-10-27 会话失败不是干净退出；读审计根
+
+- CLI 在发出 `result` 事件前退出（登录过期、未知模型、崩溃）曾表现为
+  `text=""`、`truncated=False`，模块契约把它读成"会话完成"。现在
+  `_session_failure` 把无 result 的会话标为 truncated 并附 typed refusal
+  （含退出码与 stderr 尾部）；`complete()` 返回 `stop_reason="error"`，
+  harness 评审适配器据此抛错而不是给出裁决。
+- 审计根 = cwd + run_dir + `req.read_roots`（上游 checkout、目标 venv）。
+- `.cursor/mcp.json` 不支持每工具调用超时（CLI 只认 `startupTimeoutSec`），
+  `--print` 模式也没有对应开关；桥调用的客户端期限由 CLI 决定，prompt 不再
+  承诺"随会话预算"。

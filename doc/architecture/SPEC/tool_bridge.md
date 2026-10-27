@@ -1,6 +1,6 @@
 # tool_bridge.py —— 规范
 
-<!-- verified-against: 2026-10-04 -->
+<!-- verified-against: 2026-10-27 -->
 
 `LOC ~308 · 面向 harness 会话的 scoped 工具 MCP server · refactor-status: ok`
 
@@ -59,3 +59,12 @@ bridge 把 run 的 20 工具面 + `doc_search`/`doc_read` 暴露给 harness 会�
 ## 自进化接入（2026-10-04）
 
 bridge spec 序列化 `read_roots`、`deny_prefixes`、`strict_extras`、`executables`，并携带父进程 store 路径和单元上下文。`traced_call` 在每次工具调用时绑定上下文，使跨进程 trace 连续；不传递凭据。
+
+## 宿主事实经 spec 进入桥进程（2026-10-27）
+
+harness CLI 以白名单 env 启动，桥进程的 `os.environ` 里没有调度器授予本
+run 的 `CUDA_VISIBLE_DEVICES`，也没有 `HF_HOME`——`_agent_shell_env` 与
+`_target_test_env` 都从 `os.environ` 读它们，于是桥内 run_pytest/reproduce
+看到的是整机 GPU。spec 的 `rebase.host_env`（仅这两个非机密键，str→str，
+否则 `TypeError`）在重建后端前写进桥进程 env。`rebase.target_venv` 同理
+携带已解析的目标 venv；凭据与完整子环境仍不进 spec。

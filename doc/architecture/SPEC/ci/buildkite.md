@@ -1,6 +1,6 @@
 # ci/buildkite.py —— 规范
 
-<!-- verified-against: 2026-08-25 -->
+<!-- verified-against: 2026-10-27 -->
 
 `LOC ~253 · 边缘（CI provider 客户端） · refactor-status: ok`
 
@@ -60,3 +60,10 @@ opt-in 默认关、BuildCreationRefused 只认 422+disabled、list_jobs/retry_jo
 与最终 reconciliation 都押在它上面。对 `ci_loop.BuildCreationRefused` 的
 惰性 import 是一条轻微的向内依赖（边缘 → rebase_engine）；接入第二个
 provider 时把这个异常类型上提到共享的 CI 契约模块。
+
+## jobs 列表分页（2026-10-27）
+
+`list_jobs` 跟随 `links.next` 游标翻页（同 scheme/host/path 才跟随，去重防
+环），`items`+`links` 形态与旧的裸列表/`jobs` 形态都接受；嵌入式 build 没有
+可读 jobs 列表时抛 `BuildkiteError` 而不是返回空列表（空列表曾被读成
+"没有失败的 job"）。

@@ -131,7 +131,9 @@ class CursorTransport(HarnessTransport):
              model: str = "") -> tuple[list[dict], bool]:
         """One CLI invocation → (parsed events, timed_out). A timeout kills
         the process but keeps the partial stream — a half-done investigation
-        is salvage material, not garbage."""
+        is salvage material, not garbage. The exit code and stderr tail of
+        the last invocation are kept on `self._last_exit` for the session
+        contract to judge an empty stream."""
         # --approve-mcps is load-bearing: headless runs do not auto-approve
         # configured MCP servers, and without it the tool bridge is silently
         # ignored (found in the live smoke — session ran on native tools only)
@@ -141,12 +143,15 @@ class CursorTransport(HarnessTransport):
         if selected:
             cmd += ["--model", selected]
         timed_out = False
+        self._last_exit = (0, "")
         try:
             proc = subprocess.run(
                 cmd, input=text, cwd=cwd, env=sanitized_env(),
                 capture_output=True, text=True, encoding="utf-8",
                 errors="replace", timeout=timeout_s, check=False)
             stdout = proc.stdout or ""
+            self._last_exit = (int(proc.returncode or 0),
+                               (proc.stderr or "")[-400:].strip())
         except subprocess.TimeoutExpired as exc:
             timed_out = True
             raw = exc.stdout or b""
@@ -163,12 +168,33 @@ class CursorTransport(HarnessTransport):
                 continue
         return events, timed_out
 
+    _last_exit: tuple[int, str] = (0, "")
+
     @staticmethod
     def _final_text(events: list[dict]) -> str:
         for event in reversed(events):
             if event.get("type") == "result":
                 return str(event.get("result") or "").strip()
         return ""
+
+    @staticmethod
+    def _has_result(events: list[dict]) -> bool:
+        return any(event.get("type") == "result" for event in events)
+
+    def _session_failure(self, events: list[dict], timed_out: bool) -> str:
+        """Why a finished session is NOT a completed one, or "". A CLI that
+        exits before emitting its `result` event (login expired, unknown
+        model, crash) returns an empty or partial stream with a clean-looking
+        Python return; reading that as a done session let a crashed module
+        attempt pass the wave gate."""
+        if timed_out or self._has_result(events):
+            return ""
+        rc, err = self._last_exit
+        detail = f" (exit code {rc})" if rc else ""
+        tail = f": {err}" if err else ""
+        return (f"cursor-agent ended without a result event{detail}{tail}"
+                if events or rc or err else
+                "cursor-agent produced no output")
 
     @staticmethod
     def _usage(events: list[dict]) -> SessionUsage:
@@ -265,9 +291,11 @@ class CursorTransport(HarnessTransport):
                         shutil.rmtree(path, ignore_errors=True)
                     else:
                         path.unlink(missing_ok=True)
-        audit = audit_events(events, roots=(str(cwd), str(req.run_dir)),
-                             read_only=req.scope.read_only, cwd=str(cwd))
+        audit = audit_events(
+            events, roots=(str(cwd), str(req.run_dir), *req.read_roots),
+            read_only=req.scope.read_only, cwd=str(cwd))
         usage = self._usage(events)
+        failure = self._session_failure(events, timed_out)
         if req.trace is not None:
             req.trace.record(
                 "harness_session", provider=self.spec.id, step=req.step_name,
@@ -275,13 +303,14 @@ class CursorTransport(HarnessTransport):
                 shell_commands=audit.shell_commands,
                 file_reads=audit.file_reads, writes=audit.writes,
                 other_tool_calls=audit.other_tool_calls, timed_out=timed_out,
-                served_model=usage.served_model)
+                session_failure=failure, served_model=usage.served_model)
         return AgentOutcome(
             text=self._final_text(events),
             iterations=0,  # the harness does not expose its round count
             tool_calls=audit.tool_calls,
-            truncated=timed_out,
-            refusals=[f"audit: {v}" for v in audit.violations],
+            truncated=timed_out or bool(failure),
+            refusals=[f"audit: {v}" for v in audit.violations]
+            + ([failure] if failure else []),
             input_tokens=usage.input_tokens,
             output_tokens=usage.output_tokens,
             tools_used=audit.tools_used[:40])
@@ -302,9 +331,14 @@ class CursorTransport(HarnessTransport):
             shutil.rmtree(scratch, ignore_errors=True)
         usage = self._usage(events)
         text = self._final_text(events)
+        failure = self._session_failure(events, timed_out)
         return Reply(
             blocks=[Block(type="text", text=text)] if text else [],
-            stop_reason="max_tokens" if timed_out else "end_turn",
+            # a session that died before its result is not an end_turn: the
+            # harness reviewer adapter raises on anything else, which is how
+            # a plan review on a crashed CLI stays an error, not a verdict
+            stop_reason=("max_tokens" if timed_out else
+                         "error" if failure else "end_turn"),
             usage={"input_tokens": usage.input_tokens,
                    "output_tokens": usage.output_tokens,
                    "cache_read_input_tokens": 0,

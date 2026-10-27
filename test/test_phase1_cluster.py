@@ -241,6 +241,87 @@ def test_install_targets_declared_venv_not_shell(tmp_path, monkeypatch):
         assert c[3:5] == ["--python", "python3"], c
 
 
+def test_install_carries_selected_commit_and_variant(tmp_path, monkeypatch):
+    """A release wheel must not silently use the installer's main default."""
+    from dataclasses import replace
+
+    monkeypatch.setattr(wheel, "release_editable_install_locks",
+                        lambda repo, **k: [])
+    monkeypatch.setenv("WHEEL_COMMIT", "stale-main-commit")
+    monkeypatch.setenv("WHEEL_VARIANT", "stale-variant")
+    selected = "f" * 40
+    spec = replace(SPEC, install_env={
+        "WHEEL_COMMIT": "{commit}", "WHEEL_VARIANT": "{variant}",
+        "OTHER_SETTING": '{"literal":true}',
+    })
+    installed_envs = []
+
+    def run(cmd, **kw):
+        if cmd[:3] == ["uv", "pip", "install"]:
+            installed_envs.append(kw["env"])
+        if cmd[0] == "python3" and "import importlib" in cmd[2]:
+            return 0, "ok", ""
+        if cmd[0] == "python3":
+            return 0, "old-version", ""
+        return 0, "", ""
+
+    wheel.ensure_wheel_installed(
+        tmp_path, selected, spec, python="python3",
+        install_log=tmp_path / "i.log", import_check_log=tmp_path / "c.log",
+        run=run)
+    assert len(installed_envs) == 1
+    assert installed_envs[0]["WHEEL_COMMIT"] == selected
+    assert installed_envs[0]["WHEEL_VARIANT"] == spec.variant
+    assert installed_envs[0]["OTHER_SETTING"] == '{"literal":true}'
+
+
+@pytest.mark.parametrize("mismatch", [None, "commit", "hash", "version", "missing"])
+def test_release_wheel_provenance(mismatch):
+    import json
+    from dataclasses import replace
+
+    commit, digest = "f" * 40, "c" * 64
+    template = "https://wheels.example.ai/{commit}/vllm-0.31.0rc3-cp38-abi3-manylinux_2_28_x86_64.whl"
+    spec = replace(SPEC, install_url_template=template + "#sha256=" + digest)
+    provenance = {
+        "url": template.format(commit="a" * 40 if mismatch == "commit" else commit),
+        "archive_info": {"hashes": {"sha256": "b" * 64 if mismatch == "hash" else digest}},
+    }
+    result = wheel.installed_wheel_matches(
+        spec, commit, "0.30.1" if mismatch == "version" else "0.31.0rc3",
+        python="python3", run=lambda *a, **k: (0, "{}" if mismatch == "missing" else json.dumps(provenance), ""))
+    assert result is (mismatch is None)
+
+
+def test_complete_release_wheel_install_avoids_source_import_shadow(tmp_path, monkeypatch):
+    import json
+    from dataclasses import replace
+
+    monkeypatch.setattr(wheel, "release_editable_install_locks", lambda repo, **k: [])
+    commit, digest = "f" * 40, "c" * 64
+    url = f"https://wheels.example.ai/{commit}/vllm-0.31.0rc3-cp38-abi3-manylinux_2_28_x86_64.whl"
+    spec = replace(SPEC, install_url_template=url + "#sha256=" + digest)
+    provenance = json.dumps({"url": url, "archive_info": {"hashes": {"sha256": digest}}})
+    installs = []
+
+    def run(cmd, **kw):
+        if cmd[:4] == ["python3", "-m", "pip", "install"]:
+            installs.append(cmd)
+        if cmd[0] == "python3":
+            if "direct_url.json" in cmd[2]:
+                return 0, provenance, ""
+            if "import importlib" in cmd[2]:
+                assert kw["cwd"] is None
+                return 0, "healthy", ""
+            return 0, "0.31.0rc3", ""
+        return 0, "", ""
+
+    assert wheel.ensure_wheel_installed(
+        tmp_path, commit, spec, python="python3", run=run,
+        install_log=tmp_path / "install.log", import_check_log=tmp_path / "import.log")
+    assert installs == [["python3", "-m", "pip", "install", url + "#sha256=" + digest]]
+
+
 def test_install_retries_only_import_failures(tmp_path, monkeypatch):
     """Install failure aborts immediately; import-check failure retries with a
     stale-artifact clean between attempts."""

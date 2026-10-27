@@ -1,0 +1,137 @@
+[
+  {
+    "path": "tests/dfx/perf/scripts/run_benchmark.py",
+    "sha256": "3bb8abbca41eb883adf00fe45c61af5c9eff70a687350bc900fc7bb625c979ce",
+    "size": 28286
+  },
+  {
+    "path": "tests/dfx/perf/scripts/run_diffusion_benchmark.py",
+    "sha256": "8d201d2a741a4fd67ffa436b844fd564ab1c3ca8eb1636b4554d5578d917013e",
+    "size": 39816
+  },
+  {
+    "path": "tests/dfx/perf/tests/test_cosmos3_vllm_omni.json",
+    "sha256": "d062280386e384c3a6df2a4a1fd6f4a98d4f21862d41a7c6319ad2aabd965647",
+    "size": 7595
+  },
+  {
+    "path": "tests/dfx/perf/tests/test_hunyuanvideo15_i2v_vllm_omni.json",
+    "sha256": "791aa119c83f7fb0c4981e1702fc71dd6cbc6e101082f3b56a6d70b0675bbcf8",
+    "size": 3273
+  },
+  {
+    "path": "tests/dfx/perf/tests/test_hunyuanvideo15_t2v_vllm_omni.json",
+    "sha256": "a93eb0ed3fc63ac54970b1ef1bddd9424d3a2e77ebeddf301185acd9b3bf7925",
+    "size": 2680
+  },
+  {
+    "path": "tests/dfx/perf/tests/test_lingbot_video_vllm_omni.json",
+    "sha256": "67bfadb157c078a3bffc42bbac8043ab646c9195d8cef9c08a16af3ca8a308c4",
+    "size": 1242
+  },
+  {
+    "path": "tests/dfx/perf/tests/test_minicpmo_4_5.json",
+    "sha256": "5393189dbdd32c2637db4d870a31e8ba217b87b4345b91b341f1217d3872ead0",
+    "size": 4143
+  },
+  {
+    "path": "tests/dfx/perf/tests/test_minicpmo_4_5_duplex_seed_tts.json",
+    "sha256": "f08b75ac4f1a7fdeb27d111697fb724ecbbf3678ac9287ac057b123b4cb5d70e",
+    "size": 1214
+  },
+  {
+    "path": "tests/dfx/perf/tests/test_minicpmo_4_5_ready.json",
+    "sha256": "0a32a0df6a366b970f8238f6b222c66ae634082e9f8d5430f8b9829c183cfc64",
+    "size": 1811
+  },
+  {
+    "path": "tests/dfx/perf/tests/test_minimax_h3_vllm_omni.json",
+    "sha256": "83241d247567e4b305cb456f37361d4e870e65abaf7d662db5e07898de546ae5",
+    "size": 8189
+  },
+  {
+    "path": "tests/dfx/perf/tests/test_qwen3_omni_async_chunk.json",
+    "sha256": "07e73cebd3afb436d43660da88099d7470a87aaee2816878d2d183f17d3e3687",
+    "size": 7698
+  },
+  {
+    "path": "tests/dfx/perf/tests/test_qwen3_omni_no_async_chunk.json",
+    "sha256": "c04d31a628a489415855a1e47e197f00b51a669b40166de9d5c19dd7bdb69e71",
+    "size": 4715
+  },
+  {
+    "path": "tests/dfx/perf/tests/test_qwen_image_vllm_omni.json",
+    "sha256": "b656caebd70743877dcd23a0a8fb74d5d11a57336f08d1c8c83426b66d676309",
+    "size": 10404
+  },
+  {
+    "path": "tests/dfx/perf/tests/test_tts.json",
+    "sha256": "d5dba2018645bdd8215667f1d3ea5b66aa4821d2a21d73bb56951ddbb4bdf2b8",
+    "size": 13411
+  },
+  {
+    "path": "tests/dfx/perf/tests/test_wan22_i2v_vllm_omni.json",
+    "sha256": "16863ef5480083d97790253441d820fa8973d008f7591c1892348d77b220dbc6",
+    "size": 4788
+  },
+  {
+    "path": "tests/e2e/accuracy/hunyuanvideo15_i2v/test_hunyuanvideo15_i2v_video_similarity.py",
+    "sha256": "4e7f4bba6485cf2b23127af217603e66f31a965c69f8001befaf2afe27a21948",
+    "size": 9016
+  },
+  {
+    "path": "tests/e2e/accuracy/hunyuanvideo15_t2v/test_hunyuanvideo15_t2v_video_similarity.py",
+    "sha256": "483f6a319f4285df3db5d67df0e8ae4b350fe3fd68cb765a3db4dfb954183d73",
+    "size": 6719
+  },
+  {
+    "path": "tests/e2e/accuracy/minicpmo_4_5/test_minicpmo_4_5.py",
+    "sha256": "c7755799e4797274705edc27d39af410fb7ef6330dbb12e47ac124634e441308",
+    "size": 7490
+  },
+  {
+    "path": "tests/e2e/accuracy/minimax_h3/test_minimax_h3_i2va_ref2va_similarity.py",
+    "sha256": "8bad00437610cf9d5f66d61166e639bae8110beb7849a9bf754d000f975dfc0c",
+    "size": 19512
+  },
+  {
+    "path": "tests/e2e/accuracy/qwen3_omni/test_qwen3_omni.py",
+    "sha256": "dfb91c44b0723cfb93d8690a64ae476a2b6137474080c3dee1d248e3fa097d21",
+    "size": 5625
+  },
+  {
+    "path": "tests/e2e/accuracy/test_diffusers_backend_similarity.py",
+    "sha256": "b1ec00b143efc22b8e7c10e462dae797e54c11b6ea39cddf49a9dcff4c721eb7",
+    "size": 16264
+  },
+  {
+    "path": "tests/e2e/accuracy/test_hunyuan_image3_lora.py",
+    "sha256": "172e321f4450427b035749e61eeaf0fbf1af5ca6b481fdb96db05883603ce894",
+    "size": 4305
+  },
+  {
+    "path": "tests/e2e/accuracy/test_hunyuan_image3_pixel_accuracy.py",
+    "sha256": "938e27477400c37088e10d897e61f32f90b999cd51f3e8c5d3322284b08bbec3",
+    "size": 10834
+  },
+  {
+    "path": "tests/e2e/accuracy/test_qwen_image.py",
+    "sha256": "b04e270dcfc4f8737949876d2eecde1fec395b037c869a721a1df96e45a54c8d",
+    "size": 10186
+  },
+  {
+    "path": "tests/e2e/accuracy/wan22_i2v/test_wan22_i2v_video_similarity.py",
+    "sha256": "ed92553f2616ffede7cb61b7d7bcf5eb46a0a8dd7cf75656658fbcea32068197",
+    "size": 9556
+  },
+  {
+    "path": "tests/examples/offline_inference/test_text_to_image.py",
+    "sha256": "c23fe19ef095dbc0b8be1c735c8e1e50ba3d40552b61672da61140c64599b913",
+    "size": 2912
+  },
+  {
+    "path": "tests/examples/online_serving/test_text_to_image.py",
+    "sha256": "0c2d4b0b7b54341059f4aa564d128e119acd822166b37263c552dac505e69b12",
+    "size": 4707
+  }
+]

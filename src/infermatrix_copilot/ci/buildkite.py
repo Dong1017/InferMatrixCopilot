@@ -183,22 +183,51 @@ class BuildkiteCI:
 
     def list_jobs(self, build_id: str) -> list[dict]:
         """Authoritative job list: the dedicated /jobs endpoint when it
-        behaves, embedded jobs from a fresh build fetch otherwise (some
+        behaves, following its cursor links through every page; embedded
+        jobs from a fresh build fetch otherwise (some
         builds 404 the endpoint; it can also answer with the build object
         itself — parent-documented). RAISES when neither source is
         readable: retrieval failure must stay distinguishable from a
         genuinely empty job list, or a reconciliation during an API
         outage would silently pass (round-2 review)."""
+        jobs_path = self._build_path(build_id) + "/jobs"
+        url = jobs_path + "?per_page=100"
+        seen: set[str] = set()
+        jobs: list[dict] = []
         try:
-            status, data = self._request(
-                "GET", self._build_path(build_id) + "/jobs?per_page=100",
-                None, False)
-            if status == 200:
-                if isinstance(data, list):
-                    return [j for j in data if isinstance(j, dict)]
-                if isinstance(data, dict) and \
-                        isinstance(data.get("jobs"), list):
-                    return [j for j in data["jobs"] if isinstance(j, dict)]
+            while url:
+                # Cursor links must remain on this build's jobs endpoint;
+                # repeated links cannot establish a complete job list.
+                parsed = urllib.parse.urlsplit(url)
+                expected = urllib.parse.urlsplit(jobs_path)
+                if url in seen or (parsed.scheme, parsed.netloc, parsed.path) != \
+                        (expected.scheme, expected.netloc, expected.path):
+                    break
+                seen.add(url)
+                status, data = self._request("GET", url, None, False)
+                if status != 200:
+                    break
+                if isinstance(data, dict) and "items" in data:
+                    items, links = data["items"], data.get("links")
+                    if not isinstance(items, list) or not isinstance(links, dict):
+                        break
+                    next_url = links.get("next")
+                    if next_url is not None and not isinstance(next_url, str):
+                        break
+                    jobs.extend(j for j in items if isinstance(j, dict))
+                    if not next_url:
+                        return jobs
+                    url = next_url
+                    continue
+                # Preserve the older unpaged response shapes only on the
+                # first request. A partial cursor traversal is never returned.
+                if len(seen) == 1:
+                    if isinstance(data, list):
+                        return [j for j in data if isinstance(j, dict)]
+                    if isinstance(data, dict) and \
+                            isinstance(data.get("jobs"), list):
+                        return [j for j in data["jobs"] if isinstance(j, dict)]
+                break
         except BuildkiteError:
             pass
         build = self.get_build(build_id)
@@ -206,7 +235,10 @@ class BuildkiteCI:
             raise BuildkiteError(
                 "list_jobs failed: the jobs endpoint was unusable and the "
                 "build itself is unreadable")
-        return [j for j in (build.get("jobs") or []) if isinstance(j, dict)]
+        if not isinstance(build.get("jobs"), list):
+            raise BuildkiteError(
+                "list_jobs failed: the build has no readable jobs list")
+        return [j for j in build["jobs"] if isinstance(j, dict)]
 
     def retry_job(self, build_id: str,
                   job_id: str) -> tuple[str | None, bool]:

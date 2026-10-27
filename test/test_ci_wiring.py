@@ -248,6 +248,95 @@ def test_buildkite_list_jobs_fallbacks():
     assert [j["id"] for j in bk.list_jobs("9")] == ["j4"]
 
 
+def test_buildkite_list_jobs_follows_all_cursor_pages():
+    jobs = [{"id": f"j{i}"} for i in range(106)]
+    next_url = ("https://api.buildkite.com/v2/organizations/o/pipelines/p"
+                "/builds/9/jobs?after=job100&per_page=100")
+    rec = Recorder([
+        (200, {"items": jobs[:100], "links": {"next": next_url}}),
+        (200, {"items": jobs[100:], "links": {}}),
+    ])
+    bk = BuildkiteCI("t", "o", "p", request=rec)
+    assert bk.list_jobs("9") == jobs
+    assert [call[1] for call in rec.calls] == [
+        bk._build_path("9") + "/jobs?per_page=100", next_url]
+
+
+def test_buildkite_list_jobs_follows_cursor_after_short_page():
+    next_url = ("https://api.buildkite.com/v2/organizations/o/pipelines/p"
+                "/builds/9/jobs?after=short&per_page=100")
+    rec = Recorder([
+        (200, {"items": [{"id": "j1"}], "links": {"next": next_url}}),
+        (200, {"items": [{"id": "j2"}], "links": {"next": None}}),
+    ])
+    bk = BuildkiteCI("t", "o", "p", request=rec)
+    assert [j["id"] for j in bk.list_jobs("9")] == ["j1", "j2"]
+
+
+def test_buildkite_list_jobs_page_failure_uses_complete_fresh_build():
+    jobs = [{"id": f"j{i}"} for i in range(106)]
+    next_url = ("https://api.buildkite.com/v2/organizations/o/pipelines/p"
+                "/builds/9/jobs?after=job100&per_page=100")
+    rec = Recorder([
+        (200, {"items": jobs[:100], "links": {"next": next_url}}),
+        (503, {}),
+        (200, {"number": 9, "jobs": jobs}),
+    ])
+    bk = BuildkiteCI("t", "o", "p", request=rec)
+    assert bk.list_jobs("9") == jobs
+    assert rec.calls[-1][1] == bk._build_path("9")
+
+
+@pytest.mark.parametrize("next_url", [
+    ("https://api.buildkite.com/v2/organizations/o/pipelines/p/builds/9/jobs"
+     "?per_page=100"),  # repeated first page
+    "https://api.buildkite.com/v2/organizations/o/pipelines/p/builds/10/jobs",
+    "https://other.example/jobs",
+])
+def test_buildkite_list_jobs_invalid_cursor_never_returns_partial(next_url):
+    rec = Recorder([
+        (200, {"items": [{"id": "partial"}], "links": {"next": next_url}}),
+        (503, {}),  # the fresh build fallback is also unreadable
+    ])
+    bk = BuildkiteCI("t", "o", "p", request=rec)
+    with pytest.raises(BuildkiteError, match="build itself is unreadable"):
+        bk.list_jobs("9")
+    assert [call[1] for call in rec.calls] == [
+        bk._build_path("9") + "/jobs?per_page=100", bk._build_path("9")]
+
+
+@pytest.mark.parametrize("jobs", [None, "unreadable"])
+def test_buildkite_list_jobs_requires_readable_fallback_jobs(jobs):
+    rec = Recorder([(503, {}), (200, {"number": 9, "jobs": jobs})])
+    bk = BuildkiteCI("t", "o", "p", request=rec)
+    with pytest.raises(BuildkiteError, match="no readable jobs list"):
+        bk.list_jobs("9")
+
+
+def test_monitor_reconciles_failure_beyond_first_cursor_page():
+    jobs = [{"id": f"j{i}", "name": f"CUDA {i}", "type": "script",
+             "state": "passed", "exit_status": 0} for i in range(106)]
+    jobs[-1].update(state="failed", exit_status=1)
+    next_url = ("https://api.buildkite.com/v2/organizations/o/pipelines/p"
+                "/builds/9/jobs?after=job100&per_page=100")
+    snapshot = {"number": 9, "state": "passed", "jobs": jobs[:100]}
+    rec = Recorder([
+        (200, snapshot),  # lagging poll snapshot
+        (200, snapshot),  # lagging final build snapshot
+        (200, {"items": jobs[:100], "links": {"next": next_url}}),
+        (200, {"items": jobs[100:], "links": {}}),
+        (200, "RuntimeError: failure beyond the first page"),
+    ])
+    bk = BuildkiteCI("t", "o", "p", request=rec)
+    out = ci_loop.monitor_build(bk, "9", spec=CIClassifySpec(),
+                                retry_max=0, poll_sec=0, sleep=lambda s: None)
+    assert out.reconciled and not out.clean_pass
+    assert len(out.jobs) == 106
+    assert out.jobs[-1].job_id == "j105"
+    assert out.jobs[-1].classification == "failed"
+    assert len(rec.calls) == 5
+
+
 def test_buildkite_build_lookups():
     rec = Recorder([(200, [{"number": 1, "state": "running"}])])
     bk = BuildkiteCI("t", "o", "p", request=rec)
@@ -1484,6 +1573,20 @@ def test_buildkite_list_jobs_raises_when_nothing_readable():
         bk.list_jobs("9")
 
 
+def test_monitor_reconciliation_missing_embedded_jobs_never_passes():
+    class OutageCI(ScriptedCI):
+        def list_jobs(self, build_id):
+            raise BuildkiteError("list_jobs failed")
+
+    ci = OutageCI(snapshots=[
+        {"state": "passed", "jobs": [_job("Green", "passed", 0)]},
+        {"state": "passed"},
+    ])
+    out = ci_loop.monitor_build(ci, "b", spec=CIClassifySpec(), poll_sec=0,
+                                sleep=lambda s: None)
+    assert out.reconciled is False and not out.clean_pass
+
+
 def test_rounds_resume_recovers_intent_before_new_index(tmp_path):
     """Round-2 review: a crash between durable intent and create ack must
     RECOVER that op (adopt by op-id metadata) — never advance to a fresh
@@ -1606,6 +1709,39 @@ def test_restore_worktree_restores_untracked_content(tmp_path):
     tl.restore_worktree(repo, snap, untracked)
     assert (repo / "accepted_fix.py").is_file()
     assert (repo / "accepted_fix.py").read_text() == "good bytes\n"
+
+
+def test_snapshot_worktree_refuses_head_fallback_when_dirty(tmp_path, monkeypatch):
+    """A failed stash snapshot must never turn a dirty tree into HEAD.
+
+    Restoring such a fallback would erase accepted edits made before the
+    current debug attempt.
+    """
+    import subprocess
+
+    from infermatrix_copilot.rebase_engine import test_loop as tl
+
+    repo = tmp_path / "r"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", repo], check=True)
+    (repo / "tracked.py").write_text("before = 1\n")
+    subprocess.run(["git", "-C", repo, "add", "-A"], check=True)
+    subprocess.run(["git", "-C", repo, "-c", "user.name=t", "-c",
+                    "user.email=t@t", "commit", "-qm", "seed"], check=True)
+    (repo / "tracked.py").write_text("accepted = 2\n")
+
+    real_run = subprocess.run
+
+    def fail_stash(argv, *args, **kwargs):
+        if argv[-3:-1] == ["stash", "create"]:
+            return subprocess.CompletedProcess(argv, 1, "", "snapshot failed")
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(tl.subprocess, "run", fail_stash)
+    with pytest.raises(RuntimeError, match="cannot snapshot dirty tracked worktree"):
+        tl.snapshot_worktree(repo)
+
+    assert (repo / "tracked.py").read_text() == "accepted = 2\n"
 
 
 def test_worktree_digest_sees_chmod_and_symlink_changes(tmp_path):

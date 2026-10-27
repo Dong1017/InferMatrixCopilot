@@ -138,10 +138,16 @@ kills a healthy job (observed: `simple_engineentrypoints_test` killed
 mid-pass during the v0.28.0 full run; surrounding tests were PASSING).
 Tier 1 matches the RAW tail — the learned-noise overlay only guards
 Tier 2 — so the seed itself must not match "non-fatal". Deliberate
-divergence: seed and golden both carry `(?<!non-)FATAL` (the
+divergence: seed and golden both carry `(?<![\w-])FATAL(?!\w)` (the
 `simulation_allowlist` `non_fatal` entry only covers simulated TEST
 NAMES, not engine log prose). The parent carries the same false-kill
 latently; parity here would preserve a bug.
+
+The v0.31.0 full platform run exposed a second form on 2026-10-03:
+`_raise_nonfatal_error_message` in an expected HTTP-400 traceback matched
+the older `(?<!non-)FATAL` pattern and killed pytest after the negative
+test passed. Word boundaries now exclude identifiers and both spellings
+of nonfatal prose, while standalone fatal messages still trigger Tier 1.
 
 ## 9. Precommit red-on-baseline gates every push (live run 2026-08-23) — DECIDED
 
@@ -161,3 +167,92 @@ tree — module changes are uncommitted at phase 3.2). Baseline red ⇒
 `strict_push_gate=true`); baseline green ⇒ `failed` stays structural.
 The marks debt itself belongs upstream (vllm-omni main), not on the
 rebase branch.
+
+## 10. Live worker coverage and retired checker commands (2026-10-01)
+
+The main-commit campaign found a removed upstream `RoutedExpertsTensors`
+import in `worker_v2`, outside the original worker scope. Operational worker
+paths, tests, routing and smoke imports now include both implementations.
+Historical prompt maps and goldens stay unchanged; `live_module_overrides`
+selects the expanded scope only for live renders. The separate routing and
+test-map flavors remain separate, with the same explicit coverage addition.
+
+The live agent also stalled searching the shared filesystem for the retired
+41/42 shell scripts. Live guidance now names the shipped `api_drift_guard.py`
+and an AST-derived upstream import audit through `run_import_check`. Both
+checks must be repeated after fixes and fail on mismatches or broken imports.
+Parent-parity templates remain unchanged.
+
+## 11. Resume must restore the recorded upstream commit (2026-10-01)
+
+Teardown removes the disposable upstream clone, while resume replays the
+completed wheel and assignment steps. Module/debug entry now re-ensures the
+scratch checkout and restores `upstream_commit`; checkout failure blocks.
+Recreated and surviving scratch checkouts are tested with a canonical HEAD
+different from the recorded pin, including the module-to-agent handoff.
+
+## 12. Module signals must stay inside the run directory (2026-10-01)
+
+The module config omitted `signal_dir`, rendering completion markers at the
+filesystem root. The live worker hit the scope refusal and a permission error.
+Assembly now supplies `run_dir/signals`; live guidance gives the same fallback
+through `IMX_LOG_DIR` for already-running processes with an empty value. The
+module-scope integration test verifies the marker is writable inside the run.
+
+## 13. Current renderer, EngineClient and custom-pipeline checks (2026-10-01)
+
+The live guard skipped the deleted `InputPreprocessor` import and missed a new
+abstract `EngineClient.release_kv_cache_memory` method that prevented every
+`AsyncOmni` construction. It now checks the dynamic Omni subclass of
+`BaseRenderer` and rejects missing concrete EngineClient implementations.
+Regressions cover renderer parameter drift and a newly required abstract API.
+Operational custom-pipeline paths now point to `tests/e2e/features/`; the
+historical prompt maps and goldens retain the old offline-inference paths.
+Assignment routing retains both prefixes so older baseline pipeline jobs
+continue to belong to the worker module.
+The mapped renderer check exposed missing `tok_params` overrides in Omni.
+Input/output upstream assignment and live prompts now include `vllm/renderers/`
+and the actual `tests/inputs/` regressions. Historical prompts stay unchanged.
+
+## 14. Scheduler queue and request-output owners (2026-10-01)
+
+The target scheduler replaces `skipped_waiting` with `kv_holding_waiting` and
+`deferred_waiting`, while keeping distinct running-slot and active-request
+limits. The original scheduler test map omitted `tests/core/sched/`, where
+real queue, streaming and cleanup failures surfaced. Operational scheduler
+tests and live prompts now include that directory and the shared CFG pairing
+tests. Historical prompt maps and stored golden files stay unchanged.
+
+The same transition adds fixed-token prompt scores to model-runner, engine-core
+and request outputs. Import checks cannot detect lost result fields; validation
+must exercise real upstream output construction and asynchronous device-to-host
+delivery, then verify serialization and the final request-output wrapper.
+
+## 15. Local baseline failures require matching evidence (2026-10-02)
+
+The old local loop treated any nonzero baseline exit as proof that the
+current failure pre-existed. During main API alignment, the baseline could
+not import the retired `RoutedExpertsLists` symbol against the new runtime;
+it never ran the six failing metrics tests. That import crash therefore
+cannot establish that those metrics failures existed on main.
+
+The local loop now requires every current pytest failure/error node and
+normalized exception line to appear in the baseline log before calling a
+job pre-existing. Missing logs, bootstrap errors, different tests, and
+different causes remain actionable regressions. Tests cover real log-file
+inputs and a baseline containing additional old failures. The original
+job commands, timeouts, and stored prompt goldens are unchanged.
+
+## 16. SSH Bash startup must not override the selected runtime (2026-10-03)
+
+Bash started with inherited SSH metadata and `SHLVL=0` can read `~/.bashrc`
+even for `bash -c`. On this host that file prepends `~/.local/bin`, so a
+release-runtime pytest launched a foreign vLLM 0.28.0 CLI in the benchmark
+subprocess. A controlled SSH fixture reproduces the path change; the same
+unmodified benchmark test passes when the selected release CLI runs.
+
+The test runner now uses `bash --norc -c` for both setup and test commands.
+Commands, job environments, markers, timeouts, and GPU geometry stay intact.
+The golden command checks still require the captured command byte-for-byte;
+only the shell startup flag changes. A real Bash regression test checks setup
+and test CLI resolution with an adversarial startup file.

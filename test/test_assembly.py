@@ -188,16 +188,17 @@ def test_manifest_build(ci_repo):
 
 def test_test_loop_decision_matrix(tmp_path):
     sub = Substate(tmp_path, "run-1")
+    old_failure = "E AssertionError: existing failure\nFAILED tests/test_old.py::test_old\n"
     jobs = [{"slug": s, "label": s, "min_gpus": 1}
             for s in ("pass", "hwskip", "preexisting", "regression_fixed",
                       "regression_stuck", "infra")]
     runs = {"pass": tl.TestRunResult(0),
             "hwskip": tl.TestRunResult(0, skipped=True, skip_reason="gpu"),
-            "preexisting": tl.TestRunResult(1),
+            "preexisting": tl.TestRunResult(1, output=old_failure),
             "regression_fixed": tl.TestRunResult(1),
             "regression_stuck": tl.TestRunResult(1),
             "infra": tl.TestRunResult(1)}
-    baselines = {"preexisting": tl.TestRunResult(1),       # fails on main too
+    baselines = {"preexisting": tl.TestRunResult(1, output=old_failure),
                  "regression_fixed": tl.TestRunResult(0),
                  "regression_stuck": tl.TestRunResult(0),
                  "infra": None}                            # worktree broken
@@ -225,6 +226,38 @@ def test_test_loop_decision_matrix(tmp_path):
         run_fn=lambda s: reran.append(s) or runs[s],
         baseline_fn=lambda s: baselines[s], debug_fn=debug_fn))
     assert result2["passed"] >= 2 and "pass" not in reran
+
+
+@pytest.mark.parametrize("baseline_log, preexisting", [
+    ("ImportError: cannot import name 'RoutedExpertsLists'", False),
+    ("", False),
+    ("E TypeError: new API\nFAILED tests/test_metrics.py::test_register\n", False),
+    ("E AssertionError: missing series\nFAILED tests/test_other.py::test_other\n", False),
+    ("E AssertionError: missing series\nFAILED tests/test_metrics.py::test_register\n", True),
+    (("E AssertionError: missing series\nFAILED tests/test_metrics.py::test_register\n"
+      "E TypeError: old extra failure\nFAILED tests/test_other.py::test_other\n"), True),
+])
+def test_local_baseline_requires_matching_failures_and_causes(
+        tmp_path, baseline_log, preexisting):
+    current = tmp_path / "current.log"
+    current.write_text("E AssertionError: missing series\n"
+                       "FAILED tests/test_metrics.py::test_register\n")
+    baseline = tmp_path / "baseline.log"
+    baseline.write_text(baseline_log)
+    debugged = []
+
+    async def debug_fn(slug, label, rc, output):
+        debugged.append(slug)
+        return False
+
+    result = asyncio.run(tl.run_test_loop(
+        [{"slug": "metrics"}], substate=Substate(tmp_path, "baseline-evidence"),
+        run_fn=lambda slug: tl.TestRunResult(1, output=str(current)),
+        baseline_fn=lambda slug: tl.TestRunResult(1, output=str(baseline)),
+        debug_fn=debug_fn))
+    assert result["skipped_tests"] == (["metrics"] if preexisting else [])
+    assert result["failed_tests"] == ([] if preexisting else ["metrics"])
+    assert debugged == ([] if preexisting else ["metrics"])
 
 
 def test_test_loop_infra_is_structural(tmp_path):
@@ -779,11 +812,20 @@ def test_v3_prelude_inits_runtime(v3_env, settings, trace, tmp_path,
     assert probe_up.acquire(blocking=False) is False
     # the lifecycle finalizer releases on every exit path — and tears the
     # disposable scratch down
+    # (a crash-shaped outcome keeps the scratch: the run is resumable and
+    # the target venv's editable vllm resolves into it; only a clean done
+    # discards it — the finalizer list is consumed, so re-register for the
+    # done pass)
     asyncio.run(lifecycle.finalize(run_dir, None))
     assert probe.acquire(blocking=False) is True
     probe.release()
     assert probe_up.acquire(blocking=False) is True
     probe_up.release()
+    assert (run_dir / "upstream_scratch").is_dir()
+    from infermatrix_copilot.engine.steps import rebase_v3
+    rebase_v3._register_scratch_teardown(
+        SimpleNamespace(run_dir=run_dir), run_dir / "upstream_scratch")
+    asyncio.run(lifecycle.finalize(run_dir, SimpleNamespace(status="done")))
     assert not (run_dir / "upstream_scratch").exists()
 
     # report_only never locks
@@ -1153,6 +1195,10 @@ def test_v3_module_scope_and_serialization(v3_agent_env, settings, trace,
                for p in scope.path_scope.primary)
     assert f"{rd}/plans/*" in scope.path_scope.primary
     assert scope.root == root
+    signal_path = str(Path(configs["worker_runner"].signal_dir)
+                      / "module.worker_runner.done")
+    assert configs["worker_runner"].signal_dir == str(run_dir / "signals")
+    assert scope.path_scope.check_write(signal_path).allowed
     # the decision write is allowed AND in primary (no out-of-scope noise)
     d = scope.path_scope.check_write(
         f"{rd}/plans/module-worker_runner/x.decision.md")
@@ -1460,6 +1506,66 @@ def test_v3_module_rebase_idempotent_on_resume(v3_agent_env, settings,
     assert r.outputs["state_updates"]["module_worker_runner_status"] == "done"
 
 
+@pytest.mark.parametrize("contents, expected", [
+    ("Suggestion...Passed\n- hook id: suggestion\n", None),
+    (("Migration...(no files to check)Skipped\n"
+      "- hook id: migration\n"), None),
+    (("Mypy...Failed\n- hook id: mypy\nSuggestion...Passed\n"
+      "- hook id: suggestion\n"), frozenset({"mypy"})),
+    ("Mypy...\x1b[41mFailed\x1b[0m\n- hook id: mypy\n",
+     frozenset({"mypy"})),
+    (("Unknown...Failed\nSuggestion...Passed\n"
+      "- hook id: suggestion\n"), None),
+    ("Unknown...Failed\nMypy...Failed\n- hook id: mypy\n", None),
+])
+def test_precommit_failed_hooks_requires_failed_status(tmp_path, contents,
+                                                       expected):
+    from infermatrix_copilot.engine.steps.rebase_v3 import _precommit_failed_hooks
+
+    log = tmp_path / "precommit.log"
+    log.write_text(contents)
+    assert _precommit_failed_hooks(
+        SimpleNamespace(log_file=str(log))) == expected
+
+
+@pytest.mark.parametrize("retry_once, results, expected", [
+    (True, [(1, False, "spdx"), (1, False, "ruff")],
+     (1, frozenset({"ruff"}))),
+    (True, [(1, False, "spdx"), (0, False, None)], (0, frozenset())),
+    (False, [(1, False, "spdx")], (1, frozenset({"spdx"}))),
+    (True, [(0, False, None)], (0, frozenset())),
+    (True, [(1, True, "spdx")], None),
+    (True, [(1, False, "spdx"), (1, True, "ruff")], None),
+])
+def test_precommit_baseline_retry_parity(
+        v3_env, settings, trace, monkeypatch, retry_once, results, expected):
+    """Auto-fix baseline retries use the final verdict; timeouts prove nothing."""
+    from infermatrix_copilot.engine.step import StepContext
+    from infermatrix_copilot.engine.steps.rebase_v3 import _precommit_baseline
+    from infermatrix_copilot.testing import runner as runner_mod
+
+    _, _, repo, run_dir = v3_env
+    calls = []
+
+    def run(self, job, env):
+        rc, timed_out, hook = results[len(calls)]
+        calls.append((self.repo_root, job.command, job.timeout_sec))
+        log = run_dir / f"baseline-{len(calls)}.log"
+        log.write_text(f"Hook...Failed\n- hook id: {hook}\n" if hook else "")
+        return runner_mod.TestOutcome(rc=rc, timed_out=timed_out,
+                                      log_file=str(log))
+
+    monkeypatch.setattr(runner_mod.TestRunner, "run", run)
+    ctx = StepContext(settings=settings, params={}, run_dir=run_dir,
+                      trace=trace, state={})
+    pc = {"retry_once": retry_once, "timeout_sec": 123}
+    result = _precommit_baseline(ctx, str(repo), pc, "pre-commit run -a", {})
+    assert result == expected
+    wt = run_dir / "precommit_baseline_wt"
+    assert calls == [(wt, "pre-commit run -a", 123)] * len(results)
+    assert not wt.exists()
+
+
 def test_v3_precommit_step(v3_env, settings, trace, monkeypatch):
     """Phase 3.2: the adapter-declared precommit runs after the local loop,
     retries once (auto-fix hooks), and its substate verdict feeds the push
@@ -1495,7 +1601,7 @@ def test_v3_precommit_step(v3_env, settings, trace, monkeypatch):
     assert pc["result"] == "passed" and pc["attempt"] == 1
     assert evaluate_push_gate(data, {}).allowed
 
-    # both attempts red, baseline (3rd run) ALSO red on the SAME hook set:
+    # both attempts red, baseline (3rd and 4th runs) ALSO red on SAME hooks:
     # the debt pre-exists the run - recorded distinctly, gate FLAGS
     # instead of blocking
     def hook_outcome(name, rc, hooks, timed_out=False):
@@ -1515,11 +1621,12 @@ def test_v3_precommit_step(v3_env, settings, trace, monkeypatch):
     ran.clear()
     scripted[:] = [hook_outcome("cur1", 1, ["check-test-ci-coverage"]),
                    hook_outcome("cur2", 1, ["check-test-ci-coverage"]),
-                   hook_outcome("base1", 1, ["check-test-ci-coverage"])]
+                   hook_outcome("base1", 1, ["check-test-ci-coverage"]),
+                   hook_outcome("base1-retry", 1, ["check-test-ci-coverage"])]
     r = asyncio.run(registry.get("rebase.v3_precommit").handler(
         ctx_for("run-pc2")))
     assert r.ok and "PRE-EXISTS" in r.summary        # substate data, step ok
-    assert len(ran) == 3                             # retry + baseline probe
+    assert len(ran) == 4                             # same retry for baseline
     data = Substate(run_dir.parent / "dir-run-pc2", "run-pc2").read()
     assert data["tests"]["precommit"]["result"] == "failed_preexisting"
     d = evaluate_push_gate(data, {})
@@ -1534,7 +1641,8 @@ def test_v3_precommit_step(v3_env, settings, trace, monkeypatch):
                                             "ruff"]),
                    hook_outcome("cur4", 1, ["check-test-ci-coverage",
                                             "ruff"]),
-                   hook_outcome("base2", 1, ["check-test-ci-coverage"])]
+                   hook_outcome("base2", 1, ["check-test-ci-coverage"]),
+                   hook_outcome("base2-retry", 1, ["check-test-ci-coverage"])]
     r = asyncio.run(registry.get("rebase.v3_precommit").handler(
         ctx_for("run-pc-new")))
     assert r.ok and "FAILED" in r.summary
@@ -1542,11 +1650,32 @@ def test_v3_precommit_step(v3_env, settings, trace, monkeypatch):
     assert data["tests"]["precommit"]["result"] == "failed"
     assert not evaluate_push_gate(data, {}).allowed
 
+    # Verbose passing hooks print their IDs too. A hook that passed in the
+    # baseline but fails now must still block, even alongside existing debt.
+    ran.clear()
+    baseline_verbose = hook_outcome(
+        "base-verbose", 1, ["check-test-ci-coverage"])
+    with Path(baseline_verbose.log_file).open("a") as stream:
+        stream.write("Suggestion...Passed\n- hook id: suggestion\n")
+    scripted[:] = [hook_outcome("cur-verbose1", 1,
+                                ["check-test-ci-coverage", "suggestion"]),
+                   hook_outcome("cur-verbose2", 1,
+                                ["check-test-ci-coverage", "suggestion"]),
+                   baseline_verbose, baseline_verbose]
+    r = asyncio.run(registry.get("rebase.v3_precommit").handler(
+        ctx_for("run-pc-verbose")))
+    assert r.ok and "FAILED" in r.summary
+    data = Substate(run_dir.parent / "dir-run-pc-verbose",
+                    "run-pc-verbose").read()
+    assert data["tests"]["precommit"]["result"] == "failed"
+    assert not evaluate_push_gate(data, {}).allowed
+
     # unparseable logs (no hook ids recorded) stay structural
     ran.clear()
     scripted[:] = [runner_mod.TestOutcome(rc=1),
                    runner_mod.TestOutcome(rc=1),
-                   hook_outcome("base3", 1, ["check-test-ci-coverage"])]
+                   hook_outcome("base3", 1, ["check-test-ci-coverage"]),
+                   hook_outcome("base3-retry", 1, ["check-test-ci-coverage"])]
     r = asyncio.run(registry.get("rebase.v3_precommit").handler(
         ctx_for("run-pc-nolog")))
     data = Substate(run_dir.parent / "dir-run-pc-nolog",
@@ -1923,6 +2052,118 @@ def test_v3_debug_reject_restores_worktree(v3_agent_env, settings, trace,
     assert not (repo / "stray_debug_artifact.py").exists()
 
 
+@pytest.mark.parametrize("mode", [
+    "oracle", "product", "test_fixture", "capture_error", "evaluate_error",
+])
+def test_v3_local_debug_preserves_oracles(v3_env, settings, trace,
+                                         monkeypatch, mode):
+    from infermatrix_copilot.engine.registry import StepRegistry
+    from infermatrix_copilot.engine.step import StepContext
+    from infermatrix_copilot.engine.steps import rebase_v3, register_builtin_steps
+    from infermatrix_copilot.rebase_engine import test_loop as tl_mod
+    from infermatrix_copilot.testing import runner as runner_mod
+
+    _, _, repo, run_dir = v3_env
+    test_file = repo / "tests" / "test_value.py"
+    product_file = repo / "engine.py"
+    original = "value = 0\ndef test_value():\n    assert value == 1\n"
+    test_file.write_text(original)
+    product_file.write_text("value = 0\n")
+    subprocess.run(["git", "add", "tests/test_value.py", "engine.py"],
+                   cwd=repo, check=True)
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t",
+                    "commit", "-qm", "fixtures"], cwd=repo, check=True)
+    monkeypatch.setattr(rebase_v3, "_tier_client", lambda ctx: object())
+    dispatched = []
+
+    async def fake_debug(*args):
+        dispatched.append(mode)
+        if mode == "oracle":
+            test_file.write_text(original.replace("assert value == 1",
+                                                   "assert True"))
+        elif mode == "test_fixture":
+            test_file.write_text(original.replace("value = 0", "value = 1"))
+        else:
+            product_file.write_text("value = 1\n")
+        return "done"
+
+    monkeypatch.setattr(rebase_v3, "_run_debug_agent", fake_debug)
+    if mode in ("capture_error", "evaluate_error"):
+        def unavailable(*args, **kwargs):
+            raise RuntimeError("policy unavailable")
+        name = "capture_patch_policy" if mode == "capture_error" \
+            else "evaluate_debug_patch"
+        monkeypatch.setattr(rebase_v3, name, unavailable)
+    runs = []
+
+    def fake_run(self, job, env, *, baseline=False, dry_run=False):
+        if baseline:
+            return runner_mod.TestOutcome(rc=0)
+        runs.append(job.key)
+        if len(runs) == 1:
+            return runner_mod.TestOutcome(rc=1)
+        marker = runner_mod.pass_marker_for(self.tests_dir, job)
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.touch()
+        return runner_mod.TestOutcome(rc=0)
+
+    monkeypatch.setattr(runner_mod.TestRunner, "run", fake_run)
+    monkeypatch.setattr(tl_mod, "ensure_main_worktree",
+                        lambda repo, path, base_ref="origin/main": run_dir / "wt")
+    monkeypatch.setattr(tl_mod, "remove_main_worktree", lambda repo, path: None)
+    ctx = StepContext(
+        settings=settings, params={}, run_dir=run_dir, trace=trace,
+        state={"task_spec": {"repo": "vllm-omni", "params": {}},
+               "run_id": "local-policy", "repo_path": str(repo)})
+    registry = register_builtin_steps(StepRegistry())
+    result = asyncio.run(registry.get("rebase.v3_test_loop").handler(ctx))
+    assert result.ok
+    data = Substate(run_dir, "local-policy").read()
+    accepted = mode in ("product", "test_fixture")
+    assert data["tests"]["pipeline"]["passed"] == int(accepted)
+    assert bool(data["tests"]["infra_failures"]) == mode.endswith("error")
+    assert (run_dir / "tests" / ".passed_quick").exists() == accepted
+    if not accepted:
+        assert test_file.read_text() == original
+        assert product_file.read_text() == "value = 0\n"
+    if mode == "oracle":
+        assert data["tests"]["pipeline"]["failed_tests"] == ["quick"]
+    if mode == "capture_error":
+        assert dispatched == []
+
+
+@pytest.mark.parametrize("operation", ["search", "read"])
+def test_v3_backend_knowledge_uses_configured_root_and_repo_scope(
+        settings, trace, tmp_path, operation):
+    from infermatrix_copilot.engine.steps.rebase_v3 import build_backends
+
+    root = tmp_path / "configured-knowledge"
+    for relative in ["general/shared.md", "repos/vllm-omni/owned.md",
+                     "repos/other/private.md"]:
+        page = root / relative
+        page.parent.mkdir(parents=True, exist_ok=True)
+        page.write_text("# needle\n" + relative)
+    settings.knowledge_dir = root
+    settings.memory_db = tmp_path / "memory.db"
+    backends = build_backends(
+        settings=settings, state={"task_spec": {"repo": "vllm-omni"}},
+        run_dir=tmp_path, trace=trace,
+        manifest={"knowledge": {"repo_subdir": "repos/vllm-omni"}},
+        repo=str(tmp_path / "checkout"), model="test-model")
+
+    if operation == "search":
+        result = backends.doc_search(query="needle")
+        assert "error" not in result, result
+        assert {hit["path"] for hit in result["matches"]} == {
+            "general/shared.md", "repos/vllm-omni/owned.md"}
+    else:
+        result = backends.doc_read(path="repos/vllm-omni/owned.md")
+        assert "error" not in result, result
+        assert "repos/vllm-omni/owned.md" in result["content"]
+        refused = backends.doc_read(path="repos/other/private.md")
+        assert "outside the selected knowledge slices" in refused["error"]
+
+
 def test_v3_backends_are_production(v3_env, settings, trace, tmp_path,
                                     monkeypatch):
     """The module/debug agents get REAL backends: plan review runs on the
@@ -2274,6 +2515,39 @@ def test_v3_module_gets_live_test_plan(v3_agent_env, settings, trace,
     assert (run_dir / "test_manifest.json").exists()
 
 
+def test_v3_scratch_fetches_release_branch_from_canonical_remote(
+        v3_env, settings, trace, tmp_path, monkeypatch):
+    """Borrow local objects while fetching release refs from the real remote."""
+    from infermatrix_copilot.engine import lifecycle
+    from infermatrix_copilot.engine.step import StepContext
+    from infermatrix_copilot.engine.steps import rebase_v3
+
+    _, _, upstream, _ = v3_env
+    def _git(*args):
+        return subprocess.check_output(["git", *args], text=True).strip()
+    upstream_head = _git("-C", str(upstream), "rev-parse", "HEAD")
+    _git("-C", str(upstream), "branch", "releases/v0.31.0", upstream_head)
+    canonical = tmp_path / "canonical-clone"
+    _git("clone", "--quiet", str(upstream), str(canonical))
+    assert subprocess.run(
+        ["git", "-C", str(canonical), "show-ref", "--verify",
+         "refs/heads/releases/v0.31.0"], capture_output=True,
+        check=False).returncode != 0
+    rd = tmp_path / "release-scratch-run"
+    rd.mkdir()
+    monkeypatch.setattr(rebase_v3, "_SCRATCH_REGISTERED", set())
+    ctx = StepContext(settings=settings, params={}, run_dir=rd, trace=trace,
+                      state={"upstream_origin_path": str(canonical)})
+    scratch = rebase_v3._ensure_upstream_scratch(ctx)
+    assert isinstance(scratch, str)
+    _git("-C", scratch, "fetch", "--quiet", "origin")
+    assert _git("-C", scratch, "rev-parse",
+                "origin/releases/v0.31.0") == upstream_head
+    assert (Path(scratch) / ".git/objects/info/alternates").is_file()
+    asyncio.run(lifecycle.finalize(rd, SimpleNamespace(status="done")))
+    assert not Path(scratch).exists()
+
+
 def test_v3_scratch_adoption_reregisters_teardown(v3_env, settings, trace,
                                                   tmp_path, monkeypatch):
     """A resumed process that ADOPTS a surviving scratch checkout must
@@ -2297,8 +2571,106 @@ def test_v3_scratch_adoption_reregisters_teardown(v3_env, settings, trace,
                "upstream_origin_path": str(repo)})
     out = rebase_v3._ensure_upstream_scratch(ctx)
     assert out == str(rd / "upstream_scratch")
-    asyncio.run(lifecycle.finalize(rd, None))
+    asyncio.run(lifecycle.finalize(rd, SimpleNamespace(status="done")))
     assert not (rd / "upstream_scratch").exists()     # torn down anyway
+
+
+@pytest.mark.parametrize("surviving", [False, True])
+def test_v3_resumed_scratch_restores_recorded_commit(
+        v3_env, settings, trace, tmp_path, monkeypatch, surviving):
+    from infermatrix_copilot.engine import lifecycle
+    from infermatrix_copilot.engine.step import StepContext
+    from infermatrix_copilot.engine.steps import rebase_v3
+    _, _, origin, _ = v3_env
+    pinned = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=origin, text=True).strip()
+    (origin / "new-head.txt").write_text("canonical advanced")
+    subprocess.run(["git", "add", "-A"], cwd=origin, check=True)
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t",
+                    "commit", "-qm", "advance"], cwd=origin, check=True)
+    rd = tmp_path / "resume-pin-run"
+    rd.mkdir()
+    scratch = rd / "upstream_scratch"
+    if surviving:
+        subprocess.run(["git", "clone", "-q", str(origin), str(scratch)],
+                       check=True)
+    monkeypatch.setattr(rebase_v3, "_SCRATCH_REGISTERED", set())
+    ctx = StepContext(
+        settings=settings, params={}, run_dir=rd, trace=trace,
+        state={"upstream_path": str(scratch),
+               "upstream_origin_path": str(origin), "upstream_commit": pinned})
+    out = rebase_v3._ensure_upstream_scratch(ctx)
+    assert out == str(scratch)
+    assert subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=scratch, text=True).strip() == pinned
+    assert not (scratch / "new-head.txt").exists()
+    asyncio.run(lifecycle.finalize(rd, SimpleNamespace(status="done")))
+    assert not scratch.exists()
+
+
+def test_v3_module_resume_recreates_pinned_scratch_before_agent(
+        v3_agent_env, settings, trace, monkeypatch):
+    from infermatrix_copilot.engine import lifecycle
+    from infermatrix_copilot.engine.step import StepContext
+    from infermatrix_copilot.engine.steps import rebase_v3
+    from infermatrix_copilot.rebase_engine import module_rebase as mr
+    _, _, origin, rd = v3_agent_env
+    pinned = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=origin, text=True).strip()
+    (origin / "new-head.txt").write_text("later canonical commit")
+    subprocess.run(["git", "add", "-A"], cwd=origin, check=True)
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t",
+                    "commit", "-qm", "advance"], cwd=origin, check=True)
+    monkeypatch.setattr(rebase_v3, "_ensure_checkout_locks", lambda *a: None)
+    monkeypatch.setattr(rebase_v3, "_tier_client", lambda ctx: (
+        object(), SimpleNamespace(model="m", api_key="k", base_url="")))
+    seen = []
+
+    async def fake_agent(module, **kw):
+        path = kw["config"].vllm_path
+        commit = await asyncio.to_thread(
+            subprocess.check_output, ["git", "rev-parse", "HEAD"],
+            cwd=path, text=True)
+        seen.append(commit.strip())
+        return {"status": "done", "exit_code": 0, "debug_attempts": 0,
+                "turns": 1, "summary": "verified"}
+
+    monkeypatch.setattr(mr, "rebase_module", fake_agent)
+    ctx = StepContext(
+        settings=settings, params={}, run_dir=rd, trace=trace,
+        item="worker_runner",
+        state={"task_spec": {"repo": "vllm-omni",
+                             "params": {"rebase_mode": "full"}},
+               "run_id": "resume-module", "repo_path": str(origin),
+               "upstream_origin_path": str(origin),
+               "upstream_path": str(rd / "upstream_scratch"),
+               "upstream_commit": pinned})
+    result = asyncio.run(rebase_v3._v3_module_rebase(ctx))
+    assert result.ok, result.summary
+    assert seen == [pinned]
+    asyncio.run(lifecycle.finalize(rd, None))
+
+
+def test_v3_scratch_checkout_failure_blocks(settings, trace, tmp_path,
+                                           monkeypatch):
+    from infermatrix_copilot.engine import lifecycle
+    from infermatrix_copilot.engine.step import StepContext, StepResult
+    from infermatrix_copilot.engine.steps import rebase_v3
+    rd = tmp_path / "bad-pin-run"
+    scratch = rd / "upstream_scratch"
+    scratch.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q"], cwd=scratch, check=True)
+    monkeypatch.setattr(rebase_v3, "_SCRATCH_REGISTERED", set())
+    ctx = StepContext(
+        settings=settings, params={}, run_dir=rd, trace=trace,
+        state={"upstream_path": str(scratch),
+               "upstream_commit": "missing-commit"})
+    out = rebase_v3._ensure_upstream_scratch(ctx)
+    assert isinstance(out, StepResult) and not out.ok
+    assert "scratch checkout failed" in out.summary
+    # a BLOCKED exit is resumable: the scratch stays for the retry
+    asyncio.run(lifecycle.finalize(rd, None))
+    assert scratch.exists()
 
 
 def test_v3_push_gate_override_is_logged(v3_env, settings, trace, tmp_path):

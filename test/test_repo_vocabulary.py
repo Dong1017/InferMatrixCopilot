@@ -64,13 +64,19 @@ _VOCAB_CEILINGS = {
     # delegation (PR7 sunset)
     # parity vocabulary: parent-verbatim tool/handler names, prompt prose
     # locked by byte-parity goldens, imx-omni-pytest env contract
-    "rebase_engine/module_rebase.py": 9,
+    # 2026-10-27 (harness-tier + wheel port): +1 module_rebase (the
+    # session's read root is `config.vllm_path`, the parity field name),
+    # +5 prompt_builder (campaign overrides keyed by the parity data names
+    # `vllm_paths`/`omni_files`, upstream-commit facts), +3 rebase_v3 (the
+    # harness debug attempt builds the same `vllm_path`/`omni_path` config
+    # the module attempt does) — identifiers only; prose was neutralized.
+    "rebase_engine/module_rebase.py": 10,
     "rebase_engine/module_pytest.py": 7,
-    "rebase_engine/prompt_builder.py": 34,
+    "rebase_engine/prompt_builder.py": 39,
     "rebase_engine/rebase_tools.py": 15,
     "rebase_engine/test_manifest.py": 3,
     "rebase_engine/worktree.py": 2,
-    "engine/steps/rebase_v3.py": 14,
+    "engine/steps/rebase_v3.py": 17,
     # ceilinged v1-era defaults (also under test_repo_neutral_core)
     "config.py": 4,      # agent-root sibling name (orchestrator cmd: PR7)
     "task_spec.py": 2,   # default_repo literal

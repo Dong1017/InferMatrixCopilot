@@ -211,3 +211,47 @@ def test_audit_resolves_relative_paths_against_session_cwd(tmp_path):
     audit = audit_events(events, roots=(str(tmp_path),), cwd=str(tmp_path))
     assert [v for v in audit.violations if "pkg/mod.py" in v] == []
     assert any("/etc" in v for v in audit.violations)
+
+
+def test_read_roots_widen_the_audit_but_not_the_cwd(tmp_path):
+    """A rebase module agent reads the upstream checkout and the installed
+    runtime; the request names them and the audit admits them, while any
+    other out-of-root read is still recorded."""
+    transport = _transport(tmp_path)
+    req = _request(tmp_path, transport, with_bridge=False)
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+    req.read_roots = (str(upstream),)
+    (tmp_path / "bin" / "events.jsonl").write_text("\n".join([
+        json.dumps({"type": "tool_call", "tool_call": {"readToolCall": {
+            "args": {"path": str(upstream / "vllm" / "config.py")}}}}),
+        json.dumps({"type": "tool_call", "tool_call": {"grepToolCall": {
+            "args": {"path": "/etc"}}}}),
+        json.dumps({"type": "result", "result": "REVIEW"}),
+    ]) + "\n", encoding="utf-8")
+
+    outcome = transport.run_session(req)
+
+    assert outcome.truncated is False
+    assert [r for r in outcome.refusals if "upstream" in r] == []
+    assert any("grep outside session roots: /etc" in r for r in outcome.refusals)
+
+
+def test_session_without_result_event_is_a_failure_not_a_clean_exit(tmp_path):
+    """A CLI that dies before its `result` event (login expired, unknown
+    model, crash) used to come back as text="" and truncated=False, which
+    the module contract read as a completed session."""
+    transport = _transport(tmp_path)
+    req = _request(tmp_path, transport, with_bridge=False)
+    (tmp_path / "bin" / "events.jsonl").write_text(json.dumps(
+        {"type": "system", "model": "Grok 4.7"}) + "\n", encoding="utf-8")
+
+    outcome = transport.run_session(req)
+
+    assert outcome.truncated is True and outcome.text == ""
+    assert any("ended without a result event" in r for r in outcome.refusals)
+    session = [e for e in req.trace.events if e["kind"] == "harness_session"]
+    assert "ended without a result event" in session[0]["session_failure"]
+
+    reply = transport.complete(system="S", messages=[{"role": "user", "content": "x"}])
+    assert reply.stop_reason == "error" and reply.blocks == []

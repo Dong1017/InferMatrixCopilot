@@ -8,6 +8,8 @@ import json
 import stat
 from pathlib import Path
 
+import pytest
+
 from infermatrix_copilot.config import Settings
 from infermatrix_copilot.providers.base import AgentSessionRequest
 from infermatrix_copilot.providers.claude_code import ClaudeCodeTransport
@@ -45,10 +47,10 @@ class FakeTrace:
         self.events.append({"kind": kind, **fields})
 
 
-def _transport(tmp_path: Path) -> ClaudeCodeTransport:
+def _transport(tmp_path: Path, cli_text: str | None = None) -> ClaudeCodeTransport:
     cli = tmp_path / "bin" / "claude"
     cli.parent.mkdir(exist_ok=True)
-    cli.write_text(_FAKE_CLI, encoding="utf-8")
+    cli.write_text(cli_text or _FAKE_CLI, encoding="utf-8")
     cli.chmod(cli.stat().st_mode | stat.S_IXUSR)
     return ClaudeCodeTransport(Settings(
         _env_file=None, strict_backend="claude-code",
@@ -151,3 +153,79 @@ def test_complete_is_toolless_and_scratch(tmp_path):
     assert "--mcp-config" not in argv  # no tools at all on one-shots
     assert argv[argv.index("--system-prompt") + 1] == "CLASSIFY"
     assert "[USER]\nhi" in capture["stdin"]
+
+
+# -- parser: the single result object amid stray output -----------------------
+
+def test_parse_tolerates_stray_lines_around_the_object():
+    obj = {"result": "R", "num_turns": 1, "stop_reason": "end_turn"}
+    line = json.dumps(obj)
+    assert ClaudeCodeTransport._parse(line) == obj
+    # telemetry after the object
+    assert ClaudeCodeTransport._parse(f"{line}\ntrailing noise\n") == obj
+    # a stray line containing a brace BEFORE the object must not shadow it
+    assert ClaudeCodeTransport._parse(
+        f"warn {{ broken\n{line}\n") == obj
+    # a stray dict-like line after the object loses to the real one
+    assert ClaudeCodeTransport._parse(
+        f"{line}\n{{\"partial\": true}}\n") == obj
+    assert ClaudeCodeTransport._parse("") == {}
+    assert ClaudeCodeTransport._parse("no braces at all") == {}
+    assert ClaudeCodeTransport._parse('{"unterminated": ') == {}
+
+
+# -- run_session: bad endings are failed sessions, never green ----------------
+
+_VARIANT_CLI = """#!/usr/bin/env python3
+import json, os, sys
+here = os.path.dirname(os.path.abspath(__file__))
+variant = open(os.path.join(here, "variant")).read().strip()
+base = {"type": "result", "subtype": "success", "is_error": False,
+        "result": "TEXT", "num_turns": 2, "stop_reason": "end_turn",
+        "usage": {}}
+if variant == "error":
+    base.update(is_error=True, result="quota exceeded",
+                stop_reason="error_during_execution")
+elif variant == "refusal":
+    base.update(stop_reason="refusal", result="")
+elif variant == "max_budget":
+    base.update(stop_reason="max_budget", result="")
+if variant == "garbage":
+    print("not json at all")
+else:
+    print(json.dumps(base))
+"""
+# "garbage" prints a non-JSON line that CONTAINS a brace, the exact shape
+# that used to parse to {} and read as a clean empty session.
+_GARBAGE_CLI = """#!/usr/bin/env python3
+print("warn { broken json")
+"""
+
+
+@pytest.mark.parametrize("variant,truncated,refusals", [
+    ("error", True, []),
+    ("refusal", True, ["claude-code stop_reason=refusal"]),
+    ("max_budget", True, ["claude-code stop_reason=max_budget"]),
+    ("garbage", True, []),
+])
+def test_run_session_bad_endings_are_truncated(tmp_path, variant,
+                                               truncated, refusals):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "bin").mkdir(exist_ok=True)
+    (tmp_path / "bin" / "variant").write_text(variant, encoding="utf-8")
+    transport = _transport(tmp_path, _VARIANT_CLI)
+    req = _request(tmp_path, with_bridge=False)
+
+    outcome = transport.run_session(req)
+
+    assert outcome.truncated is truncated
+    assert outcome.refusals == refusals
+
+
+def test_run_session_unparsable_brace_output_is_truncated(tmp_path):
+    transport = _transport(tmp_path, _GARBAGE_CLI)
+    req = _request(tmp_path, with_bridge=False)
+
+    outcome = transport.run_session(req)
+
+    assert outcome.truncated is True and outcome.text == ""

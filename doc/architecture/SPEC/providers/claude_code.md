@@ -1,6 +1,6 @@
 # providers/claude_code.py —— 规范
 
-<!-- verified-against: 2026-09-30 -->
+<!-- verified-against: 2026-10-27 -->
 
 `LOC ~205 · harness transport（Claude 订阅） · refactor-status: ok`
 
@@ -50,3 +50,12 @@ x 必须为正。CLI 在每个 API 请求完成**之后**检查预算：它阻�
 `total_cost_usd` 以 `usage["cost_usd"]` 返回。
 阈值参数由 `budget_arg()` 精确生成：浮点数的最短往返十进制、普通（非科学）记数法；非正、非有限值 → `ValueError`。
 固定精度格式会移动边界（`.4f` 把 0.00001 变成 "0.0000" 即没有阈值，把 0.12345 变成 "0.1235" 即更高的阈值），所以不允许。
+
+## 2026-10-27 会话契约
+
+- 模块契约走 USER 通道（stdin）：`--system-prompt` argv 元素受 128KiB 单参数
+  上限约束，证据包会超出。
+- 以 `is_error` / refusal / `max_budget` 结束、或输出不可解析的会话一律
+  truncated（绝不绿）；refusal/max_budget 另成为 typed refusal，标记文件
+  不能覆盖。
+- `-p json` 解析取最后一个带 `result` 的整行对象，容忍前后杂行。
