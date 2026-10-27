@@ -204,11 +204,18 @@ On its own line (parser-friendly):
 ## Verification (must all pass)
 **Module pytest wrapper:** Every verification line uses `imx-omni-pytest …`. **Do not replace with bare `pytest`.** It applies `test_watchdog.sh`, `TEST_TIMEOUT_SEC`, logs under `\${LOG_DIR}/tests/module_*.log`, and shared GPU lock for **every** pytest line from Phase-2 sessions.
 
-**Long-running shell waits — avoid CLI auth-token expiry:** A single `shellToolCall` blocking idle for >~120 seconds crashes mid-run with `Invalid API key — Please run /login`. The wrapper retries but each retry restarts your session.
-- **Do not** issue `sleep 480 && tail …` to wait for long tests. Use `imx-omni-pytest …` (has its own watchdog + log streaming).
-- For background tasks, prefer **short polled checks** (`for i in 1 2 3 …; do sleep 30; <check>; done`).
-- Cap per-call sleep at 60 s when waiting on a known-running pid; loop with status checks.
-- **Thinking stalls are equally dangerous.** Produce incremental output (file writes, short commands, debug memory entries) to maintain heartbeat visibility. Silent agents are timed out after 7200s with `No code changes from debug agents.`
+**Long-running verification:** The MCP client timeout follows the harness
+session budget; it is not a fixed 30-second limit. Use the module pytest wrapper
+with `TEST_TIMEOUT_SEC={MODULE_TEST_TIMEOUT_SEC}` and allow terminal completion.
+For short observation polls, guard missing paths before invoking commands that
+would otherwise read stdin. Do not duplicate a live test or confuse an
+observation timeout with a test result.
+- All commands, assertions, selected scope and granted GPU geometry remain required.
+- The engine cleans up this attempt's background processes when the attempt ends,
+  including after a normal return. Never return while verification is still live
+  or leave a detached chain for another module to inherit.
+- If background verification is needed, redirect all three standard streams,
+  record the wrapper PID, poll it, and collect its terminal outcome before returning.
 
 Run:
 {IMPORT_CHECK}

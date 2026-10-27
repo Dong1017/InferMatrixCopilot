@@ -185,6 +185,9 @@ def _agent_shell_env(ctx: StepContext, manifest: dict, repo_root: str,
     # with the run identity and merges the runtime noise overlay
     _state = getattr(ctx, "state", None) or {}
     env["IMX_RUN_ID"] = str(_state.get("run_id", "") or ctx.run_dir.name)
+    env["TEST_TIMEOUT_SEC"] = str(
+        ((manifest.get("rebase") or {}).get("testing") or {})
+        .get("module_timeout_sec", 7200))
     _settings = getattr(ctx, "settings", None)
     if _settings is not None:
         from ...memory.paths import KnowledgePaths as _KP2
@@ -689,11 +692,17 @@ def _ensure_checkout_locks(ctx: StepContext, manifest: dict,
         held.append(lock)
     _HELD_LOCKS[key] = held
     from ..lifecycle import register_finalizer
+    from ...rebase_engine.processes import cleanup_run_processes
+
+    cleanup_run_processes(ctx.run_dir, ctx.run_dir.name)
 
     async def _release_locks(_outcome, _key=key) -> None:
-        for h in _HELD_LOCKS.pop(_key, []):
-            h.release()
-        _drop_serial_lock(_key)
+        try:
+            cleanup_run_processes(ctx.run_dir, ctx.run_dir.name)
+        finally:
+            for h in _HELD_LOCKS.pop(_key, []):
+                h.release()
+            _drop_serial_lock(_key)
 
     register_finalizer(ctx.run_dir, _release_locks)
     ctx.trace.record("checkout_locks_acquired",
@@ -1165,6 +1174,9 @@ async def _run_debug_agent(ctx: StepContext, manifest: dict, module: str,
     except Exception as exc:  # noqa: BLE001 - a debug crash is STRUCTURAL
         ctx.trace.record("debug_attempt_error", slug=slug, error=str(exc))
         return f"error:debug agent crashed: {exc}"
+    finally:
+        from ...rebase_engine.processes import cleanup_run_processes
+        cleanup_run_processes(ctx.run_dir, ctx.run_dir.name)
     if result.get("done"):
         return "done"
     # done=False from the loop is ALWAYS machinery/budget (fatal auth,
@@ -1804,6 +1816,8 @@ async def _v3_module_rebase(ctx: StepContext) -> StepResult:
         # harness delegation: "api" (default) keeps the in-process loop
         backend=getattr(ctx.settings, "rebase_backend", "api") or "api",
         backend_model=getattr(ctx.settings, "rebase_backend_model", "") or "",
+        harness_timeout_s=ctx.settings.rebase_harness_timeout_sec,
+        test_timeout_sec=int(paths.env["TEST_TIMEOUT_SEC"]),
         settings=ctx.settings,
         manifest_path=str(adapter_dir / "manifest.yaml"),
         paths_spec={k: val for k, val in _dc_asdict(paths).items()

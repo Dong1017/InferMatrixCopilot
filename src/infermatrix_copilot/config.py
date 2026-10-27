@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import urlparse
 
-from pydantic import field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 _PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -256,6 +256,7 @@ class Settings(BaseSettings):
     # is meaningless to a harness CLI, so it is never forwarded there; empty
     # falls back to `strict_backend_model`, then the harness's own default.
     rebase_backend_model: str = ""
+    rebase_harness_timeout_sec: int = Field(default=7200, gt=0)
     # v3 remote CI (rebase_engine/ci_loop.run_ci_rounds) — neutral knobs;
     # pipeline identities live in the adapter. Defaults are the parent's.
     rebase_ci_retries: int = 2          # push/rebuild rounds after the first

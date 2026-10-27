@@ -161,13 +161,8 @@ def visible_devices(spec: str) -> list[str]:
 
 
 def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except PermissionError:  # exists, other user
-        return True
+    from .process_tree import _alive
+    return _alive(pid)
 
 
 # -- nvidia-smi hygiene (injectable for tests) ---------------------------------
