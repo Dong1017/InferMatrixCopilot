@@ -1,8 +1,8 @@
 # run_status.py —— 规范
 
-<!-- verified-against: 2026-08-28 -->
+<!-- verified-against: 2026-10-28 -->
 
-`LOC ~309 · 持久化的单写者 run 生命周期记录 · refactor-status: ok`
+`LOC ~345 · 持久化的单写者 run 生命周期记录 · refactor-status: ok`
 
 ## 职责
 `run_status.json` —— 一次 Strict run 的**持久、无歧义**的生命周期记录，可跨进程观测。
@@ -17,7 +17,11 @@ server 重启，并且必须能把**崩掉的 run 和正在跑的 run 区分开*
 `claim_for_execution(run_dir, child_pid)`（**预约 run 子进程的第一步**：
 原子 CAS `queued → planning`，同 pid 幂等，输者不得执行）、
 `mark_child_started`（**非预约** run 记录自身 pid 的路径）、`mark`、
-`read_status`、`reclaim_queued(run_dir, owner_server_id,
+`mark_interrupted(run_dir, *, note, child_pid)`（被信号终止的 run 的子进程侧
+终态：写 `interrupted` **并盖上 `child_pid`**——默认本进程；`child_pid` 为
+null 的 `interrupted` 对 `reclaim_queued` 意味着"预约了、从未拉起"，做过部分
+工作的 run 绝不能被当作没启动过而重新武装；无既有记录的 CLI run 会得到一条
+带 `run_id` 的新记录）、`read_status`、`reclaim_queued(run_dir, owner_server_id,
 owner_server_pid)`（`interrupted → queued` 重新武装）、
 `reconcile_after_wait`/`reconcile_if_dead`/`startup_reconcile`、
 `register_server`/`unregister_server`/`server_alive`，以及状态常量

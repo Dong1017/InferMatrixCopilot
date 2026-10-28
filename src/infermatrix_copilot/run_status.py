@@ -193,6 +193,28 @@ def mark(run_dir: str | Path, state: str, *, note: str = "") -> dict:
     return _locked_update(run_dir, lambda _cur: upd)  # type: ignore[return-value]
 
 
+def mark_interrupted(run_dir: str | Path, *, note: str = "",
+                     child_pid: Optional[int] = None) -> dict:
+    """Child-side `interrupted` on a signalled run (SIGINT from a GPU
+    scheduler, SIGTERM from an operator). Stamps `child_pid` (this process by
+    default): an `interrupted` record with a null child pid means "reserved,
+    never launched" to `reclaim_queued`, and a run that did partial work must
+    never be re-armed as if it had not started. A CLI run without a prior
+    record gets one, so `--resume` tooling and reconcilers see the same
+    terminal truth the MCP path writes."""
+    pid = int(child_pid if child_pid is not None else os.getpid())
+
+    def _upd(cur: dict) -> dict:
+        upd: dict[str, Any] = {"state": INTERRUPTED, "child_pid": pid}
+        if cur.get("run_id") is None:
+            upd["run_id"] = Path(run_dir).name
+        if note:
+            upd["note"] = note
+        return upd
+
+    return _locked_update(run_dir, _upd)  # type: ignore[return-value]
+
+
 # ── liveness ──────────────────────────────────────────────────────────────────
 def pid_alive(pid: Optional[int]) -> bool:
     """True if `pid` names a live process. `os.kill(pid, 0)` probes without

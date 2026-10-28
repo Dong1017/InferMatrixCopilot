@@ -176,6 +176,46 @@ class HarnessTransport:
         raise NotImplementedError
 
 
+def run_harness_cli(cmd: list[str], *, input: str | None, cwd: str | None,
+                    env: dict[str, str] | None, timeout: float | None
+                    ) -> "subprocess.CompletedProcess[str]":
+    """`subprocess.run(capture_output=True, text=True, ...)` for a harness CLI,
+    with two properties `subprocess.run` lacks:
+
+    - the child is REGISTERED with the run's shutdown path for the duration
+      of the call, so SIGINT/SIGTERM to the engine terminates the harness
+      session (and its MCP bridge child) instead of orphaning it onto init;
+    - a timeout kills the whole descendant tree, not just the leader
+      (`subprocess.run` sends one SIGKILL to the CLI and leaves the bridge).
+
+    The child gets its own session: a terminal Ctrl-C then reaches the engine
+    only, whose handler stops the session in order. Timeout semantics match
+    `subprocess.run`: `TimeoutExpired` carries the partial stdout."""
+    import subprocess
+
+    from ..engine.lifecycle import register_child, unregister_child
+    from ..testing.process_tree import kill_tree
+
+    proc = subprocess.Popen(
+        cmd, stdin=subprocess.PIPE if input is not None else subprocess.DEVNULL,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd, env=env,
+        text=True, encoding="utf-8", errors="replace", start_new_session=True)
+    register_child(proc)
+    try:
+        try:
+            stdout, stderr = proc.communicate(input, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            kill_tree([proc.pid], term_grace=5.0, kill_grace=2.0)
+            try:
+                proc.communicate(timeout=10)
+            except (subprocess.TimeoutExpired, OSError, ValueError):
+                pass
+            raise
+    finally:
+        unregister_child(proc)
+    return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
+
+
 def flatten_messages(system: str, messages: list[dict]) -> str:
     """Render an internal block-protocol conversation as one prompt string for
     harnesses without a messages channel. Tool-less conversations only (the

@@ -1,6 +1,6 @@
 # engine/steps/rebase_v3.py —— 规范
 
-<!-- verified-against: 2026-10-27 -->
+<!-- verified-against: 2026-10-28 -->
 
 `LOC ~2204 · step 库（v3 rebase 装配层） · refactor-status: oversized`
 
@@ -16,8 +16,8 @@ step —— 薄的受治理 wrapper，substate-first、类型化失败、发布�
 | `rebase.v3_scan` | deterministic/read | `manifest_jobs`；`test_manifest.json` 产物 |
 | `rebase.v3_wheel` | deterministic/write_workspace | `upstream_commit`（选 commit → 装进目标 venv → **最后**才 pin Dockerfile：装失败绝不留脏树） |
 | `rebase.v3_assign` | deterministic/read | `active_modules`、`wave1_modules`、`wave2_modules`（path-sync 后按 wave 分派） |
-| `rebase.v3_wave_gate` | deterministic/read | wave-1 失败 ⇒ `wave2_modules=[]`；`halt_on_module_failure` ⇒ ESCALATE |
-| `rebase.v3_module_rebase` | script/write_workspace | `module_<name>_status`（foreach；同 run 串行锁 —— 同一 checkout；substate done/skipped 短路防重入二次执行） |
+| `rebase.v3_wave_gate` | deterministic/read | wave-1 失败**或 interrupted** ⇒ `wave2_modules=[]`；`halt_on_module_failure` ⇒ ESCALATE |
+| `rebase.v3_module_rebase` | script/write_workspace | `module_<name>_status`（foreach；同 run 串行锁 —— 同一 checkout；substate done/skipped 短路防重入二次执行；outcome `interrupted` ⇒ BLOCKED，可 `--resume`） |
 | `rebase.v3_test_loop` | script/write_workspace | `phase3_failed`；substate `tests.pipeline`/`infra_failures`；空 manifest ⇒ `manifest_empty` |
 | `rebase.v3_precommit` | script/write_workspace | 无发布 —— substate `tests.precommit`（passed/failed/failed_preexisting/not_declared） |
 | `rebase.v3_push_gate` | deterministic/read | `push_gate_flagged`、`push_gate_overrides`；不许 ⇒ FORBIDDEN；override 记 trace |
@@ -133,3 +133,16 @@ harness 会话通过 MCP tool bridge 拿到同一套工具面，plan gate 在派
 - baseline venv（`ensure_baseline_venv`）：硬链接克隆 campaign venv 并换入
   baseline commit 的 wheel，让"omni main 对上次对齐的 wheel 是否也失败"可问；
   任何失败返回 None，保留保守的回归判定。
+
+## 信号中断的模块：BLOCKED 收口、resume 重跑（2026-10-28）
+
+`_v3_module_rebase` 在 `rebase_module` 返回 `status == "interrupted"`
+（引擎收到 SIGINT/SIGTERM，见 `engine/lifecycle` 与 `rebase_engine` 规范）时
+返回 `StepResult(False, BLOCKED, "<m>: interrupted by <SIG> — resumable with
+--resume", state_updates={module_<m>_status: interrupted})`：executor 不再推进到
+下一个 foreach 兄弟，run 由 `workflow_execution` 以 `interrupted` 收口。短路
+条件**不变**（只有 done/skipped），因此 `--resume` 重跑 interrupted 模块、跳过
+done；`_v3_wave_gate` 把 interrupted 与 failed 同等视为"wave-1 未完成"（半
+rebase 的模块不是 wave 2 的基础）。测试：`test_assembly.py::
+test_v3_module_rebase_reruns_interrupted_and_blocks_on_interrupt`、
+`test_run_shutdown.py::test_wave_gate_treats_interrupted_as_not_done`。

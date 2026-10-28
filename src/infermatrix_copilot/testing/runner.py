@@ -323,6 +323,23 @@ class TestRunner:
             lambda: len(visible_devices(self.cuda)))
         self.watchdog_interval = watchdog_interval
         self.notify_download = notify_download
+        # the active attempt's tree killer, set for the duration of `_spawn`:
+        # a wrapper signal handler calls `terminate_active()` so the test
+        # tree never outlives a wrapper that was told to stop
+        self._active_kill: Callable[[], None] | None = None
+        self._active_lock = threading.Lock()
+
+    def terminate_active(self) -> bool:
+        """TERM → grace → KILL the attempt currently running (process group
+        plus every snapshotted descendant). Returns False when nothing is
+        running. Safe from a signal handler or another thread; `_spawn`'s
+        `proc.wait()` then returns the child's signal rc."""
+        with self._active_lock:
+            kill = self._active_kill
+        if kill is None:
+            return False
+        kill()
+        return True
 
     def run(self, job: TestJob, env: dict[str, str], *, baseline: bool = False,
             dry_run: bool = False) -> TestOutcome:
@@ -500,8 +517,12 @@ class TestRunner:
             # shell at SHLVL=0. That can put a foreign CLI ahead of the
             # explicitly selected runtime. Keep setup and test environments
             # authoritative; explicit sourcing in a job still works.
+            # stdin is /dev/null: a test must never inherit the wrapper's
+            # stdin (a harness tool pipe that closes at the tool's deadline,
+            # or a terminal whose hangup would reach an interactive child)
             proc = subprocess.Popen(["bash", "--norc", "-c", exec_cmd],
                                     cwd=self.repo_root, env=env,
+                                    stdin=subprocess.DEVNULL,
                                     stdout=lf, stderr=lf,
                                     start_new_session=True)
             # capture the pgid while the leader is certainly alive: the final
@@ -551,6 +572,9 @@ class TestRunner:
             def _kill_snapshot():
                 self._terminate_tree(proc.pid, pgid, snapshot=tree["idmap"])
 
+            with self._active_lock:
+                self._active_kill = _kill_snapshot
+
             watchdog = None
             if self.patterns is not None:
                 watchdog = LogWatchdog(
@@ -574,8 +598,18 @@ class TestRunner:
             t_primary.start()
             t_safety.start()
             try:
-                rc = proc.wait()
+                try:
+                    rc = proc.wait()
+                except BaseException:
+                    # the WRAPPER is being unwound (KeyboardInterrupt, a
+                    # SystemExit from a handler): the tree must not outlive
+                    # it holding GPUs — kill, then let the unwind continue
+                    _snapshot()
+                    self._terminate_tree(proc.pid, pgid, snapshot=tree["idmap"])
+                    raise
             finally:
+                with self._active_lock:
+                    self._active_kill = None
                 stop_snap.set()
                 snap_thread.join(timeout=10)
                 # cancel then JOIN: a fired primary timer is mid-escalation in

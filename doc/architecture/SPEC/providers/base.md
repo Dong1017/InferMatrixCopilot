@@ -1,8 +1,8 @@
 # providers/base.py —— 规范
 
-<!-- verified-against: 2026-10-27 -->
+<!-- verified-against: 2026-10-28 -->
 
-`LOC ~161 · provider 层契约 + 子进程环境白名单 · refactor-status: ok`
+`LOC ~234 · provider 层契约 + 子进程环境白名单 + 受管 CLI 子进程 · refactor-status: ok`
 
 ## 职责
 每个 provider 都要实现的那组契约，以及决定"厂商 CLI 子进程继承什么环境"的安全原语。
@@ -17,7 +17,8 @@
      Settings.tier_target 解析，transport 只做防御性兜底。 -->
 `ProviderSpec`、`AgentSessionRequest`、`SessionUsage`、`HarnessTransport`
 （`cli_path`、`require_cli`、`auth_gap`、`run_session`、`complete`）、
-`sanitized_env()`、`flatten_messages()`。
+`sanitized_env()`、`flatten_messages()`、`run_harness_cli(cmd, *, input, cwd,
+env, timeout) -> CompletedProcess`。
 
 ## 不变量（**C1**、**C4**、**E2**）
 - **环境是白名单，不是黑名单**（`_ENV_KEEP` + `LC_`/`XDG_` 前缀）。厂商 CLI 必须保住
@@ -39,7 +40,9 @@
 （那是 `Settings`）。
 
 ## 依赖（允许）
-stdlib + `..scopes.ToolScope`。它是一个叶子契约模块。
+stdlib + `..scopes.ToolScope`；`run_harness_cli` 内**延迟导入**
+`..engine.lifecycle`（`register_child`/`unregister_child`）与
+`..testing.process_tree.kill_tree`。其余仍是叶子契约模块。
 
 ## 扩展点
 新的能力标志加进 `ProviderSpec.capabilities`；新的会话上限加进 `AgentSessionRequest`。
@@ -66,3 +69,18 @@ stdlib + `..scopes.ToolScope`。它是一个叶子契约模块。
 会话审计的额外**只读**包含根（rebase module agent 必须读上游 checkout 与
 目标 venv）。只放宽读包含判定，不放宽写；cursor 传输把它并进
 `audit_events(roots=...)`。
+
+## 2026-10-28 `run_harness_cli`：受停机路径管理的 harness 子进程
+
+`subprocess.run(capture_output=True, text=True, …)` 的等价物，三个 harness
+transport（cursor/claude_code/codex）的会话都经它拉起厂商 CLI。与
+`subprocess.run` 的差别，也是它存在的理由：
+
+- 子进程在调用期间**注册到 run 的停机路径**（`engine.lifecycle.register_child`，
+  返回前 `unregister_child`）：引擎收到 SIGINT/SIGTERM 时，harness 会话及其
+  MCP bridge 子进程被按序终止，而不是被孤儿化到 init 上继续持有 run 的工具
+  作用域（run-20261027-193251 的第三个缺陷）。
+- 超时时 **杀整棵后代树**（`kill_tree`，TERM 5 s → KILL），而非只给 CLI 领导
+  进程一个 SIGKILL；随后 `TimeoutExpired` 照常抛出，带部分 stdout。
+- `start_new_session=True`：终端的 Ctrl-C 只到引擎，由引擎的处理器按序停会话。
+- `stdin` 在 `input is None` 时为 `/dev/null`，不继承引擎的 stdin。

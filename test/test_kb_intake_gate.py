@@ -118,7 +118,7 @@ def test_codex_transport_pins_reasoning_effort(monkeypatch):
         captured["cmd"] = cmd
         return SimpleNamespace(stdout="", returncode=0)
 
-    monkeypatch.setattr(codex.subprocess, "run", fake_run)
+    monkeypatch.setattr(codex, "run_harness_cli", fake_run)
     transport = codex.CodexTransport.__new__(codex.CodexTransport)
     transport.settings = SimpleNamespace(strict_backend_model="", strict_backend_timeout_s=5)
     monkeypatch.setattr(transport, "require_cli", lambda: "codex", raising=False)

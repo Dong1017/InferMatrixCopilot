@@ -9,7 +9,9 @@ from pathlib import Path
 from ..adapters.base import AdapterError
 from ..config import Settings
 from ..engine.executor import Executor
-from ..engine.lifecycle import RunLock, RunLockHeld, run_guarded
+from ..engine.lifecycle import (RunLock, RunLockHeld,
+                                install_run_signal_handlers, run_guarded,
+                                shutdown_requested)
 from ..engine.registry import StepRegistry
 from ..metrics import format_metrics_line
 from ..notify import BLOCKED_EXIT, Notifier
@@ -124,8 +126,27 @@ class WorkflowExecution:
             # run_guarded finalizes inside the event loop: playbooks that
             # register run finalizers (lifecycle.register_finalizer) get
             # teardown on every exit path. Nothing registered == no-op.
-            outcome = asyncio.run(
-                run_guarded(executor.run(playbook, state), run_dir))
+            # SIGINT/SIGTERM (a GPU scheduler ending the reservation, an
+            # operator) become a bounded graceful shutdown: harness children
+            # and marked background processes are stopped, the run task is
+            # cancelled through the same finalizers, and the run is left
+            # resumable and marked `interrupted` — never `running`.
+            restore = install_run_signal_handlers(run_dir, run_dir.name)
+            try:
+                outcome = asyncio.run(
+                    run_guarded(executor.run(playbook, state), run_dir))
+            except (asyncio.CancelledError, KeyboardInterrupt):
+                req = shutdown_requested()
+                if req is None:
+                    raise
+                return self._interrupted(run_dir, trace, req)
+            finally:
+                restore()
+            req = shutdown_requested()
+            if req is not None:
+                # the cooperative path: a step noticed the request and
+                # returned blocked before cancellation reached it
+                return self._interrupted(run_dir, trace, req, outcome)
 
             if outcome.status == "done":
                 notifier.resolve()
@@ -152,3 +173,30 @@ class WorkflowExecution:
                 knowledge_lock.release()
             if held_lock is None:
                 lock.release()
+
+    @staticmethod
+    def _interrupted(run_dir: Path, trace: RunTrace, req,
+                     outcome=None) -> ExecutionResult:
+        """Terminal protocol for a signalled run: durable `interrupted`
+        status (run_status.json names this process as the child that ran,
+        so no reconciler mistakes it for a never-launched reservation), a
+        trace event, the operator-facing line, and `128 + signal`."""
+        from .. import run_status as rs
+
+        reason = (f"interrupted by {req.signal_name} — run is resumable "
+                  f"(--resume {run_dir.name})")
+        try:
+            rs.mark_interrupted(run_dir, note=reason)
+        except OSError:
+            pass
+        trace.record("run_interrupted", signal=req.signal_name,
+                     exit_code=req.exit_code,
+                     steps_completed=sorted(
+                         k for k, r in (getattr(outcome, "step_results", None)
+                                        or {}).items() if r.ok))
+        for step_id, r in (getattr(outcome, "step_results", None) or {}).items():
+            mark = style("✓", "green") if r.ok else style("✗", "red", "bold")
+            print(f"  {mark} {step_id}: {r.summary}")
+        print(f"run {run_dir.name}: interrupted ({req.signal_name})  ({run_dir})")
+        print(style("  ⚠ ", "yellow", "bold") + reason)
+        return ExecutionResult(req.exit_code, reason)

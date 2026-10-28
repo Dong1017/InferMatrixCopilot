@@ -454,6 +454,11 @@ class Copilot:
         # nothing to distinguish a stale-head refusal from a missing tier or a
         # failed checkout — the reason was previously printed to the child's
         # console and discarded.
+        from ..engine.lifecycle import shutdown_requested
+        if shutdown_requested() is not None:
+            # a signalled run already wrote `interrupted`; `128 + signal`
+            # must not be re-labelled as a failure here
+            return code
         rs.mark(run_dir, {0: rs.DONE, BLOCKED_EXIT: rs.BLOCKED}.get(code, rs.FAILED),
                 note=self.last_blocked_reason if code == BLOCKED_EXIT else "")
         return code
