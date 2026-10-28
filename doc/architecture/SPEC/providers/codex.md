@@ -1,6 +1,6 @@
 # providers/codex.py —— 规范
 
-<!-- verified-against: 2026-10-05 -->
+<!-- verified-against: 2026-10-28 -->
 
 `LOC ~197 · harness transport（ChatGPT 订阅） · refactor-status: ok`
 
@@ -52,3 +52,9 @@ OS 级控制可用的后端；把两者混同，会模糊掉"当前实际生效�
 
 ## 2026-09-30
 `complete()` 接受并忽略 `max_budget_usd`；`stops_at_spend` 为 False（CLI 无花费阈值）。
+
+## 2026-10-28 子进程受停机路径管理
+
+会话经 `base.run_harness_cli` 拉起 codex CLI（而非 `subprocess.run`）：子进程在调用期间注册到 `engine.lifecycle` 的子进程表，引擎的
+SIGINT/SIGTERM 优雅停机会终止该会话及其 MCP bridge 后代；会话超时杀整棵
+后代树后再抛 `TimeoutExpired`（语义不变：空文本、`truncated`、refusal）。

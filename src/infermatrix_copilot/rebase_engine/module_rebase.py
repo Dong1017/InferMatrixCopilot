@@ -10,10 +10,13 @@ the adaptive-guidance knowledge layer is best-effort via hooks."""
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
+from ..engine.lifecycle import (ShutdownRequest, register_shutdown_hook,
+                                shutdown_requested, unregister_shutdown_hook)
 from ..run_trace import RunTrace
 from ..scopes import ToolScope
 from .agent_loop import GATED_TOOL_NAMES, run_agent_loop
@@ -216,8 +219,6 @@ async def _harness_attempt(prompt: str, *, module: str, config,
     bypass). Returns the same dict shape the in-process attempt does so
     `rebase_module`'s retry/debug logic is untouched.
     """
-    import asyncio
-
     from ..providers import AgentSessionRequest
     from ..providers.registry import transport_for_id
     from ..tool_bridge import write_bridge_spec
@@ -306,6 +307,17 @@ async def _harness_attempt(prompt: str, *, module: str, config,
     started = _time.time()
     outcome = await asyncio.to_thread(transport.run_session, req)
 
+    bridge = (bridge_health(spec_path, since_ts=started) if spec_path
+              else {"verdict": "ok", "detail": ""})
+    if bridge["verdict"] != "ok" and trace is not None:
+        # the harness only ever reports "tool not found"; the bridge's own
+        # lifecycle log says whether it was never launched, died, or was
+        # starved by a slow call (run-20261027-193251: discovery lost
+        # mid-session after a 30-minute synchronous plan review)
+        trace.record("bridge_unavailable", step=f"rebase.module.{module}",
+                     spec=str(spec_path), **{k: v for k, v in bridge.items()
+                                             if k != "events"})
+
     native, pre_gate = _native_writes(scope.root, run_dir, before, started)
     if native and trace is not None:
         trace.record("harness_native_writes", step=f"rebase.module.{module}",
@@ -347,6 +359,11 @@ async def _harness_attempt(prompt: str, *, module: str, config,
                          count=len(audit_reads), notes=audit_reads[:10])
         result_text += ("\nSession read audit (not a completion veto): "
                         + "; ".join(audit_reads[:3]))
+    if bridge["verdict"] != "ok":
+        result_text += ("\nTool bridge " + bridge["verdict"].replace("_", " ")
+                        + (f" ({bridge['detail']})" if bridge.get("detail") else "")
+                        + ": the harness lost or never had the infermatrix-tools "
+                        "server; see bridge/*.lifecycle.jsonl.")
     if not done:
         reasons = []
         if not signaled:
@@ -366,6 +383,61 @@ async def _harness_attempt(prompt: str, *, module: str, config,
             "text": result_text,
             "turns": int(getattr(outcome, "iterations", 0) or 0),
             "plan_done": plan_done}
+
+
+BRIDGE_EXIT_SETTLE_S = 2.0  # the harness returns before its bridge child finishes exiting
+
+
+def bridge_health(spec_path: Path, *, since_ts: float,
+                  settle_s: float = BRIDGE_EXIT_SETTLE_S) -> dict:
+    """Read the bridge process's lifecycle log for one session and classify
+    it. `verdict` is one of:
+
+    - `ok`: started once, exited because the harness closed stdin;
+    - `never_started`: no bridge launched after `since_ts` — the harness
+      never connected (discovery failed from the first turn);
+    - `exited_early`: the bridge left while the harness was still running
+      (signal, exception, SystemExit) — `detail` carries its own reason;
+    - `no_exit_recorded`: started, but no exit event appeared within
+      `settle_s` of the session ending (SIGKILL, or still alive: orphaned);
+    - `restarted`: more than one start — the harness relaunched it.
+
+    `slow_tools` counts calls ≥ `tool_bridge.SLOW_TOOL_CALL_S`: the usual
+    cause of a client-side deadline that makes a harness drop the server."""
+    import time as _time
+
+    from ..tool_bridge import read_lifecycle_events
+
+    events: list[dict] = []
+    deadline = _time.monotonic() + max(0.0, settle_s)
+    while True:
+        events = [e for e in read_lifecycle_events(spec_path)
+                  if float(e.get("ts") or 0) >= since_ts - 1.0]
+        starts = [e for e in events if e.get("kind") == "start"]
+        exits = [e for e in events if e.get("kind") == "exit"]
+        if not starts or exits or _time.monotonic() >= deadline:
+            break
+        _time.sleep(0.1)
+    slow = [e for e in events if e.get("kind") == "slow_tool"]
+    report = {"starts": len(starts), "exits": len(exits), "slow_tools": len(slow),
+              "slowest_tool": max(slow, key=lambda e: e.get("elapsed_s", 0))
+              .get("tool") if slow else None, "detail": "", "events": events}
+    if not starts:
+        verdict = "never_started"
+    elif len(starts) > 1:
+        verdict = "restarted"
+    elif not exits:
+        verdict = "no_exit_recorded"
+    else:
+        last = exits[-1]
+        if last.get("reason") == "stdin_closed" and not last.get("parent_alive"):
+            verdict = "ok"
+        else:
+            verdict = "exited_early"
+            report["detail"] = (f"reason={last.get('reason')} rc={last.get('rc')} "
+                                f"{last.get('detail') or ''}").strip()
+    report["verdict"] = verdict
+    return report
 
 
 def _append_agent_log(path: str, text: str) -> None:
@@ -457,26 +529,80 @@ async def rebase_module(
             from .processes import cleanup_run_processes
             cleanup_run_processes(Path(config.log_dir), substate.run_id)
 
-    # parent parity: an incomplete first run gets up to max_debug_retries
-    # follow-up attempts with the debug prompt built from the failure text.
-    # The plan gate PERSISTS across attempts: once the module's decision was
-    # written, debug retries run unlocked (the debug prompt carries no
-    # plan-review contract, and the parent's re-locking left debug agents
-    # unable to edit — a fixed, recorded parent defect); an initial run that
-    # never passed the gate keeps it closed for retries.
+    # A SIGINT/SIGTERM to the engine must leave this module `interrupted`
+    # (never `running`, which resume would mistake for a live sibling, nor
+    # `done`): the cooperative path checks after each attempt; the forced
+    # path (task cancelled, or the shutdown worker's hook racing the
+    # unwind) writes the same mark. Idempotent by construction.
     debug_attempts = 0
-    result = await _attempt(prompt)
-    gate_passed = bool(result.get("plan_done"))
-    while not result.get("done") and \
-            debug_attempts < config.max_debug_retries:
-        debug_attempts += 1
-        debug_prompt = build_debug_prompt(
-            module, result.get("text", ""),
-            prompt_data.debug_prompt_template_live
-            or prompt_data.debug_prompt_template, "")
-        result = await _attempt(debug_prompt,
-                                require_plan_review=not gate_passed)
-        gate_passed = gate_passed or bool(result.get("plan_done"))
+    in_flight = False  # True only while an attempt is awaited (the hook's guard)
+
+    def _mark_interrupted(req: ShutdownRequest | None) -> dict:
+        signal_name = req.signal_name if req is not None else "cancelled"
+        current = (substate.read().get("modules") or {}).get(module) or {}
+        if current.get("status") == "interrupted":
+            return current
+        outcome = {"status": "interrupted", "exit_code": -1,
+                   "debug_attempts": debug_attempts, "turns": 0,
+                   "interrupted_by": signal_name,
+                   "summary": (f"interrupted by {signal_name} while the module "
+                               f"agent was running; resume re-runs it")}
+        substate.update({"modules": {module: outcome}})
+        if trace is not None:
+            trace.record("module_interrupted", step=f"rebase.module.{module}",
+                         signal=signal_name, debug_attempts=debug_attempts)
+        try:
+            _append_agent_log(agent_log, f"\nModule interrupted by {signal_name}; "
+                              "resume re-runs this module.\n")
+        except OSError:
+            pass
+        return outcome
+
+    def _hook(req: ShutdownRequest) -> None:
+        # the worker thread's view: only an attempt that is still running
+        # is interrupted; one that already returned is judged by the
+        # cooperative path below (a `done` result stays done)
+        if in_flight:
+            _mark_interrupted(req)
+
+    async def _guarded_attempt(p: str, **kw) -> dict:
+        nonlocal in_flight
+        in_flight = True
+        try:
+            return await _attempt(p, **kw)
+        finally:
+            in_flight = False
+
+    register_shutdown_hook(_hook)
+    try:
+        # parent parity: an incomplete first run gets up to max_debug_retries
+        # follow-up attempts with the debug prompt built from the failure
+        # text. The plan gate PERSISTS across attempts: once the module's
+        # decision was written, debug retries run unlocked (the debug prompt
+        # carries no plan-review contract, and the parent's re-locking left
+        # debug agents unable to edit — a fixed, recorded parent defect); an
+        # initial run that never passed the gate keeps it closed for retries.
+        result = await _guarded_attempt(prompt)
+        gate_passed = bool(result.get("plan_done"))
+        while not result.get("done") and shutdown_requested() is None and \
+                debug_attempts < config.max_debug_retries:
+            debug_attempts += 1
+            debug_prompt = build_debug_prompt(
+                module, result.get("text", ""),
+                prompt_data.debug_prompt_template_live
+                or prompt_data.debug_prompt_template, "")
+            result = await _guarded_attempt(debug_prompt,
+                                            require_plan_review=not gate_passed)
+            gate_passed = gate_passed or bool(result.get("plan_done"))
+    except asyncio.CancelledError:
+        _mark_interrupted(shutdown_requested())
+        raise
+    finally:
+        unregister_shutdown_hook(_hook)
+
+    req = shutdown_requested()
+    if req is not None and not result.get("done"):
+        return _mark_interrupted(req)
 
     outcome = {"status": "done" if result.get("done") else "failed",
                "exit_code": 0 if result.get("done") else -1,

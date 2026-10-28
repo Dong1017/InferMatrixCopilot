@@ -33,6 +33,7 @@ from .base import (
     HarnessTransport,
     SessionUsage,
     flatten_messages,
+    run_harness_cli,
     sanitized_env,
 )
 from .registry import PROVIDERS
@@ -145,10 +146,10 @@ class CursorTransport(HarnessTransport):
         timed_out = False
         self._last_exit = (0, "")
         try:
-            proc = subprocess.run(
-                cmd, input=text, cwd=cwd, env=sanitized_env(),
-                capture_output=True, text=True, encoding="utf-8",
-                errors="replace", timeout=timeout_s, check=False)
+            # registered with the run's shutdown path: a SIGINT/SIGTERM to
+            # the engine stops this session (and its bridge child) in order
+            proc = run_harness_cli(cmd, input=text, cwd=cwd,
+                                   env=sanitized_env(), timeout=timeout_s)
             stdout = proc.stdout or ""
             self._last_exit = (int(proc.returncode or 0),
                                (proc.stderr or "")[-400:].strip())

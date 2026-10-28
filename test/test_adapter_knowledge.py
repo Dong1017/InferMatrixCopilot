@@ -175,10 +175,19 @@ def test_live_prompt_keeps_bridge_polls_below_client_deadline(prompt_data):
     assert "under 20 seconds each" in live
     assert "sleep 30" not in live
     assert "Cap per-call sleep at 60 s" not in live
-    assert "`setsid -f sh -c" in live
+    assert "setsid -f sh -c" in live
     assert "plain `nohup ... &` is insufficient" in live
     assert "echo $$ > \"$1\"; shift; exec \"$@\"" in live
     assert "bare stdin reader" in live
+    # the detach is explicit AND verifiable: the launch is one tool call,
+    # the `ps` sid proof must hold, and polling reads the wrapper's receipt
+    assert "never run\n  a verification command in the foreground" in live
+    assert "ps -o pid,sid,pgid,stat,etimes,cmd" in live
+    assert "`sid` must\n  equal its own pid" in live
+    assert 'kill -0 "$(cat "$pidfile")"' in live
+    assert "tests/outcomes/wrap-*.json" in live
+    assert '`signal_origin: "external"`' in live
+    assert "reserved for the wrapper's process tree" in live
     assert "TEST_TIMEOUT_SEC=7200" in live  # GOLDEN_KWARGS default budget
     assert "stops this attempt's background processes" in live
 

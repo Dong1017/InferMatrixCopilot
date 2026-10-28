@@ -35,6 +35,7 @@ from .base import (
     HarnessTransport,
     SessionUsage,
     flatten_messages,
+    run_harness_cli,
     sanitized_env,
 )
 from .registry import PROVIDERS
@@ -87,10 +88,8 @@ class ClaudeCodeTransport(HarnessTransport):
             cmd += ["--mcp-config", str(mcp_config), "--strict-mcp-config",
                     "--allowedTools", f"mcp__{_BRIDGE_SERVER}"]
         try:
-            proc = subprocess.run(
-                cmd, input=prompt_text, cwd=cwd, env=sanitized_env(),
-                capture_output=True, text=True, encoding="utf-8",
-                errors="replace", timeout=timeout_s, check=False)
+            proc = run_harness_cli(cmd, input=prompt_text, cwd=cwd,
+                                   env=sanitized_env(), timeout=timeout_s)
             stdout = proc.stdout or ""
         except subprocess.TimeoutExpired as exc:
             raw = exc.stdout or b""

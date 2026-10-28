@@ -27,14 +27,28 @@ Known gap, disclosed: **skill/memory retrieval is deliberately NOT bridged.**
 Those tools can propose knowledge candidates, and opening a cross-process
 write path for them was declined — a harness session may read this repo's
 knowledge, never add to it.
+
+Liveness (run-20261027-193251): every bridged tool is a SYNC handler, and
+FastMCP calls sync handlers inline on its event loop, so one long call (a
+30-minute plan review, a 10-minute `run_shell`) froze the whole server — no
+pings, no other tool, and the harness marked the server undiscoverable for
+the rest of a multi-hour session. Handlers therefore run on worker threads
+(`_offload`), the process ignores SIGINT/SIGHUP like the other stdio servers,
+and a per-spec lifecycle log under `<run_dir>/bridge/` records start, slow
+calls and the exit reason so the module loop can report `bridge_unavailable`
+instead of letting the agent find out by tool failure.
 """
 
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import os
 import re
+import signal
+import sys
+import time
 from pathlib import Path
 
 from .run_trace import RunTrace
@@ -322,6 +336,109 @@ def _fn_from_schema(name: str, schema: dict, call):
     return fn
 
 
+# -- liveness ----------------------------------------------------------------
+SLOW_TOOL_CALL_S = 60.0  # a call this long is logged: it is what starves a client deadline
+
+
+def lifecycle_log_path(spec_path: Path) -> Path:
+    """`<run_dir>/bridge/<stem>.lifecycle.jsonl` next to the spec."""
+    spec_path = Path(spec_path)
+    return spec_path.with_name(f"{spec_path.stem}.lifecycle.jsonl")
+
+
+class BridgeLifecycle:
+    """Append-only record of this bridge PROCESS: `start`, `slow_tool`,
+    `exit` (with the reason). Separate from `bridge_trace.jsonl`, which
+    records tool calls and is shared by every bridge of the run; this file
+    answers "was the server alive, and why did it stop" per spec. Writes
+    never raise — a logging failure must not take the server down."""
+
+    def __init__(self, path: Path):
+        self.path = Path(path)
+        self.calls = 0
+
+    def record(self, kind: str, **fields) -> None:
+        event = {"ts": time.time(), "kind": kind, "pid": os.getpid(),
+                 "ppid": os.getppid(), **fields}
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with self.path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(event, default=str) + "\n")
+        except OSError:
+            pass
+
+
+def read_lifecycle_events(spec_path: Path) -> list[dict]:
+    """Parsed lifecycle events for a spec (missing/corrupt lines ignored)."""
+    out: list[dict] = []
+    try:
+        for line in lifecycle_log_path(spec_path).read_text(
+                encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(event, dict):
+                out.append(event)
+    except OSError:
+        pass
+    return out
+
+
+def _parent_alive(ppid: int) -> bool:
+    """True while the launching harness process exists (reparenting to init
+    or a reaper means it is gone)."""
+    if ppid <= 1 or os.getppid() != ppid:
+        return False
+    try:
+        os.kill(ppid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _offload(fn):
+    """Run a sync tool handler on a worker thread so the MCP event loop keeps
+    answering pings, list_tools and other calls during a long handler. The
+    wrapper keeps the original signature (FastMCP derives the input schema
+    from it) and is a coroutine function, which FastMCP awaits."""
+    import anyio
+
+    @functools.wraps(fn)
+    async def _async(*args, **kwargs):
+        return await anyio.to_thread.run_sync(
+            functools.partial(fn, *args, **kwargs))
+
+    return _async
+
+
+def timed_call(call, lifecycle: BridgeLifecycle | None,
+               slow_after_s: float = SLOW_TOOL_CALL_S):
+    """Count calls and log the slow ones (≥ `slow_after_s`) to the lifecycle
+    file: a client-side deadline that cut a call off shows up here as the
+    only call longer than the deadline, which is otherwise invisible."""
+    if lifecycle is None:
+        return call
+
+    def bound(name: str, args: dict):
+        started = time.monotonic()
+        lifecycle.calls += 1
+        try:
+            return call(name, args)
+        finally:
+            elapsed = time.monotonic() - started
+            if elapsed >= slow_after_s:
+                lifecycle.record("slow_tool", tool=name,
+                                 elapsed_s=round(elapsed, 1))
+
+    return bound
+
+
 # -- server ------------------------------------------------------------------
 def make_dispatcher(scope: ToolScope, roots: tuple[str, ...], trace: RunTrace,
                     extra: dict | None = None, gate: "PlanGate | None" = None):
@@ -386,9 +503,11 @@ def traced_call(call, spec: dict):
     return bound
 
 
-def build_server(spec_path: Path):
+def build_server(spec_path: Path, lifecycle: BridgeLifecycle | None = None):
     """Build the FastMCP server for one spec. Import of the MCP SDK is local
-    so the module stays importable (spec read/write) without the extra."""
+    so the module stays importable (spec read/write) without the extra.
+    Every handler is registered OFFLOADED (see `_offload`): the event loop
+    must stay responsive during a long tool call."""
     from mcp.server.fastmcp import FastMCP
 
     scope, spec = load_bridge_spec(spec_path)
@@ -407,8 +526,9 @@ def build_server(spec_path: Path):
                                   or ("edit_file", "run_pytest",
                                       "run_precommit")),
                             trace=trace)
-    _call = traced_call(make_dispatcher(scope, roots, trace,
-                                        extra=rebase_extra or None, gate=gate), spec)
+    _call = timed_call(traced_call(make_dispatcher(
+        scope, roots, trace, extra=rebase_extra or None, gate=gate), spec),
+        lifecycle)
 
     mcp = FastMCP("infermatrix-tool-bridge")
     # `dispatch` resolves `extra` BEFORE the builtin registry, so a name the
@@ -420,38 +540,42 @@ def build_server(spec_path: Path):
         _name = _d.get("name", "")
         if not _name or _name not in rebase_extra:
             continue
-        mcp.add_tool(_fn_from_schema(_name, _d.get("input_schema") or {},
-                                     _call),
-                     name=_name, description=_d.get("description", ""))
+        mcp.add_tool(_offload(_fn_from_schema(
+            _name, _d.get("input_schema") or {}, _call)),
+            name=_name, description=_d.get("description", ""))
+
+    def tool(name: str):
+        return lambda fn: mcp.add_tool(_offload(fn), name=name,
+                                       description=TOOLS[name].description)
 
     if "read_file" in allowed:
-        @mcp.tool(description=TOOLS["read_file"].description)
+        @tool("read_file")
         def read_file(path: str, offset: int = 0) -> str:
             return _call("read_file", {"path": path, "offset": offset})
 
     if "list_dir" in allowed:
-        @mcp.tool(description=TOOLS["list_dir"].description)
+        @tool("list_dir")
         def list_dir(path: str) -> str:
             return _call("list_dir", {"path": path})
 
     if "grep" in allowed:
-        @mcp.tool(description=TOOLS["grep"].description)
+        @tool("grep")
         def grep(pattern: str, path: str, regex: bool = False) -> str:
             return _call("grep", {"pattern": pattern, "path": path,
                                   "regex": regex})
 
     if "write_file" in allowed:
-        @mcp.tool(description=TOOLS["write_file"].description)
+        @tool("write_file")
         def write_file(path: str, content: str) -> str:
             return _call("write_file", {"path": path, "content": content})
 
     if "edit_file" in allowed:
-        @mcp.tool(description=TOOLS["edit_file"].description)
+        @tool("edit_file")
         def edit_file(path: str, old: str, new: str) -> str:
             return _call("edit_file", {"path": path, "old": old, "new": new})
 
     if "run_shell" in allowed:
-        @mcp.tool(description=TOOLS["run_shell"].description)
+        @tool("run_shell")
         def run_shell(cmd: str, cwd: str = "") -> str:
             return _call("run_shell", {"cmd": cmd, "cwd": cwd or None})
 
@@ -478,23 +602,27 @@ def _register_repo_tools(mcp, scope: ToolScope, trace: RunTrace) -> None:
             raise RuntimeError(str(out.get("error") or "tool error"))
         return str(out["result"])
 
-    @mcp.tool(description=tools["diff_stat"].description)
+    def tool(name: str):
+        return lambda fn: mcp.add_tool(_offload(fn), name=name,
+                                       description=tools[name].description)
+
+    @tool("diff_stat")
     def diff_stat() -> str:
         return _call("diff_stat", {})
 
-    @mcp.tool(description=tools["file_at_base"].description)
+    @tool("file_at_base")
     def file_at_base(path: str, offset: int = 0) -> str:
         return _call("file_at_base", {"path": path, "offset": offset})
 
-    @mcp.tool(description=tools["show_commit"].description)
+    @tool("show_commit")
     def show_commit(sha: str) -> str:
         return _call("show_commit", {"sha": sha})
 
-    @mcp.tool(description=tools["search_history"].description)
+    @tool("search_history")
     def search_history(term: str, path: str = "") -> str:
         return _call("search_history", {"term": term, "path": path})
 
-    @mcp.tool(description=tools["calc"].description)
+    @tool("calc")
     def calc(expr: str) -> str:
         return _call("calc", {"expr": expr})
 
@@ -544,8 +672,12 @@ def _register_knowledge_tools(mcp, spec: dict, scope: ToolScope,
                      effect=f"doc tools unavailable: {type(exc).__name__}: {exc}")
         return
 
-    @mcp.tool(description="Search the curated knowledge base (general + this "
-                          "repo's slice); returns matching doc paths.")
+    def tool(description: str):
+        return lambda fn: mcp.add_tool(_offload(fn), name=fn.__name__,
+                                       description=description)
+
+    @tool("Search the curated knowledge base (general + this repo's slice); "
+          "returns matching doc paths.")
     def doc_search(query: str, limit: int = 20) -> str:
         trace.record("tool_call", tool="doc_search", ok=True,
                      out_of_scope=False, path=None)
@@ -554,8 +686,8 @@ def _register_knowledge_tools(mcp, spec: dict, scope: ToolScope,
             f"{h.get('path')}:{h.get('line')}:{str(h.get('text') or '').strip()}"
             for h in hits) or "(no matches)"
 
-    @mcp.tool(description="Read a knowledge doc returned by doc_search "
-                          "(paged; pass the previous next_offset).")
+    @tool("Read a knowledge doc returned by doc_search (paged; pass the "
+          "previous next_offset).")
     def doc_read(path: str, offset: int = 0) -> str:
         trace.record("tool_call", tool="doc_read", ok=True,
                      out_of_scope=False, path=path)
@@ -571,9 +703,9 @@ def _register_knowledge_tools(mcp, spec: dict, scope: ToolScope,
                      effect=f"repo_map unavailable: {type(exc).__name__}: {exc}")
         return
     if "repo_map" in map_tools:
-        tool = map_tools["repo_map"]
+        tool_def = map_tools["repo_map"]
 
-        @mcp.tool(description=tool.description)
+        @tool(tool_def.description)
         def repo_map(query: str) -> str:
             # dispatch with extra= mirrors the in-process extra-tool path
             # (traced, bypasses the builtin allowlist by design)
@@ -584,22 +716,69 @@ def _register_knowledge_tools(mcp, spec: dict, scope: ToolScope,
             return str(out["result"])
 
 
+def install_bridge_signal_dispositions() -> None:
+    """A stdio MCP server lives exactly as long as its stdin: it must NOT die
+    on a terminal Ctrl-C (SIGINT goes to the whole foreground group, and the
+    engine's handler stops the harness in order), on a hangup of a terminal
+    it never used, or on a write to a closed pipe (surfaces as an exception
+    the transport handles). The harness closing stdin is the one exit."""
+    for signum in (signal.SIGINT, signal.SIGHUP, signal.SIGPIPE):
+        try:
+            signal.signal(signum, signal.SIG_IGN)
+        except (OSError, ValueError, AttributeError):
+            pass
+
+
+def run_bridge(spec_path: Path) -> int:
+    """Serve one spec over stdio until stdin closes, logging start/exit (with
+    the reason) to the lifecycle file. The log is the module loop's evidence
+    for a `bridge_unavailable` trace event after the session."""
+    # dispositions FIRST: a signal that lands while the SDK is still importing
+    # (seconds on a loaded host) must not end the server before it starts
+    install_bridge_signal_dispositions()
+    lifecycle = BridgeLifecycle(lifecycle_log_path(spec_path))
+    ppid = os.getppid()
+    lifecycle.record("start", spec=str(spec_path), argv=sys.argv[1:],
+                     sid=os.getsid(0) if hasattr(os, "getsid") else None,
+                     pgid=os.getpgrp() if hasattr(os, "getpgrp") else None)
+    try:
+        server = build_server(spec_path, lifecycle)
+    except ImportError:
+        lifecycle.record("exit", reason="import_error", rc=1,
+                         detail="the MCP SDK is not installed")
+        sys.stderr.write("the tool bridge needs the MCP SDK — "
+                         "pip install 'infermatrix-copilot[mcp]'\n")
+        return 1
+    except Exception as exc:  # noqa: BLE001 — the reason must be on disk
+        lifecycle.record("exit", reason="build_error", rc=1,
+                         detail=f"{type(exc).__name__}: {exc}")
+        raise
+    rc = 0
+    reason, detail = "stdin_closed", ""
+    try:
+        server.run()  # stdio transport by default; returns at stdin EOF
+    except KeyboardInterrupt:
+        reason, detail, rc = "signal", "KeyboardInterrupt", 130
+    except SystemExit as exc:
+        reason, detail = "system_exit", repr(exc.code)
+        rc = exc.code if isinstance(exc.code, int) else 1
+    except BaseException as exc:  # noqa: BLE001 — logged, then re-raised
+        reason, detail, rc = "exception", f"{type(exc).__name__}: {exc}", 1
+        lifecycle.record("exit", reason=reason, detail=detail, rc=rc,
+                         calls=lifecycle.calls, parent_alive=_parent_alive(ppid))
+        raise
+    lifecycle.record("exit", reason=reason, detail=detail, rc=rc,
+                     calls=lifecycle.calls, parent_alive=_parent_alive(ppid))
+    return rc
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="infermatrix_copilot.tool_bridge",
         description="Scoped-tool MCP bridge for harness backends (stdio).")
     parser.add_argument("--spec", required=True, help="bridge spec JSON path")
     args = parser.parse_args(argv)
-    try:
-        server = build_server(Path(args.spec))
-    except ImportError:
-        import sys
-
-        sys.stderr.write("the tool bridge needs the MCP SDK — "
-                         "pip install 'infermatrix-copilot[mcp]'\n")
-        return 1
-    server.run()  # stdio transport by default
-    return 0
+    return run_bridge(Path(args.spec))
 
 
 if __name__ == "__main__":

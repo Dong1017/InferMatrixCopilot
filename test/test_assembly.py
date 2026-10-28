@@ -1506,6 +1506,61 @@ def test_v3_module_rebase_idempotent_on_resume(v3_agent_env, settings,
     assert r.outputs["state_updates"]["module_worker_runner_status"] == "done"
 
 
+def test_v3_module_rebase_reruns_interrupted_and_blocks_on_interrupt(
+        v3_agent_env, settings, trace, monkeypatch):
+    """A SIGINT/SIGTERM leaves a module `interrupted`: on resume that module
+    is NOT short-circuited (only done/skipped are) and the agent runs again;
+    and an attempt that itself ends `interrupted` BLOCKS the step so the run
+    stops instead of advancing to the next sibling."""
+    from infermatrix_copilot.engine.registry import StepRegistry
+    from infermatrix_copilot.engine.step import FailureKind, StepContext
+    from infermatrix_copilot.engine.steps import rebase_v3, \
+        register_builtin_steps
+    from infermatrix_copilot.rebase_engine import module_rebase as mr
+    _, _, repo, run_dir = v3_agent_env
+    monkeypatch.setattr(
+        rebase_v3, "_tier_client",
+        lambda ctx: (object(), SimpleNamespace(
+            model="m", api_key="k", base_url="", source="global")))
+    called = []
+    outcomes = iter([
+        {"status": "done", "exit_code": 0, "debug_attempts": 0,
+         "turns": 1, "summary": ""},
+        {"status": "interrupted", "exit_code": -1, "debug_attempts": 1,
+         "turns": 4, "interrupted_by": "SIGTERM", "summary": "cut"},
+    ])
+
+    async def fake_rebase_module(module, **kw):
+        called.append(module)
+        return next(outcomes)
+    monkeypatch.setattr(mr, "rebase_module", fake_rebase_module)
+    sub = Substate(run_dir, "run-int")
+    sub.update({"modules": {"worker_runner": {"status": "interrupted"},
+                            "model_executor": {"status": "done"}}})
+    registry = register_builtin_steps(StepRegistry())
+    handler = registry.get("rebase.v3_module_rebase").handler
+
+    def ctx_for(item):
+        return StepContext(
+            settings=settings, params={}, run_dir=run_dir, trace=trace,
+            item=item,
+            state={"task_spec": {"repo": "vllm-omni", "params": {}},
+                   "run_id": "run-int", "repo_path": str(repo)})
+
+    # resume: the interrupted module runs again, the done one does not
+    r = asyncio.run(handler(ctx_for("worker_runner")))
+    assert r.ok and called == ["worker_runner"]
+    assert r.outputs["state_updates"]["module_worker_runner_status"] == "done"
+    r = asyncio.run(handler(ctx_for("model_executor")))
+    assert r.ok and "short-circuit" in r.summary and called == ["worker_runner"]
+    # an attempt interrupted mid-flight blocks the step (resumable)
+    sub.update({"modules": {"worker_runner": {"status": "interrupted"}}})
+    r = asyncio.run(handler(ctx_for("worker_runner")))
+    assert not r.ok and r.failure is FailureKind.BLOCKED
+    assert "SIGTERM" in r.summary and "--resume" in r.summary
+    assert r.outputs["state_updates"]["module_worker_runner_status"] == "interrupted"
+
+
 @pytest.mark.parametrize("contents, expected", [
     ("Suggestion...Passed\n- hook id: suggestion\n", None),
     (("Migration...(no files to check)Skipped\n"

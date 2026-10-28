@@ -239,13 +239,35 @@ every later call. Therefore:
 - Use `imx-omni-pytest …` with `TEST_TIMEOUT_SEC={MODULE_TEST_TIMEOUT_SEC}` for
   every required verification command. Keep the selected scope, assertions and
   granted GPU geometry; do not shrink or extend the test budget.
-- Never block a tool call on a long wait (`sleep 480 && tail …`). For anything
-  longer than a short command, launch detached with stdin/stdout/stderr
-  redirected and a PID file, e.g.
-  `setsid -f sh -c 'echo $$ > "$1"; shift; exec "$@"' sh "$pidfile" imx-omni-pytest ... </dev/null >"$log" 2>&1`
+- Never block a tool call on a long wait (`sleep 480 && tail …`), and never run
+  a verification command in the foreground of a tool call: a foreground run is
+  killed at the tool's deadline together with its process group. Launch every
+  `imx-omni-pytest` DETACHED — own session, stdin from /dev/null, stdout/stderr
+  to a log, PID saved — in ONE tool call that returns immediately:
+  ```
+  log=$IMX_LOG_DIR/tests/detached-<name>.out; pidfile=$IMX_LOG_DIR/tests/detached-<name>.pid
+  setsid -f sh -c 'echo $$ > "$1"; shift; exec "$@"' sh "$pidfile" imx-omni-pytest ... </dev/null >"$log" 2>&1
+  sleep 1; cat "$pidfile"; ps -o pid,sid,pgid,stat,etimes,cmd -p "$(cat "$pidfile")"
+  ```
   (a plain `nohup ... &` is insufficient: the non-interactive bridge shell waits
-  for that job). Then poll the saved wrapper PID with short calls, at most one
-  check per tool call and under 20 seconds each including any sleep.
+  for that job). The `ps` line is the detach proof: the wrapper's `sid` must
+  equal its own pid; if it does not, stop and relaunch, never fall back to a
+  foreground run. The wrapper also re-sessions itself and ignores SIGHUP, so a
+  tool deadline cannot end it, but it still must not be started in the
+  foreground, where the tool's output pipe is its stdout.
+- Then POLL, at most one check per tool call and under 20 seconds each
+  including any sleep: `kill -0 "$(cat "$pidfile")"` says live; once it is
+  gone, read the newest `$IMX_LOG_DIR/tests/outcomes/wrap-*.json` receipt (it is
+  written by the wrapper at exit) and `tail -n 40 "$log"`. The receipt's
+  `rc`, `timed_out`, `watchdog_triggered` are the outcome; `signal` and
+  `signal_origin` say whether a signal ended the child and who sent it.
+- A receipt with `signal_origin: "external"` (rc -2/-15/-9, `timed_out` and
+  `watchdog_triggered` both false, typically ~30 s after start) means a
+  supervisor OUTSIDE this process tree killed the test — on this host, the
+  GPU reservation guard, because the GPUs in `CUDA_VISIBLE_DEVICES` were not
+  reserved for the wrapper's process tree. That is not a test failure and not
+  your code: record it in debug memory and report the module incomplete with
+  the receipt path; do not retry in a loop and do not change the test scope.
 - Guard optional glob or command-substitution results before passing them to
   stdin-reading commands (`tail`, `head`, `cat`, `grep`); an empty expansion
   turns `tail -n 5 "$log"` into a bare stdin reader that holds the bridge.

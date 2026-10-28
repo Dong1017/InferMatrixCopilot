@@ -1,6 +1,6 @@
 # testing/ —— 规范
 
-<!-- verified-against: 2026-10-27 -->
+<!-- verified-against: 2026-10-28 -->
 
 `LOC ~1760（6 个文件） · 测试执行底座（rebase agent shell 测试层的 Python 移植） · refactor-status: ok`
 
@@ -30,7 +30,9 @@ test_runner.sh 的 Python 移植。仓库专属数据（watchdog 模式、artifa
   `cleanup_orphan_gpu_procs`、`wait_gpu_memory_idle`。
 - `process_tree`：`collect_descendants`、`kill_tree(pids, identity=...)`、`kill_by_pattern`。
 - `runner`：`TestRunner.run(job, env, baseline, dry_run) -> TestOutcome`、
-  `TestJob`、`RunPlan`、`TestOutcome`、`strip_cov_flags`、`cleanup_test_artifacts`、
+  `TestRunner.terminate_active() -> bool`（对正在跑的 attempt 的进程组 + 快照
+  后代 TERM→宽限→KILL；无 attempt 在跑返回 False；可自信号处理器/他线程调用，
+  `_spawn` 的 `proc.wait()` 随后返回子进程的信号 rc）、`TestJob`、`RunPlan`、`TestOutcome`、`strip_cov_flags`、`cleanup_test_artifacts`、
   `log_file_for`/`pass_marker_for`、`TIMEOUT_RC=124`、`PY_TIMEOUT_MARGIN_SEC`。
 - `watchdog`：`WatchdogPatterns(.from_yaml)`、`LogWatchdog(.start/.stop/.check_once/.result)`、`WatchdogResult`。
 - `watchdog_learn`：`record`、`harvest`、`eligible_patterns`、`promote`、
@@ -81,7 +83,8 @@ env 前缀 → `scrub_agent_shell_env(extra_safe_prefixes=…)`（manifest 数�
 
 ## 测试
 `test_testing_substrate.py`（77 个，覆盖全部六模块）、`test_shell_golden.py`
-（TestRunner 对 shell 的 command-echo 金样）；`watchdog_learn` 另由
+（TestRunner 对 shell 的 command-echo 金样）、`test_module_pytest_signals.py`
+（经包装器：`terminate_active` 停树、stdin=/dev/null）；`watchdog_learn` 另由
 `test_curator.py`（harvest exactly-once）与 `test_knowledge_foundation.py`
 （record 身份字段、撕尾修复）钉住。
 
@@ -90,3 +93,14 @@ env 前缀 → `scrub_agent_shell_env(extra_safe_prefixes=…)`（manifest 数�
 接线挤在一个方法里，密度高但每行都背着一条已记录的竞态教训 —— 拆分前先读
 注释里的事故史。身份校验逻辑分居 `_record_walk`（记录侧）与 `kill_tree`
 （消费侧），契约靠注释维系；若再演化，考虑一个共享的 identity 小模块。
+
+## 子进程 stdin 与可被叫停的 attempt（2026-10-28）
+
+- `_spawn` 以 `stdin=subprocess.DEVNULL` 拉起 `bash --norc -c`：测试绝不继承
+  包装器的 stdin（harness 工具在截止时关闭的管道、或会把挂断传给交互式子进程
+  的终端）。
+- `_spawn` 期间 `self._active_kill` 指向本 attempt 的树杀手（进程组 + 身份
+  快照），`terminate_active()` 调它；`proc.wait()` 被 BaseException（包装器被
+  KeyboardInterrupt/SystemExit 展开）打断时先刷新快照、杀树，再让异常传播——
+  包装器被展开时测试树不得继续占 GPU。消费方是
+  `rebase_engine/module_pytest.py::WrapperProcess` 的 SIGTERM/SIGINT 处理器。

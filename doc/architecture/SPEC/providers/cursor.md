@@ -1,6 +1,6 @@
 # providers/cursor.py —— 规范
 
-<!-- verified-against: 2026-10-27 -->
+<!-- verified-against: 2026-10-28 -->
 
 `LOC ~207 · harness transport（Cursor 订阅） · refactor-status: ok`
 
@@ -74,3 +74,9 @@ worktree（repo+PR+sha 分键，run queue 不会让同 PR 的两个 run 并发�
 - `.cursor/mcp.json` 不支持每工具调用超时（CLI 只认 `startupTimeoutSec`），
   `--print` 模式也没有对应开关；桥调用的客户端期限由 CLI 决定，prompt 不再
   承诺"随会话预算"。
+
+## 2026-10-28 子进程受停机路径管理
+
+`_run` 经 `base.run_harness_cli` 拉起 cursor-agent（而非 `subprocess.run`）：子进程在调用期间注册到 `engine.lifecycle` 的子进程表，引擎的
+SIGINT/SIGTERM 优雅停机会终止该会话及其 MCP bridge 后代；会话超时杀整棵
+后代树后再抛 `TimeoutExpired`（语义不变：空文本、`truncated`、refusal）。

@@ -69,6 +69,30 @@ requires a fresh module signal, no typed session/audit refusal, and the required
 plan decision from that module's current attempt. Plain completion prose does
 not replace these checks.
 
+### Stopping a run (SIGINT/SIGTERM) and what it leaves behind
+
+SIGINT (Ctrl-C, or a GPU scheduler's `--timeout`) and SIGTERM are a graceful
+shutdown, also when the launcher started the copilot with `nohup … &` and the
+process inherited an ignored SIGINT. The engine stops the running harness
+session (the vendor CLI and its MCP bridge), kills this run's marked background
+processes (including detached test wrappers), releases the GPU lock through the
+run finalizers, keeps the upstream scratch, and exits with `128 + signal`
+(130 for SIGINT, 143 for SIGTERM) within about a minute; a second signal does
+not shorten that. The in-flight module is recorded as `interrupted` in
+`substate.json` (never left `running` or promoted to `done`), `run_status.json`
+says `interrupted`, and `run_trace.jsonl` carries `module_interrupted` and
+`run_interrupted` events. `--resume <run-id>` re-runs interrupted modules and
+skips completed ones.
+
+Module test receipts under `<run_dir>/tests/outcomes/wrap-*.json` name the
+signal that ended a test and its origin. `signal_origin: "external"` (rc
+-2/-15/-9 with `timed_out` and `watchdog_triggered` both false) means a
+supervisor outside the run — on a shared host, the GPU reservation guard —
+killed the test process: check that the reservation covers the wrapper's
+process tree before reading it as a test failure. The bridge's own lifecycle
+log, `<run_dir>/bridge/<step>.lifecycle.jsonl`, records why a tool server
+exited; a `bridge_unavailable` trace event summarises it per attempt.
+
 ## External checkout pin (EXT1-class guard)
 
 Before cutover, the EXTERNAL orchestrator's canonical checkout gains a

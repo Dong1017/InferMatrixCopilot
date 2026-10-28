@@ -1,6 +1,6 @@
 # rebase_engine/ —— 规范
 
-<!-- verified-against: 2026-10-27 -->
+<!-- verified-against: 2026-10-28 -->
 
 `LOC ~7500（26 个模块） · repo-rebase-v3 的原生 rebase 引擎 · refactor-status: ok`
 
@@ -25,8 +25,8 @@
 | `knowledge_attest.py` | 知识层的 WAL 安全逻辑摘要 + 快照/恢复（只读） |
 | `knowledge_migrate.py` | PR4d 一次性知识迁移：全锁在手、逐 store 日志化事务 |
 | `modes.py` | rebase 模式治理：唯一权威解析 + 写回、`mode_*` 旗标、闸冲突裁决 |
-| `module_pytest.py` | `imx-omni-pytest` 受闸测试包装（GPU 互斥、看门狗、分层超时） |
-| `module_rebase.py` | 单模块 rebase 单元：prompt → agent loop → substate 结果 |
+| `module_pytest.py` | `imx-omni-pytest` 受闸测试包装（GPU 互斥、看门狗、分层超时、自建会话、信号回执） |
+| `module_rebase.py` | 单模块 rebase 单元：prompt → agent loop → substate 结果；桥存活判定；可中断 |
 | `parent_compat.py` | 父知识库的只读兼容读取层（`mode=ro`，fail-closed 打开） |
 | `path_sync.py` | 模块路径图同步 + manifest modules 段重写 + L2 决定应用 |
 | `phase1_steps.py` | phase-1 组合（归类 + 路径同步），父级报告文件名不变 |
@@ -129,7 +129,12 @@ test loop 动作、`precommit_fix`、`RebaseBackends`、LLM client）。
 worktree）、`test_assembly.py`（tools/loop/module/prompt/wheel）、
 `test_ci_wiring.py`（ci_loop/test_loop/test_manifest）、
 `test_ext1_checkout_guard.py`（锁+卫生盾）、`test_knowledge_migrate.py`、
-`test_parent_compat.py`、`test_shell_golden.py`、`test_v3_complete_e2e.py`。
+`test_parent_compat.py`、`test_shell_golden.py`、`test_v3_complete_e2e.py`、
+`test_module_pytest_outcomes.py`、`test_module_pytest_signals.py`（真包装进程：
+自建会话、忽略 SIGHUP、SIGTERM 停树并记 `wrapper_signal`、外部 kill 判
+`external` 并写诊断、进程内调用不改调用者会话、子进程 stdin=/dev/null）、
+`test_run_shutdown.py`（模块 `interrupted` 两条路径、钩子幂等）、
+`test_tool_bridge_lifecycle.py`（`bridge_health` 判定与 `bridge_unavailable`）。
 
 ## 重构备注
 `ci_loop.py`（1156 行）最大：monitor/分类器/round 编排同居，再长就按
@@ -191,3 +196,61 @@ run-20261024 里这些链在 wave 1 完成后又占着 run 的 GPU 锁约 7 小�
   的 pytest 项。
 - `wheel.py`：`release_venv_holders`（仅 venv 结构存在时、排除调用者祖先链）、
   EBUSY/ETXTBSY 重试、baseline rev-parse 前置校验、分支重置前 `git clean -ffd`。
+
+## 包装器进程契约：信号来源可追溯、脱离 harness 工具会话（2026-10-28）
+
+run-20261027-193251 的 `model_executor` 四次模块测试在约 30 s 处结束，回执
+rc -15/-15/-9/-2、`timed_out=false`、`watchdog_triggered=false`——包装器自己
+没有杀它，回执却说不出是谁杀的。证据链（agent 日志第三次 attempt 的说明、
+campaign 日志几百条 "GPU 1 reservation lost"、宿主 root 运行的
+`canhazgpu guard --enforce`）指向宿主 GPU reservation guard 对它视为未预约的
+GPU 进程执行 SIGINT→SIGTERM→SIGKILL 阶梯。`module_pytest.py` 现在：
+
+- `WrapperProcess.detach()`（**只在真实 CLI 入口**调用：`main(argv=None)`；
+  进程内调用者传 argv 时 `process_setup` 默认 False，绝不改调用者的会话）：
+  非会话领导者时 `os.setsid()`（`IMX_WRAPPER_FOREGROUND=1` 退出；进程组领导者
+  的 EPERM 记入 `wrapper_detach_error`），并忽略 SIGHUP——harness 工具的前台
+  截止杀进程组、关 stdin，都到不了它。
+- `install_signal_handlers(runner)`：SIGTERM/SIGINT 记入 `received` 并经
+  `TestRunner.terminate_active()` 对当前 attempt 的进程组 + 快照后代
+  TERM→宽限→KILL；被叫停的包装器绝不把 pytest 留在 GPU 上。`proc.wait()`
+  被任何 BaseException 打断时同样先杀树再传播。
+- 回执 `schema_version` 2：新增 `signal`（结束子进程的信号名或 null）、
+  `signal_origin` ∈ timeout / watchdog / wrapper_signal / **external** / null、
+  `signal_diagnosis`（仅 external：外部监管者杀了测试进程，
+  `CUDA_VISIBLE_DEVICES` 的 GPU 未为本进程树预约，不是测试失败）、
+  `wrapper_pgid/sid/ppid`、`wrapper_session_leader`、`wrapper_detached`、
+  `wrapper_detach_error`、`wrapper_parent_comm`、`wrapper_signals_ignored`、
+  `wrapper_signals_received`。external 与 wrapper_signal 还在测试日志尾部追加
+  "signal postmortem" 页脚（**先于**回执写入，回执的 `log_sha256` 覆盖它），
+  并在 stderr 给出一行结论；stdout/stderr 已关闭时静默。
+- `testing/runner.py::_spawn` 以 `stdin=/dev/null` 拉起测试。
+- live prompt 的 detach 段改为可核验程序：一次工具调用内 `setsid -f` 启动 +
+  `ps -o pid,sid,…` 证明 `sid == pid`，否则重启而非回退前台；轮询
+  `kill -0 $(cat pidfile)`，结束后读 `tests/outcomes/wrap-*.json` 回执；
+  `signal_origin: "external"` 的含义与处置（记 debug memory、报 incomplete、
+  不循环重试）写进 prompt。
+
+## 桥存活判定与可中断的模块循环（2026-10-28）
+
+- `bridge_health(spec_path, *, since_ts, settle_s=BRIDGE_EXIT_SETTLE_S)` 读
+  `tool_bridge` 的 `<stem>.lifecycle.jsonl`（只看本次会话开始之后的事件，
+  start 有而 exit 未到时最多等 2 s——harness 先于其桥子进程返回）并给出
+  `verdict` ∈ ok / never_started / exited_early（`detail` 带桥自己的
+  `reason`/`rc`）/ no_exit_recorded / restarted，附 `slow_tools`、
+  `slowest_tool`。`_harness_attempt` 在非 `ok` 时记 trace
+  `bridge_unavailable`（step、spec、verdict、detail、计数；不含事件原文）并在
+  结果文本追加一行，供 debug prompt 与 agent 日志读到。
+- `rebase_module` 可中断：每次 attempt 后轮询 `engine.lifecycle.
+  shutdown_requested()`——有请求则**不再**做 debug 重试，未 done 的模块写
+  `{"status": "interrupted", "interrupted_by": <SIG>, …}`、记 trace
+  `module_interrupted`、agent 日志加一行；attempt 返回 done 的模块**保持 done**。
+  强制路径：attempt 在飞时 task 被取消（`CancelledError`）同样先标
+  `interrupted` 再抛；此外在飞期间注册一个停机钩子（`in_flight` 守卫：attempt
+  已返回则让位给协作式判定），工作线程调用它得到同一份痕迹。标记幂等：
+  已是 `interrupted` 不重复写、不重复记事件。
+- `rebase_v3._v3_module_rebase` 对 `interrupted` 返回 `StepResult(False,
+  BLOCKED, …)`（状态更新 `module_<m>_status=interrupted`），run 以 interrupted
+  收口而不是推进到下一个兄弟；substate 短路**只**接受 done/skipped，所以
+  `--resume` 重跑 interrupted 模块、跳过 done；`_v3_wave_gate` 把 interrupted
+  与 failed 同等视为未完成。

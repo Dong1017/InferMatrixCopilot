@@ -20,7 +20,26 @@ Invocation parity: `imx-omni-pytest -vv -s tests/x/` runs pytest;
 `imx-omni-pytest python -c '...'` runs that command under the same gating
 (the parent wrapper accepted both shapes).  An adapter may declare
 ``rebase.testing.module_test_platform`` so broad module runs do not execute
-tests that CI routes exclusively to a different accelerator platform."""
+tests that CI routes exclusively to a different accelerator platform.
+
+Process contract (run-20261027-193251, four module test runs killed at
+~30 s with rc -2/-15/-9 and neither timeout nor watchdog set): the wrapper
+is launched from a harness tool shell with a foreground deadline, inside a
+session it does not own, on a host where a GPU reservation guard signals
+processes it considers unreserved. The wrapper therefore
+
+  * puts itself in its OWN session (`os.setsid`, unless it already leads
+    one or `IMX_WRAPPER_FOREGROUND=1` opts out) and ignores SIGHUP, so the
+    tool's deadline kill of its process group and the loss of its stdin do
+    not end the test;
+  * handles SIGTERM/SIGINT by stopping the test tree (TERM → grace → KILL)
+    and recording the signal — a wrapper told to stop never leaves pytest
+    on a GPU;
+  * records in the outcome receipt which signal ended the child and who
+    sent it (`signal_origin`: timeout | watchdog | wrapper_signal |
+    external) plus its own pid/pgid/sid/ppid context, so a kill by a
+    supervisor outside this process tree is distinguishable from the
+    wrapper's own enforcement in the receipt alone."""
 
 from __future__ import annotations
 
@@ -29,8 +48,10 @@ import json
 import os
 import re
 import shlex
+import signal
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 from ..testing.runner import TestJob, TestOutcome, TestRunner
@@ -38,6 +59,124 @@ from ..testing.watchdog import WatchdogPatterns
 
 
 _ACCELERATOR_PLATFORMS = frozenset({"cuda", "musa", "npu", "rocm", "xpu"})
+RECEIPT_SCHEMA_VERSION = 2  # 2: signal / signal_origin / process-context fields
+
+
+class WrapperProcess:
+    """What this wrapper process did to itself and what reached it: the
+    receipt's process-context block. `detach()` is called once by the real
+    CLI entry (never by in-process tests, which must not re-session the
+    test runner); `install_signal_handlers()` records SIGTERM/SIGINT and
+    stops the active test tree through the runner."""
+
+    def __init__(self) -> None:
+        self.detached = False
+        self.detach_error = ""
+        self.ignored: list[str] = []
+        self.received: list[dict] = []
+        self._runner: TestRunner | None = None
+
+    # -- setup ---------------------------------------------------------------
+    def detach(self) -> None:
+        if os.environ.get("IMX_WRAPPER_FOREGROUND") == "1":
+            self.detach_error = "IMX_WRAPPER_FOREGROUND=1"
+        elif not hasattr(os, "setsid"):
+            self.detach_error = "setsid unavailable"
+        else:
+            try:
+                if os.getsid(0) == os.getpid():
+                    self.detached = True  # already a session leader
+                else:
+                    os.setsid()
+                    self.detached = True
+            except OSError as exc:
+                # a process-group leader cannot setsid (job-control shell
+                # foreground): stay, and say so in the receipt
+                self.detach_error = f"setsid: {exc.strerror or exc}"
+        for signum in (getattr(signal, "SIGHUP", None),):
+            if signum is None:
+                continue
+            try:
+                signal.signal(signum, signal.SIG_IGN)
+                self.ignored.append(signal.Signals(signum).name)
+            except (OSError, ValueError):
+                pass
+
+    def install_signal_handlers(self, runner: TestRunner) -> None:
+        self._runner = runner
+        for signum in (signal.SIGTERM, signal.SIGINT):
+            try:
+                signal.signal(signum, self._on_signal)
+            except (OSError, ValueError):
+                pass
+
+    def _on_signal(self, signum, _frame) -> None:
+        name = signal.Signals(signum).name
+        self.received.append({"signal": name, "ts": time.time()})
+        runner = self._runner
+        if runner is not None:
+            try:
+                runner.terminate_active()
+            except Exception:  # noqa: BLE001 — a handler must return
+                pass
+
+    # -- receipt -------------------------------------------------------------
+    @staticmethod
+    def _parent_comm(ppid: int) -> str | None:
+        try:
+            return Path(f"/proc/{ppid}/comm").read_text(
+                encoding="utf-8").strip()[:32]
+        except OSError:
+            return None
+
+    def context(self) -> dict:
+        pid = os.getpid()
+        ppid = os.getppid()
+        sid = os.getsid(0) if hasattr(os, "getsid") else None
+        pgid = os.getpgrp() if hasattr(os, "getpgrp") else None
+        return {
+            "wrapper_pgid": pgid, "wrapper_sid": sid, "wrapper_ppid": ppid,
+            "wrapper_session_leader": sid == pid,
+            "wrapper_detached": self.detached,
+            "wrapper_detach_error": self.detach_error or None,
+            "wrapper_parent_comm": self._parent_comm(ppid),
+            "wrapper_signals_ignored": list(self.ignored),
+            "wrapper_signals_received": [r["signal"] for r in self.received],
+        }
+
+    def classify(self, outcome: TestOutcome) -> dict:
+        """`signal` (name of the signal that ended the child, or None) and
+        `signal_origin`: who sent it. `external` is the diagnostic case —
+        the child died from a signal the wrapper's timeout, watchdog and
+        own handlers never sent, i.e. an outside supervisor targeted the
+        test process (on a shared GPU host, the reservation guard)."""
+        rc = outcome.rc
+        name = None
+        if isinstance(rc, int) and rc < 0:
+            try:
+                name = signal.Signals(-rc).name
+            except ValueError:
+                name = f"SIG{-rc}"
+        if outcome.timed_out:
+            origin = "timeout"
+        elif outcome.watchdog_triggered:
+            origin = "watchdog"
+        elif self.received:
+            origin = "wrapper_signal"
+        elif name is not None:
+            origin = "external"
+        else:
+            origin = None
+        diagnosis = None
+        if origin == "external":
+            diagnosis = (f"child killed by {name} that neither the timeout, "
+                         "the watchdog nor this wrapper sent: an external "
+                         "supervisor targeted the test process (on a shared "
+                         "GPU host, a reservation guard — the GPUs in "
+                         "CUDA_VISIBLE_DEVICES were not reserved for this "
+                         "process tree); the run itself did not fail")
+        return {"signal": name, "signal_origin": origin,
+                "signal_diagnosis": diagnosis}
 
 
 def _needs_gpu_lock(args: list[str]) -> bool:
@@ -103,7 +242,8 @@ def _log_hash(log_file: str) -> tuple[str | None, str]:
 def _write_outcome_receipt(log_dir: Path, *, args: list[str], run_id: str,
                            attempt: str, timeout: int, cuda: str,
                            outcome: TestOutcome, effective_args: list[str],
-                           platform_marker: str | None) -> None:
+                           platform_marker: str | None,
+                           process: WrapperProcess | None = None) -> None:
     """Atomic per-attempt runner outcome, without commands, paths, or env dumps.
 
     Requested argv is not effective inner argv/scope proof (pytest defaults
@@ -112,7 +252,8 @@ def _write_outcome_receipt(log_dir: Path, *, args: list[str], run_id: str,
     """
     starttime = None
     try:
-        # Linux self identity only; no other process or environment is read.
+        # Linux self identity; the only other process read is the parent's
+        # comm (`WrapperProcess.context`), never its environment.
         stat = Path("/proc/self/stat").read_text(encoding="utf-8")
         starttime = int(stat.rsplit(")", 1)[1].split()[19])
     except (OSError, ValueError, IndexError):
@@ -126,8 +267,10 @@ def _write_outcome_receipt(log_dir: Path, *, args: list[str], run_id: str,
         r"-?\d+|GPU-[0-9a-fA-F-]+|MIG-[0-9a-fA-F-]+(?:/\d+/\d+)?", part
     ) for part in cuda_subset)
     log_sha, log_status = _log_hash(outcome.log_file)
+    process = process or WrapperProcess()
     receipt = {
-        "schema_version": 1,
+        "schema_version": RECEIPT_SCHEMA_VERSION,
+        **process.context(), **process.classify(outcome),
         "run_id": (run_id if re.fullmatch(r"run-\d{8}-\d{6}-[0-9a-f]{6}", run_id)
                    else None),
         "run_id_sha256": hashlib.sha256(run_id.encode()).hexdigest(),
@@ -160,8 +303,17 @@ def _write_outcome_receipt(log_dir: Path, *, args: list[str], run_id: str,
         Path(temporary).unlink(missing_ok=True)
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *,
+         process_setup: bool | None = None) -> int:
+    """`process_setup` (default: only for the real CLI, i.e. `argv is None`)
+    re-sessions this process and installs its signal handlers — an
+    in-process caller (tests) must never have ITS session changed."""
     args = list(sys.argv[1:] if argv is None else argv)
+    process = WrapperProcess()
+    if process_setup is None:
+        process_setup = argv is None
+    if process_setup:
+        process.detach()
     repo = os.environ.get("IMX_TARGET_REPO", "")
     log_dir = os.environ.get("IMX_LOG_DIR", "")
     if not repo or not log_dir:
@@ -282,15 +434,52 @@ def main(argv: list[str] | None = None) -> int:
     # pass), while gpu_lock=True holds the lock for the run
     job = TestJob(key=_job_key(args), command=command, timeout_sec=timeout,
                   min_gpus=0, gpu_lock=_needs_gpu_lock(args), index=0)
+    if process_setup:
+        process.install_signal_handlers(runner)
     outcome = runner.run(job, dict(os.environ))
+    verdict = process.classify(outcome)
+    if verdict["signal_diagnosis"] or process.received:
+        # before the receipt: its log hash must cover the footer
+        _append_signal_footer(outcome.log_file, verdict, process)
     _write_outcome_receipt(Path(log_dir), args=args, run_id=run_ident,
                            attempt=_attempt, timeout=timeout, cuda=cuda,
                            outcome=outcome, effective_args=effective_args,
-                           platform_marker=platform_marker)
-    if outcome.skipped:
-        print(f"imx-omni-pytest: skipped — {outcome.skip_reason}",
-              file=sys.stderr)
+                           platform_marker=platform_marker, process=process)
+    try:
+        if outcome.skipped:
+            print(f"imx-omni-pytest: skipped — {outcome.skip_reason}",
+                  file=sys.stderr)
+        if verdict["signal_diagnosis"]:
+            print(f"module test wrapper: {verdict['signal_diagnosis']}",
+                  file=sys.stderr)
+        elif process.received:
+            print("module test wrapper: stopped by "
+                  + ", ".join(r["signal"] for r in process.received)
+                  + f" (child rc={outcome.rc})", file=sys.stderr)
+    except (BrokenPipeError, OSError):
+        pass  # the launching shell is gone; the receipt and log remain
     return outcome.rc
+
+
+def _append_signal_footer(log_file: str, verdict: dict,
+                          process: WrapperProcess) -> None:
+    """Postmortem footer for a signal-ended child: the debug agent reads the
+    log, not the receipt, and must not mistake an external kill for a test
+    failure."""
+    if not log_file:
+        return
+    lines = ["", "=== module test wrapper signal postmortem ===",
+             f"signal={verdict['signal']} origin={verdict['signal_origin']}",
+             "wrapper_signals_received="
+             + (",".join(r["signal"] for r in process.received) or "none"),
+             f"wrapper_pid={os.getpid()} detached={process.detached}"]
+    if verdict["signal_diagnosis"]:
+        lines.append(verdict["signal_diagnosis"])
+    try:
+        with open(log_file, "a", encoding="utf-8") as stream:
+            stream.write("\n".join(lines) + "\n")
+    except OSError:
+        pass
 
 
 if __name__ == "__main__":  # pragma: no cover

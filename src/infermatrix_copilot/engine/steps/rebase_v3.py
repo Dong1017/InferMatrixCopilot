@@ -1220,9 +1220,11 @@ async def _v3_wave_gate(ctx: StepContext) -> StepResult:
     sub = _substate(ctx)
     data = sub.read()
     wave1 = ctx.state.get("wave1_modules") or []
+    # `interrupted` counts as not-done here: a half-rebased wave-1 module is
+    # no base for wave 2 either (a resumed run re-runs it before this gate)
     failed = [m for m in wave1
               if ((data.get("modules") or {}).get(m) or {})
-              .get("status") == "failed"]
+              .get("status") in ("failed", "interrupted")]
     if not failed:
         return StepResult(True, summary="wave 1 clean; wave 2 proceeds")
     if _task_params(ctx).get("halt_on_module_failure"):
@@ -2093,6 +2095,17 @@ async def _v3_module_rebase(ctx: StepContext) -> StepResult:
                                 run_dir=ctx.run_dir),
             module_test_plan=test_plan,
             trace=ctx.trace)
+    if outcome["status"] == "interrupted":
+        # a SIGINT/SIGTERM stopped the agent mid-module: the step BLOCKS so
+        # the run ends (status interrupted, scratch kept) instead of the
+        # executor advancing to the next sibling; resume re-runs the module
+        # because the short-circuit above accepts only done/skipped
+        return StepResult(False, FailureKind.BLOCKED,
+                          f"{module}: interrupted by "
+                          f"{outcome.get('interrupted_by', 'signal')} — "
+                          "resumable with --resume",
+                          outputs={"state_updates": {
+                              f"module_{module}_status": "interrupted"}})
     return StepResult(True,
                       summary=f"{module}: {outcome['status']} "
                               f"(debug_attempts={outcome['debug_attempts']})",

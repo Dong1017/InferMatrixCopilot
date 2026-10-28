@@ -1,6 +1,6 @@
 # providers/claude_code.py —— 规范
 
-<!-- verified-against: 2026-10-27 -->
+<!-- verified-against: 2026-10-28 -->
 
 `LOC ~205 · harness transport（Claude 订阅） · refactor-status: ok`
 
@@ -59,3 +59,9 @@ x 必须为正。CLI 在每个 API 请求完成**之后**检查预算：它阻�
   truncated（绝不绿）；refusal/max_budget 另成为 typed refusal，标记文件
   不能覆盖。
 - `-p json` 解析取最后一个带 `result` 的整行对象，容忍前后杂行。
+
+## 2026-10-28 子进程受停机路径管理
+
+会话经 `base.run_harness_cli` 拉起 claude CLI（而非 `subprocess.run`）：子进程在调用期间注册到 `engine.lifecycle` 的子进程表，引擎的
+SIGINT/SIGTERM 优雅停机会终止该会话及其 MCP bridge 后代；会话超时杀整棵
+后代树后再抛 `TimeoutExpired`（语义不变：空文本、`truncated`、refusal）。

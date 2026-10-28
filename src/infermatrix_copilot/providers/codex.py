@@ -32,6 +32,7 @@ from .base import (
     HarnessTransport,
     SessionUsage,
     flatten_messages,
+    run_harness_cli,
     sanitized_env,
 )
 from .registry import PROVIDERS
@@ -122,10 +123,8 @@ class CodexTransport(HarnessTransport):
         cmd += ["-"]
         timed_out = False
         try:
-            proc = subprocess.run(
-                cmd, input=text, cwd=cwd, env=sanitized_env(),
-                capture_output=True, text=True, encoding="utf-8",
-                errors="replace", timeout=timeout_s, check=False)
+            proc = run_harness_cli(cmd, input=text, cwd=cwd,
+                                   env=sanitized_env(), timeout=timeout_s)
             stdout = proc.stdout or ""
         except subprocess.TimeoutExpired as exc:
             timed_out = True
